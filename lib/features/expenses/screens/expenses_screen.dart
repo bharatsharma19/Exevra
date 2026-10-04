@@ -156,7 +156,7 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
 
           // Expense List / Grouped View
           Expanded(
-            child: expenseState.isLoading
+            child: (expenseState.isLoading && expenseState.expenses.isEmpty)
                 ? const Center(child: CircularProgressIndicator())
                 : filtered.isEmpty
                     ? _buildEmptyState()
@@ -201,8 +201,8 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
           AppHaptics.selection();
           AddEditExpenseSheet.show(context);
         },
-        backgroundColor: AppColors.primaryCyan,
-        foregroundColor: Colors.black,
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Theme.of(context).colorScheme.onPrimary,
         icon: const Icon(Icons.add_rounded, size: 24),
         label: const Text('Add Expense', style: TextStyle(fontWeight: FontWeight.w700)),
       ).animate().scale(delay: 200.ms, curve: Curves.easeOutBack),
@@ -211,13 +211,16 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
 
   Widget _buildTypeTab(String label, ExpenseTypeFilter filterType, ExpenseTypeFilter current) {
     final isSelected = filterType == current;
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final onPrimaryColor = Theme.of(context).colorScheme.onPrimary;
+
     return Expanded(
       child: GestureDetector(
         onTap: () => ref.read(expenseProvider.notifier).setTypeFilter(filterType),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
-            color: isSelected ? AppColors.primaryCyan : Colors.transparent,
+            color: isSelected ? primaryColor : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Text(
@@ -226,7 +229,7 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
             style: TextStyle(
               fontSize: 13,
               fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-              color: isSelected ? Colors.black : Colors.grey,
+              color: isSelected ? onPrimaryColor : Colors.grey,
             ),
           ),
         ),

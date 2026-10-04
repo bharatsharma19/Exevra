@@ -27,7 +27,7 @@ class AppLockState {
     bool? isLocked,
     bool? canCheckBiometrics,
     bool? isAuthenticating,
-    String? errorMessage,
+    Object? errorMessage = const Object(),
     DateTime? lastBackgroundTime,
     bool clearLastBackgroundTime = false,
   }) {
@@ -36,7 +36,7 @@ class AppLockState {
       isLocked: isLocked ?? this.isLocked,
       canCheckBiometrics: canCheckBiometrics ?? this.canCheckBiometrics,
       isAuthenticating: isAuthenticating ?? this.isAuthenticating,
-      errorMessage: errorMessage,
+      errorMessage: errorMessage == const Object() ? this.errorMessage : errorMessage as String?,
       lastBackgroundTime: clearLastBackgroundTime
           ? null
           : (lastBackgroundTime ?? this.lastBackgroundTime),

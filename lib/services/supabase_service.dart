@@ -106,7 +106,14 @@ class SupabaseService {
           .maybeSingle();
 
       if (response != null) {
-        return ExpenseGroup.fromJson(response);
+        final List<dynamic> members = await client
+            .from('group_members')
+            .select('id')
+            .eq('group_id', groupId);
+        
+        final data = Map<String, dynamic>.from(response);
+        data['members_count'] = members.length;
+        return ExpenseGroup.fromJson(data);
       }
     } catch (e) {
       debugPrint('[SupabaseService] fetchGroup fallback: $e');
@@ -214,6 +221,20 @@ class SupabaseService {
     }
   }
 
+  Future<bool> removeGroupMember(String groupId, String memberUserId) async {
+    try {
+      await client.from('group_members').delete().match({
+        'group_id': groupId,
+        'user_id': memberUserId,
+      });
+      _localMembers.removeWhere((m) => m.groupId == groupId && m.userId == memberUserId);
+      return true;
+    } catch (e) {
+      debugPrint('[SupabaseService] removeGroupMember: $e');
+      return false;
+    }
+  }
+
   Future<List<GroupMember>> fetchGroupMembers(String groupId) async {
     try {
       final res = await client
@@ -242,29 +263,59 @@ class SupabaseService {
 
   Future<void> leaveGroup(String groupId) async {
     final userId = currentUser?.id ?? 'demo-user-id';
+    String? nextGroupId;
     try {
       await client.from('group_members').delete().match({
         'group_id': groupId,
         'user_id': userId,
       });
-      await client.from('profiles').update({'group_id': null}).eq('id', userId);
+      
+      final remaining = await client
+          .from('group_members')
+          .select('group_id')
+          .eq('user_id', userId)
+          .limit(1);
+          
+      if (remaining.isNotEmpty) {
+        nextGroupId = remaining[0]['group_id'] as String;
+        await client.from('profiles').update({'group_id': nextGroupId}).eq('id', userId);
+      } else {
+        await client.from('profiles').update({'group_id': null}).eq('id', userId);
+      }
     } catch (e) {
       debugPrint('[SupabaseService] leaveGroup fallback: $e');
     }
+    
     if (_localProfile != null) {
-      _localProfile = _localProfile!.copyWith(groupId: null);
+      _localProfile = _localProfile!.copyWith(groupId: nextGroupId);
     }
     _localGroup = null;
   }
 
   Future<void> deleteGroup(String groupId) async {
+    final userId = currentUser?.id ?? 'demo-user-id';
+    String? nextGroupId;
     try {
       await client.from('groups').delete().eq('id', groupId);
+      
+      final remaining = await client
+          .from('group_members')
+          .select('group_id')
+          .eq('user_id', userId)
+          .limit(1);
+          
+      if (remaining.isNotEmpty) {
+        nextGroupId = remaining[0]['group_id'] as String;
+        await client.from('profiles').update({'group_id': nextGroupId}).eq('id', userId);
+      } else {
+        await client.from('profiles').update({'group_id': null}).eq('id', userId);
+      }
     } catch (e) {
       debugPrint('[SupabaseService] deleteGroup fallback: $e');
     }
+    
     if (_localProfile != null && _localProfile!.groupId == groupId) {
-      _localProfile = _localProfile!.copyWith(groupId: null);
+      _localProfile = _localProfile!.copyWith(groupId: nextGroupId);
     }
     _localGroup = null;
   }

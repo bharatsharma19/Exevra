@@ -239,13 +239,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   Widget _buildMessageBubble(ChatMessage msg, bool isDark) {
     if (msg.isUser) {
+      final primaryColor = Theme.of(context).colorScheme.primary;
+      final onPrimaryColor = Theme.of(context).colorScheme.onPrimary;
+
       return Align(
         alignment: Alignment.centerRight,
         child: Container(
           margin: const EdgeInsets.only(bottom: 12, left: 48),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            color: AppColors.primaryCyan,
+            color: primaryColor,
             borderRadius: const BorderRadius.only(
               topLeft: Radius.circular(18),
               topRight: Radius.circular(18),
@@ -255,8 +258,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ),
           child: Text(
             msg.text,
-            style: const TextStyle(
-              color: Colors.black,
+            style: TextStyle(
+              color: onPrimaryColor,
               fontWeight: FontWeight.w600,
               fontSize: 14,
             ),
@@ -339,9 +342,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       child: Container(
                         width: 8,
                         height: 8,
-                        decoration: const BoxDecoration(
+                        decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: AppColors.primaryCyan,
+                          color: Theme.of(context).colorScheme.primary,
                         ),
                       ).animate(onPlay: (c) => c.repeat(reverse: true)).scale(begin: const Offset(0.5, 0.5), end: const Offset(1.3, 1.3)),
                     ),

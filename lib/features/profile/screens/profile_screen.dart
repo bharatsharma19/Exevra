@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -34,10 +35,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   void _showEditProfileDialog() {
     final profile = ref.read(authNotifierProvider).profile;
     _nameController.text = profile?.displayName ?? '';
-    _avatarUrlController.text = (profile?.avatarUrl != null && !profile!.avatarUrl!.startsWith('preset:'))
+    _avatarUrlController.text =
+        (profile?.avatarUrl != null &&
+            !profile!.avatarUrl!.startsWith('preset:'))
         ? profile.avatarUrl!
         : '';
-    String? currentPreset = (profile?.avatarUrl != null && profile!.avatarUrl!.startsWith('preset:'))
+    String? currentPreset =
+        (profile?.avatarUrl != null &&
+            profile!.avatarUrl!.startsWith('preset:'))
         ? profile.avatarUrl!.replaceFirst('preset:', '')
         : '🚀';
 
@@ -88,11 +93,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                               ? AppColors.primaryCyan.withValues(alpha: 0.25)
                               : Colors.white.withValues(alpha: 0.05),
                           border: Border.all(
-                            color: isSelected ? AppColors.primaryCyan : Colors.white12,
+                            color: isSelected
+                                ? AppColors.primaryCyan
+                                : Colors.white12,
                             width: isSelected ? 2 : 1,
                           ),
                         ),
-                        child: Text(emoji, style: const TextStyle(fontSize: 22)),
+                        child: Text(
+                          emoji,
+                          style: const TextStyle(fontSize: 22),
+                        ),
                       ),
                     );
                   }).toList(),
@@ -124,21 +134,28 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ElevatedButton(
               onPressed: () async {
                 if (profile != null) {
-                  final String? newAvatar = _avatarUrlController.text.trim().isNotEmpty
+                  final String? newAvatar =
+                      _avatarUrlController.text.trim().isNotEmpty
                       ? _avatarUrlController.text.trim()
-                      : (currentPreset != null ? 'preset:$currentPreset' : profile.avatarUrl);
+                      : (currentPreset != null
+                            ? 'preset:$currentPreset'
+                            : profile.avatarUrl);
 
                   final updated = profile.copyWith(
                     displayName: _nameController.text.trim(),
                     avatarUrl: newAvatar,
                   );
                   Navigator.of(ctx).pop();
-                  await ref.read(authNotifierProvider.notifier).updateProfile(updated);
+                  await ref
+                      .read(authNotifierProvider.notifier)
+                      .updateProfile(updated);
                   AppHaptics.success();
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text('Profile updated & synchronized with Supabase!'),
+                        content: Text(
+                          'Profile updated & synchronized with Supabase!',
+                        ),
                         backgroundColor: AppColors.primaryEmerald,
                         duration: Duration(seconds: 2),
                       ),
@@ -212,9 +229,23 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ),
           ElevatedButton(
             onPressed: () async {
-              final code = _inviteCodeController.text.trim();
+              String code = _inviteCodeController.text.trim();
               if (code.isNotEmpty) {
                 Navigator.of(ctx).pop();
+                if (code.contains('invite?token=')) {
+                  final token = code
+                      .split('invite?token=')
+                      .last
+                      .split('&')
+                      .first
+                      .split(' ')
+                      .first;
+                  try {
+                    final normalizedToken = base64Url.normalize(token);
+                    final decoded = utf8.decode(base64Url.decode(normalizedToken));
+                    code = decoded.split('|')[0];
+                  } catch (_) {}
+                }
                 await ref.read(expenseProvider.notifier).joinGroup(code);
               }
             },
@@ -231,7 +262,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Sign Out'),
-        content: const Text('Are you sure you want to sign out of your account on this device?'),
+        content: const Text(
+          'Are you sure you want to sign out of your account on this device?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
@@ -258,7 +291,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete Account Permanently', style: TextStyle(color: AppColors.error)),
+        title: const Text(
+          'Delete Account Permanently',
+          style: TextStyle(color: AppColors.error),
+        ),
         content: const Text(
           'This action is irreversible according to Store Compliance policies. '
           'All your personal expenses, records, profile metadata, and group associations will be permanently purged.',
@@ -292,17 +328,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final profile = authState.profile;
-    final resolvedDisplayName = (profile?.displayName != null && profile!.displayName.trim().isNotEmpty)
+    final resolvedDisplayName =
+        (profile?.displayName != null && profile!.displayName.trim().isNotEmpty)
         ? profile.displayName
-        : (authState.user?.userMetadata?['full_name'] as String? ?? authState.user?.email?.split('@').first ?? 'User');
+        : (authState.user?.userMetadata?['full_name'] as String? ??
+              authState.user?.email?.split('@').first ??
+              'User');
     final group = expenseState.currentGroup;
     final currentUserId = authState.user?.id ?? 'demo-user-id';
     final isGroupAdmin = group?.isAdmin(currentUserId) ?? false;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Account & Settings'),
-      ),
+      appBar: AppBar(title: const Text('Account & Settings')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 10, 20, 40),
         child: Column(
@@ -316,39 +353,47 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 children: [
                   CircleAvatar(
                     radius: 32,
-                    backgroundColor: AppColors.primaryCyan.withValues(alpha: 0.2),
-                    child: (profile?.avatarUrl != null && profile!.avatarUrl!.startsWith('preset:'))
+                    backgroundColor: AppColors.primaryCyan.withValues(
+                      alpha: 0.2,
+                    ),
+                    child:
+                        (profile?.avatarUrl != null &&
+                            profile!.avatarUrl!.startsWith('preset:'))
                         ? Text(
                             profile.avatarUrl!.replaceFirst('preset:', ''),
                             style: const TextStyle(fontSize: 28),
                           )
-                        : (profile?.avatarUrl != null && profile!.avatarUrl!.startsWith('http'))
-                            ? ClipOval(
-                                child: Image.network(
-                                  profile.avatarUrl!,
-                                  width: 64,
-                                  height: 64,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) => Text(
-                                    (profile.displayName.isNotEmpty) ? profile.displayName[0].toUpperCase() : 'U',
+                        : (profile?.avatarUrl != null &&
+                              profile!.avatarUrl!.startsWith('http'))
+                        ? ClipOval(
+                            child: Image.network(
+                              profile.avatarUrl!,
+                              width: 64,
+                              height: 64,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) =>
+                                  Text(
+                                    (profile.displayName.isNotEmpty)
+                                        ? profile.displayName[0].toUpperCase()
+                                        : 'U',
                                     style: const TextStyle(
                                       fontSize: 26,
                                       fontWeight: FontWeight.w800,
                                       color: AppColors.primaryCyan,
                                     ),
                                   ),
-                                ),
-                              )
-                            : Text(
-                                resolvedDisplayName.isNotEmpty
-                                    ? resolvedDisplayName[0].toUpperCase()
-                                    : 'U',
-                                style: const TextStyle(
-                                  fontSize: 26,
-                                  fontWeight: FontWeight.w800,
-                                  color: AppColors.primaryCyan,
-                                ),
-                              ),
+                            ),
+                          )
+                        : Text(
+                            resolvedDisplayName.isNotEmpty
+                                ? resolvedDisplayName[0].toUpperCase()
+                                : 'U',
+                            style: const TextStyle(
+                              fontSize: 26,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.primaryCyan,
+                            ),
+                          ),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
@@ -371,16 +416,24 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                             const SizedBox(width: 6),
                             GestureDetector(
                               onTap: _showEditProfileDialog,
-                              child: const Icon(Icons.edit_outlined, size: 16, color: AppColors.primaryCyan),
+                              child: const Icon(
+                                Icons.edit_outlined,
+                                size: 16,
+                                color: AppColors.primaryCyan,
+                              ),
                             ),
                           ],
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          profile?.email ?? authState.user?.email ?? 'alex.mercer@antigravity.io',
+                          profile?.email ??
+                              authState.user?.email ??
+                              'alex.mercer@antigravity.io',
                           style: TextStyle(
                             fontSize: 13,
-                            color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                            color: isDark
+                                ? AppColors.darkTextTertiary
+                                : AppColors.lightTextTertiary,
                           ),
                         ),
                         if (profile?.phone != null) ...[
@@ -389,7 +442,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                             profile!.phone!,
                             style: TextStyle(
                               fontSize: 12,
-                              color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                              color: isDark
+                                  ? AppColors.darkTextTertiary
+                                  : AppColors.lightTextTertiary,
                             ),
                           ),
                         ],
@@ -408,7 +463,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w800,
-                color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                color: isDark
+                    ? AppColors.darkTextPrimary
+                    : AppColors.lightTextPrimary,
               ),
             ),
             const SizedBox(height: 10),
@@ -425,13 +482,21 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       children: [
                         Text(
                           group.name,
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                         if (isGroupAdmin)
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
                             decoration: BoxDecoration(
-                              color: AppColors.primaryCyan.withValues(alpha: 0.15),
+                              color: AppColors.primaryCyan.withValues(
+                                alpha: 0.15,
+                              ),
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(color: AppColors.primaryCyan),
                             ),
@@ -453,7 +518,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           'Invite Code: ',
                           style: TextStyle(
                             fontSize: 13,
-                            color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                            color: isDark
+                                ? AppColors.darkTextSecondary
+                                : AppColors.lightTextSecondary,
                           ),
                         ),
                         SelectableText(
@@ -466,14 +533,22 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         ),
                         const SizedBox(width: 8),
                         IconButton(
-                          icon: const Icon(Icons.copy_rounded, size: 16, color: AppColors.primaryCyan),
+                          icon: const Icon(
+                            Icons.copy_rounded,
+                            size: 16,
+                            color: AppColors.primaryCyan,
+                          ),
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
                           onPressed: () {
-                            Clipboard.setData(ClipboardData(text: group.inviteCode));
+                            Clipboard.setData(
+                              ClipboardData(text: group.inviteCode),
+                            );
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('Group invite code copied to clipboard!'),
+                                content: Text(
+                                  'Group invite code copied to clipboard!',
+                                ),
                                 duration: Duration(seconds: 2),
                               ),
                             );
@@ -489,11 +564,20 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       child: OutlinedButton.icon(
                         onPressed: () {
                           AppHaptics.selection();
-                          final shareText = 'Join my group "${group.name}" on Exevra! Use Invite Code: ${group.inviteCode}';
+                          final exp = DateTime.now()
+                              .add(const Duration(days: 7))
+                              .millisecondsSinceEpoch;
+                          final token = base64Url.encode(
+                            utf8.encode('${group.inviteCode}|$exp'),
+                          );
+                          final shareText =
+                              'Join my group "${group.name}" on Exevra!\n\nClick this link to join:\nhttps://exevra.com/invite?token=$token';
                           Clipboard.setData(ClipboardData(text: shareText));
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                              content: Text('Group invite copied to clipboard! Share with friends to invite them.'),
+                              content: Text(
+                                'Group invite copied to clipboard! Share with friends to invite them.',
+                              ),
                               backgroundColor: AppColors.primaryCyan,
                               duration: Duration(seconds: 3),
                             ),
@@ -503,7 +587,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         label: const Text('Invite Friends to Group'),
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 10),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
                       ),
                     ),
@@ -515,7 +601,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
-                          color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                          color: isDark
+                              ? AppColors.darkTextSecondary
+                              : AppColors.lightTextSecondary,
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -523,80 +611,159 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
                         itemCount: expenseState.groupMembers.length,
-                        separatorBuilder: (context, index) => const SizedBox(height: 8),
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(height: 8),
                         itemBuilder: (context, index) {
                           final m = expenseState.groupMembers[index];
                           final isViewer = m.isViewerOnly;
                           return Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(12),
-                              color: isDark ? AppColors.darkCardElevated.withValues(alpha: 0.5) : AppColors.lightCardElevated,
+                              color: isDark
+                                  ? AppColors.darkCardElevated.withValues(
+                                      alpha: 0.5,
+                                    )
+                                  : AppColors.lightCardElevated,
                               border: Border.all(
                                 color: isViewer
                                     ? AppColors.warning.withValues(alpha: 0.4)
-                                    : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                                    : (isDark
+                                          ? AppColors.darkBorder
+                                          : AppColors.lightBorder),
                               ),
                             ),
                             child: Row(
                               children: [
                                 CircleAvatar(
                                   radius: 16,
-                                  backgroundColor: AppColors.primaryCyan.withValues(alpha: 0.15),
+                                  backgroundColor: AppColors.primaryCyan
+                                      .withValues(alpha: 0.15),
                                   child: Text(
-                                    (m.displayName?.isNotEmpty ?? false) ? m.displayName![0].toUpperCase() : 'U',
-                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.primaryCyan),
+                                    (m.displayName?.isNotEmpty ?? false)
+                                        ? m.displayName![0].toUpperCase()
+                                        : 'U',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.primaryCyan,
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         m.displayName ?? 'User',
-                                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                        ),
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                       Text(
                                         m.isAdmin
                                             ? 'Admin'
-                                            : (isViewer ? 'Viewer (Pending Review)' : 'Member (Can Add)'),
+                                            : (isViewer
+                                                  ? 'Viewer (Pending Review)'
+                                                  : 'Member (Can Add)'),
                                         style: TextStyle(
                                           fontSize: 11,
                                           fontWeight: FontWeight.w600,
                                           color: m.isAdmin
                                               ? AppColors.primaryCyan
-                                              : (isViewer ? AppColors.warning : AppColors.primaryEmerald),
+                                              : (isViewer
+                                                    ? AppColors.warning
+                                                    : AppColors.primaryEmerald),
                                         ),
                                       ),
                                     ],
                                   ),
                                 ),
-                                if (isGroupAdmin && isViewer) ...[
-                                  ElevatedButton.icon(
+                                if (isGroupAdmin &&
+                                    m.userId != currentUserId) ...[
+                                  if (isViewer)
+                                    ElevatedButton.icon(
+                                      onPressed: () async {
+                                        final ok = await ref
+                                            .read(expenseProvider.notifier)
+                                            .approveGroupMember(m.userId);
+                                        if (ok && context.mounted) {
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                '${m.displayName ?? "Member"} approved! They can now record expenses.',
+                                              ),
+                                              backgroundColor:
+                                                  AppColors.primaryEmerald,
+                                            ),
+                                          );
+                                        }
+                                      },
+                                      icon: const Icon(
+                                        Icons.check_rounded,
+                                        size: 14,
+                                      ),
+                                      label: const Text(
+                                        'Approve',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor:
+                                            AppColors.primaryEmerald,
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 6,
+                                        ),
+                                        minimumSize: Size.zero,
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  const SizedBox(width: 8),
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.person_remove_rounded,
+                                      size: 20,
+                                      color: AppColors.error,
+                                    ),
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
                                     onPressed: () async {
-                                      final ok = await ref.read(expenseProvider.notifier).approveGroupMember(m.userId);
+                                      final ok = await ref
+                                          .read(expenseProvider.notifier)
+                                          .removeGroupMember(m.userId);
                                       if (ok && context.mounted) {
-                                        ScaffoldMessenger.of(context).showSnackBar(
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
                                           SnackBar(
-                                            content: Text('${m.displayName ?? "Member"} approved! They can now record expenses.'),
-                                            backgroundColor: AppColors.primaryEmerald,
+                                            content: Text(
+                                              '${m.displayName ?? "Member"} removed from group.',
+                                            ),
+                                            backgroundColor: AppColors.error,
                                           ),
                                         );
                                       }
                                     },
-                                    icon: const Icon(Icons.check_rounded, size: 14),
-                                    label: const Text('Approve', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: AppColors.primaryEmerald,
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                      minimumSize: Size.zero,
-                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                    ),
                                   ),
                                 ],
                               ],
@@ -610,16 +777,26 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     Row(
                       children: [
                         TextButton.icon(
-                          onPressed: () => ref.read(expenseProvider.notifier).leaveGroup(),
+                          onPressed: () =>
+                              ref.read(expenseProvider.notifier).leaveGroup(),
                           icon: const Icon(Icons.exit_to_app_rounded, size: 16),
                           label: const Text('Leave Group'),
                         ),
                         if (isGroupAdmin) ...[
                           const Spacer(),
                           TextButton.icon(
-                            onPressed: () => ref.read(expenseProvider.notifier).deleteGroup(),
-                            icon: const Icon(Icons.delete_outline_rounded, size: 16, color: AppColors.error),
-                            label: const Text('Delete Group', style: TextStyle(color: AppColors.error)),
+                            onPressed: () => ref
+                                .read(expenseProvider.notifier)
+                                .deleteGroup(),
+                            icon: const Icon(
+                              Icons.delete_outline_rounded,
+                              size: 16,
+                              color: AppColors.error,
+                            ),
+                            label: const Text(
+                              'Delete Group',
+                              style: TextStyle(color: AppColors.error),
+                            ),
                           ),
                         ],
                       ],
@@ -636,7 +813,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     Expanded(
                       child: OutlinedButton.icon(
                         onPressed: _showCreateGroupDialog,
-                        icon: const Icon(Icons.add_circle_outline_rounded, size: 18),
+                        icon: const Icon(
+                          Icons.add_circle_outline_rounded,
+                          size: 18,
+                        ),
                         label: const Text('Create Group'),
                       ),
                     ),
@@ -661,7 +841,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w800,
-                color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                color: isDark
+                    ? AppColors.darkTextPrimary
+                    : AppColors.lightTextPrimary,
               ),
             ),
             const SizedBox(height: 10),
@@ -674,8 +856,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   // App Lock (Biometrics) Toggle
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
-                    secondary: const Icon(Icons.fingerprint_rounded, color: AppColors.primaryCyan),
-                    title: const Text('App Lock (Biometrics / PIN)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                    secondary: const Icon(
+                      Icons.fingerprint_rounded,
+                      color: AppColors.primaryCyan,
+                    ),
+                    title: const Text(
+                      'App Lock (Biometrics / PIN)',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     subtitle: Text(
                       appLockState.canCheckBiometrics
                           ? 'Protect application with Face ID, Fingerprint or Device PIN'
@@ -687,15 +878,22 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     onChanged: (val) async {
                       AppHaptics.selection();
                       if (val) {
-                        final authenticated = await ref.read(appLockProvider.notifier).authenticate(
-                          customReason: 'Authenticate to enable App Lock security',
-                        );
+                        final authenticated = await ref
+                            .read(appLockProvider.notifier)
+                            .authenticate(
+                              customReason:
+                                  'Authenticate to enable App Lock security',
+                            );
                         if (authenticated) {
-                          await ref.read(appLockProvider.notifier).setBiometricsEnabled(true);
+                          await ref
+                              .read(appLockProvider.notifier)
+                              .setBiometricsEnabled(true);
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('App Lock enabled. Your data is secured.'),
+                                content: Text(
+                                  'App Lock enabled. Your data is secured.',
+                                ),
                                 backgroundColor: AppColors.primaryCyan,
                                 duration: Duration(seconds: 2),
                               ),
@@ -703,7 +901,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           }
                         }
                       } else {
-                        await ref.read(appLockProvider.notifier).setBiometricsEnabled(false);
+                        await ref
+                            .read(appLockProvider.notifier)
+                            .setBiometricsEnabled(false);
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
@@ -720,18 +920,31 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   // Currency Selector
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.monetization_on_outlined, color: AppColors.primaryCyan),
-                    title: const Text('Active Currency', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                    leading: const Icon(
+                      Icons.monetization_on_outlined,
+                      color: AppColors.primaryCyan,
+                    ),
+                    title: const Text(
+                      'Active Currency',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     trailing: DropdownButton<String>(
                       value: profile?.currency ?? AppConstants.defaultCurrency,
                       underline: const SizedBox(),
                       onChanged: (val) {
                         if (val != null) {
                           AppHaptics.selection();
-                          ref.read(authNotifierProvider.notifier).setCurrency(val);
+                          ref
+                              .read(authNotifierProvider.notifier)
+                              .setCurrency(val);
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              content: Text('Active currency updated to $val and synced with cloud.'),
+                              content: Text(
+                                'Active currency updated to $val and synced with cloud.',
+                              ),
                               backgroundColor: AppColors.primaryEmerald,
                               duration: const Duration(seconds: 2),
                             ),
@@ -751,18 +964,31 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   // Theme Mode Selector
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.dark_mode_outlined, color: AppColors.primaryViolet),
-                    title: const Text('Theme Mode', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                    leading: const Icon(
+                      Icons.dark_mode_outlined,
+                      color: AppColors.primaryViolet,
+                    ),
+                    title: const Text(
+                      'Theme Mode',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     trailing: DropdownButton<String>(
                       value: profile?.themeMode ?? 'system',
                       underline: const SizedBox(),
                       onChanged: (val) {
                         if (val != null) {
                           AppHaptics.selection();
-                          ref.read(authNotifierProvider.notifier).setThemeMode(val);
+                          ref
+                              .read(authNotifierProvider.notifier)
+                              .setThemeMode(val);
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              content: Text('Theme mode updated to $val and synced with cloud.'),
+                              content: Text(
+                                'Theme mode updated to $val and synced with cloud.',
+                              ),
                               backgroundColor: AppColors.primaryEmerald,
                               duration: const Duration(seconds: 2),
                             ),
@@ -770,9 +996,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         }
                       },
                       items: const [
-                        DropdownMenuItem(value: 'system', child: Text('System')),
-                        DropdownMenuItem(value: 'dark', child: Text('Dark Space')),
-                        DropdownMenuItem(value: 'light', child: Text('Light Platinum')),
+                        DropdownMenuItem(
+                          value: 'system',
+                          child: Text('System'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'dark',
+                          child: Text('Dark Space'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'light',
+                          child: Text('Light Platinum'),
+                        ),
                       ],
                     ),
                   ),
@@ -781,13 +1016,24 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   // Haptics Toggle
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
-                    secondary: const Icon(Icons.vibration_rounded, color: AppColors.primaryEmerald),
-                    title: const Text('Tactile Haptic Feedback', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                    secondary: const Icon(
+                      Icons.vibration_rounded,
+                      color: AppColors.primaryEmerald,
+                    ),
+                    title: const Text(
+                      'Tactile Haptic Feedback',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     value: profile?.hapticsEnabled ?? true,
                     activeThumbColor: AppColors.primaryEmerald,
                     onChanged: (val) {
                       AppHaptics.selection();
-                      ref.read(authNotifierProvider.notifier).setHapticsEnabled(val);
+                      ref
+                          .read(authNotifierProvider.notifier)
+                          .setHapticsEnabled(val);
                     },
                   ),
                   const Divider(height: 1),
@@ -795,9 +1041,21 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   // AI Consent Switch
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
-                    secondary: const Icon(Icons.psychology_outlined, color: AppColors.primaryRose),
-                    title: const Text('AI Spending Records Analysis', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                    subtitle: const Text('Permit assistant to inject aggregate totals into prompt context', style: TextStyle(fontSize: 11)),
+                    secondary: const Icon(
+                      Icons.psychology_outlined,
+                      color: AppColors.primaryRose,
+                    ),
+                    title: const Text(
+                      'AI Spending Records Analysis',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    subtitle: const Text(
+                      'Permit assistant to inject aggregate totals into prompt context',
+                      style: TextStyle(fontSize: 11),
+                    ),
                     value: profile?.aiConsent ?? false,
                     activeThumbColor: AppColors.primaryRose,
                     onChanged: (val) {
@@ -819,17 +1077,33 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 children: [
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.logout_rounded, color: Colors.orangeAccent),
-                    title: const Text('Sign Out', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                    leading: const Icon(
+                      Icons.logout_rounded,
+                      color: Colors.orangeAccent,
+                    ),
+                    title: const Text(
+                      'Sign Out',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     onTap: _showSignOutDialog,
                   ),
                   const Divider(height: 1),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.delete_forever_rounded, color: AppColors.error),
+                    leading: const Icon(
+                      Icons.delete_forever_rounded,
+                      color: AppColors.error,
+                    ),
                     title: const Text(
                       'Delete Account',
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.error),
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.error,
+                      ),
                     ),
                     onTap: _showDeleteAccountDialog,
                   ),

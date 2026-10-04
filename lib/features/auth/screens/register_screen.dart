@@ -196,8 +196,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           child: ElevatedButton(
                             onPressed: authState.isLoading ? null : _submitRegister,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.primaryCyan,
-                              foregroundColor: Colors.black,
                               padding: const EdgeInsets.symmetric(vertical: 16),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(16),
@@ -242,10 +240,10 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           AppHaptics.selection();
                           context.pop();
                         },
-                        child: const Text(
+                        child: Text(
                           'Sign In',
                           style: TextStyle(
-                            color: AppColors.primaryCyan,
+                            color: Theme.of(context).colorScheme.primary,
                             fontWeight: FontWeight.w700,
                             fontSize: 14,
                           ),

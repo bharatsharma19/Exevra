@@ -533,8 +533,6 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                   onPressed: _isSubmitting ? null : _submit,
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
-                    backgroundColor: AppColors.primaryCyan,
-                    foregroundColor: Colors.black,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   ),
                   child: _isSubmitting

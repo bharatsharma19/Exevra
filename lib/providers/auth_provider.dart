@@ -43,7 +43,7 @@ class AppAuthState {
     AuthStatus? status,
     supabase.User? user,
     UserProfile? profile,
-    String? errorMessage,
+    Object? errorMessage = const Object(),
     bool? isLoading,
     String? themeMode,
   }) {
@@ -51,7 +51,7 @@ class AppAuthState {
       status: status ?? this.status,
       user: user ?? this.user,
       profile: profile ?? this.profile,
-      errorMessage: errorMessage,
+      errorMessage: errorMessage == const Object() ? this.errorMessage : errorMessage as String?,
       isLoading: isLoading ?? this.isLoading,
       themeMode: themeMode ?? this.themeMode,
     );
@@ -70,12 +70,21 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
   Future<void> _init() async {
     state = state.copyWith(isLoading: true);
 
-    // Load local preferences
-    final prefs = await SharedPreferences.getInstance();
-    final cachedCurrency = prefs.getString(AppConstants.keyCurrency) ?? AppConstants.defaultCurrency;
-    final cachedTheme = prefs.getString(AppConstants.keyThemeMode) ?? 'system';
-    final cachedHaptics = prefs.getBool(AppConstants.keyHapticsEnabled) ?? true;
-    final cachedAiConsent = prefs.getBool(AppConstants.keyAiConsent) ?? false;
+    String cachedCurrency = AppConstants.defaultCurrency;
+    String cachedTheme = 'system';
+    bool cachedHaptics = true;
+    bool cachedAiConsent = false;
+    
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      cachedCurrency = prefs.getString(AppConstants.keyCurrency) ?? AppConstants.defaultCurrency;
+      cachedTheme = prefs.getString(AppConstants.keyThemeMode) ?? 'system';
+      cachedHaptics = prefs.getBool(AppConstants.keyHapticsEnabled) ?? true;
+      cachedAiConsent = prefs.getBool(AppConstants.keyAiConsent) ?? false;
+    } catch (e) {
+      debugPrint('[AuthNotifier] Failed to load preferences: $e');
+    }
+    
     AppHaptics.isEnabled = cachedHaptics;
 
     final currentUser = _authService.currentUser;
@@ -103,15 +112,32 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
 
     _authSub = _authService.authStateChanges.listen((data) async {
       final user = data.session?.user;
-      if (user != null) {
-        final profile = await _supabaseService.fetchProfile(user.id);
+      final event = data.event;
+
+      if (event == supabase.AuthChangeEvent.signedOut || event == supabase.AuthChangeEvent.userDeleted) {
         state = state.copyWith(
-          status: AuthStatus.authenticated,
-          user: user,
-          profile: profile,
+          status: AuthStatus.unauthenticated,
+          user: null,
+          profile: null,
           isLoading: false,
         );
-      } else {
+      } else if (user != null) {
+        if (state.user?.id != user.id || state.profile == null) {
+          final profile = await _supabaseService.fetchProfile(user.id);
+          state = state.copyWith(
+            status: AuthStatus.authenticated,
+            user: user,
+            profile: profile,
+            isLoading: false,
+          );
+        } else {
+          state = state.copyWith(
+            status: AuthStatus.authenticated,
+            user: user,
+            isLoading: false,
+          );
+        }
+      } else if (event == supabase.AuthChangeEvent.initialSession) {
         state = state.copyWith(
           status: AuthStatus.unauthenticated,
           user: null,

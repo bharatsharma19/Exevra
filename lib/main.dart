@@ -124,7 +124,7 @@ class _AntigravityExpenseAppState extends ConsumerState<AntigravityExpenseApp>
         if (appLockState.isLocked && appLockState.isBiometricsEnabled) {
           return Stack(
             children: [
-              ?child,
+              if (child != null) child,
               const Positioned.fill(child: AppLockScreen()),
             ],
           );

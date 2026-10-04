@@ -103,11 +103,84 @@ class ExpenseState {
   List<GroupMember> get pendingReviewMembers =>
       groupMembers.where((m) => m.isViewerOnly).toList();
 
+  List<SettlementDebt> get settlements {
+    if (currentGroup == null || groupMembers.isEmpty) return [];
+
+    final groupExpenses = expenses.where((e) => !e.isPersonal).toList();
+    if (groupExpenses.isEmpty) return [];
+
+    double totalSpent = 0.0;
+    final balances = <String, double>{};
+    for (var m in groupMembers) {
+      balances[m.userId] = 0.0;
+    }
+
+    for (var expense in groupExpenses) {
+      final amount = expense.amount;
+      final payer = expense.userId;
+      if (!balances.containsKey(payer)) {
+        balances[payer] = 0.0;
+      }
+      balances[payer] = balances[payer]! + amount;
+      totalSpent += amount;
+    }
+
+    final memberCount = groupMembers.length;
+    int totalCents = (totalSpent * 100).round();
+    int splitCents = totalCents ~/ memberCount;
+    int remainder = totalCents % memberCount;
+
+    for (var i = 0; i < memberCount; i++) {
+      final m = groupMembers[i].userId;
+      int toDeduct = splitCents + (i < remainder ? 1 : 0);
+      balances[m] = balances[m]! - (toDeduct / 100.0);
+    }
+
+    final debtors = <String, double>{};
+    final creditors = <String, double>{};
+
+    balances.forEach((userId, balance) {
+      final b = double.parse(balance.toStringAsFixed(2));
+      if (b < 0) {
+        debtors[userId] = -b;
+      } else if (b > 0) {
+        creditors[userId] = b;
+      }
+    });
+
+    final List<SettlementDebt> debts = [];
+    final debtorKeys = debtors.keys.toList();
+    final creditorKeys = creditors.keys.toList();
+
+    int i = 0, j = 0;
+    while (i < debtorKeys.length && j < creditorKeys.length) {
+      final debtor = debtorKeys[i];
+      final creditor = creditorKeys[j];
+
+      final dAmount = debtors[debtor]!;
+      final cAmount = creditors[creditor]!;
+
+      final min = (dAmount < cAmount) ? dAmount : cAmount;
+
+      if (min > 0) {
+        debts.add(SettlementDebt(fromUserId: debtor, toUserId: creditor, amount: min));
+      }
+
+      debtors[debtor] = double.parse((dAmount - min).toStringAsFixed(2));
+      creditors[creditor] = double.parse((cAmount - min).toStringAsFixed(2));
+
+      if (debtors[debtor]! <= 0) i++;
+      if (creditors[creditor]! <= 0) j++;
+    }
+
+    return debts;
+  }
+
   ExpenseState copyWith({
     List<Expense>? expenses,
     ExpenseFilter? filter,
     bool? isLoading,
-    String? errorMessage,
+    Object? errorMessage = const Object(),
     ExpenseGroup? currentGroup,
     List<GroupMember>? groupMembers,
   }) {
@@ -115,7 +188,7 @@ class ExpenseState {
       expenses: expenses ?? this.expenses,
       filter: filter ?? this.filter,
       isLoading: isLoading ?? this.isLoading,
-      errorMessage: errorMessage,
+      errorMessage: errorMessage == const Object() ? this.errorMessage : errorMessage as String?,
       currentGroup: currentGroup ?? this.currentGroup,
       groupMembers: groupMembers ?? this.groupMembers,
     );
@@ -133,6 +206,7 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
   Future<void> loadAll() async {
     state = state.copyWith(isLoading: true, errorMessage: null);
     try {
+      state = state.copyWith(errorMessage: null);
       final authState = _ref.read(authNotifierProvider);
       final groupId = authState.profile?.groupId;
 
@@ -191,13 +265,14 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
     bool isGroup = false,
   }) async {
     try {
+      state = state.copyWith(errorMessage: null);
       AppHaptics.light();
       final auth = _ref.read(authNotifierProvider);
       final userId = auth.user?.id ?? 'demo-user-id';
       final groupId = isGroup ? auth.profile?.groupId : null;
 
       final newExpense = Expense(
-        id: 'exp-${DateTime.now().millisecondsSinceEpoch}',
+        id: 'opt-${DateTime.now().millisecondsSinceEpoch}',
         userId: userId,
         groupId: groupId,
         title: title.trim(),
@@ -211,11 +286,20 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
         creatorName: auth.profile?.displayName ?? 'You',
       );
 
-      final created = await _service.createExpense(newExpense);
-      final updatedList = [created, ...state.expenses];
-      state = state.copyWith(expenses: updatedList);
+      final previousExpenses = state.expenses;
+      state = state.copyWith(expenses: [newExpense, ...state.expenses]);
       AppHaptics.success();
-      return true;
+
+      try {
+        final created = await _service.createExpense(newExpense);
+        final updatedList = state.expenses.map((e) => e.id == newExpense.id ? created : e).toList();
+        state = state.copyWith(expenses: updatedList);
+        return true;
+      } catch (e) {
+        state = state.copyWith(expenses: previousExpenses, errorMessage: e.toString());
+        AppHaptics.error();
+        return false;
+      }
     } catch (e) {
       AppHaptics.error();
       state = state.copyWith(errorMessage: e.toString());
@@ -225,6 +309,7 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
 
   Future<bool> updateExpense(Expense updatedExpense) async {
     try {
+      state = state.copyWith(errorMessage: null);
       AppHaptics.light();
       final auth = _ref.read(authNotifierProvider);
       final currentUserId = auth.user?.id ?? 'demo-user-id';
@@ -234,11 +319,21 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
         throw Exception('Permission denied: You can only edit expenses you created.');
       }
 
-      final saved = await _service.updateExpense(updatedExpense);
-      final updatedList = state.expenses.map((e) => e.id == saved.id ? saved : e).toList();
-      state = state.copyWith(expenses: updatedList);
+      final previousExpenses = state.expenses;
+      final optimisticList = state.expenses.map((e) => e.id == updatedExpense.id ? updatedExpense : e).toList();
+      state = state.copyWith(expenses: optimisticList);
       AppHaptics.success();
-      return true;
+
+      try {
+        final saved = await _service.updateExpense(updatedExpense);
+        final finalUpdatedList = state.expenses.map((e) => e.id == saved.id ? saved : e).toList();
+        state = state.copyWith(expenses: finalUpdatedList);
+        return true;
+      } catch (e) {
+        state = state.copyWith(expenses: previousExpenses, errorMessage: e.toString());
+        AppHaptics.error();
+        return false;
+      }
     } catch (e) {
       AppHaptics.error();
       state = state.copyWith(errorMessage: e.toString());
@@ -248,6 +343,7 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
 
   Future<bool> deleteExpense(String expenseId) async {
     try {
+      state = state.copyWith(errorMessage: null);
       final expense = state.expenses.firstWhere((e) => e.id == expenseId);
       final auth = _ref.read(authNotifierProvider);
       final currentUserId = auth.user?.id ?? 'demo-user-id';
@@ -264,12 +360,19 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
         );
       }
 
-      AppHaptics.light();
-      await _service.deleteExpense(expenseId);
-      final updatedList = state.expenses.where((e) => e.id != expenseId).toList();
-      state = state.copyWith(expenses: updatedList);
+      final previousExpenses = state.expenses;
+      final optimisticList = state.expenses.where((e) => e.id != expenseId).toList();
+      state = state.copyWith(expenses: optimisticList);
       AppHaptics.medium();
-      return true;
+
+      try {
+        await _service.deleteExpense(expenseId);
+        return true;
+      } catch (e) {
+        state = state.copyWith(expenses: previousExpenses, errorMessage: e.toString());
+        AppHaptics.error();
+        return false;
+      }
     } catch (e) {
       AppHaptics.error();
       state = state.copyWith(errorMessage: e.toString());
@@ -283,6 +386,7 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
 
   Future<bool> createGroup(String name) async {
     try {
+      state = state.copyWith(errorMessage: null);
       AppHaptics.light();
       final group = await _service.createGroup(name);
       state = state.copyWith(
@@ -310,6 +414,7 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
 
   Future<bool> joinGroup(String inviteCode) async {
     try {
+      state = state.copyWith(errorMessage: null);
       AppHaptics.light();
       final group = await _service.joinGroupByInvite(inviteCode);
       if (group != null) {
@@ -330,6 +435,7 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
   Future<void> leaveGroup() async {
     if (state.currentGroup == null) return;
     try {
+      state = state.copyWith(errorMessage: null);
       AppHaptics.light();
       await _service.leaveGroup(state.currentGroup!.id);
       state = state.copyWith(currentGroup: null, groupMembers: const []);
@@ -343,6 +449,7 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
   Future<void> deleteGroup() async {
     if (state.currentGroup == null) return;
     try {
+      state = state.copyWith(errorMessage: null);
       AppHaptics.heavy();
       await _service.deleteGroup(state.currentGroup!.id);
       state = state.copyWith(currentGroup: null, groupMembers: const []);
@@ -356,6 +463,7 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
     final group = state.currentGroup;
     if (group == null) return false;
     try {
+      state = state.copyWith(errorMessage: null);
       AppHaptics.light();
       final ok = await _service.approveGroupMember(group.id, memberUserId);
       if (ok) {
@@ -372,6 +480,26 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       }
     } catch (e) {
       state = state.copyWith(errorMessage: 'Failed to approve member: $e');
+      AppHaptics.error();
+    }
+    return false;
+  }
+  Future<bool> removeGroupMember(String memberUserId) async {
+    final group = state.currentGroup;
+    if (group == null) return false;
+    try {
+      state = state.copyWith(errorMessage: null);
+      AppHaptics.light();
+      final ok = await _service.removeGroupMember(group.id, memberUserId);
+      if (ok) {
+        state = state.copyWith(
+          groupMembers: state.groupMembers.where((m) => m.userId != memberUserId).toList(),
+        );
+        AppHaptics.medium();
+        return true;
+      }
+    } catch (e) {
+      state = state.copyWith(errorMessage: 'Failed to remove member: $e');
       AppHaptics.error();
     }
     return false;

@@ -3,7 +3,12 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/utils/haptics.dart';
 
-class MainNavigationShell extends StatelessWidget {
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../providers/expense_provider.dart';
+import '../../../providers/insights_provider.dart';
+import '../../../providers/chat_provider.dart';
+
+class MainNavigationShell extends ConsumerWidget {
   final StatefulNavigationShell navigationShell;
 
   const MainNavigationShell({
@@ -19,8 +24,38 @@ class MainNavigationShell extends StatelessWidget {
     );
   }
 
+  void _showError(BuildContext context, String message) {
+    if (message.isEmpty) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: const TextStyle(color: Colors.white)),
+        backgroundColor: Colors.red.shade600,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.listen<ExpenseState>(expenseProvider, (prev, next) {
+      if (next.errorMessage != null && (prev?.errorMessage != next.errorMessage)) {
+        _showError(context, next.errorMessage!);
+      }
+    });
+
+    ref.listen<InsightState>(insightProvider, (prev, next) {
+      if (next.errorMessage != null && (prev?.errorMessage != next.errorMessage)) {
+        _showError(context, next.errorMessage!);
+      }
+    });
+
+    ref.listen<ChatState>(chatProvider, (prev, next) {
+      if (next.errorMessage != null && (prev?.errorMessage != next.errorMessage)) {
+        _showError(context, next.errorMessage!);
+      }
+    });
+
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
@@ -38,31 +73,31 @@ class MainNavigationShell extends StatelessWidget {
           selectedIndex: navigationShell.currentIndex,
           onDestinationSelected: _onTap,
           backgroundColor: isDark ? AppColors.darkCard : AppColors.lightCard,
-          indicatorColor: AppColors.primaryCyan.withValues(alpha: 0.2),
-          destinations: const [
+          indicatorColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
+          destinations: [
             NavigationDestination(
-              icon: Icon(Icons.dashboard_outlined),
-              selectedIcon: Icon(Icons.dashboard_rounded, color: AppColors.primaryCyan),
+              icon: const Icon(Icons.dashboard_outlined),
+              selectedIcon: Icon(Icons.dashboard_rounded, color: Theme.of(context).colorScheme.primary),
               label: 'Dashboard',
             ),
             NavigationDestination(
-              icon: Icon(Icons.receipt_long_outlined),
-              selectedIcon: Icon(Icons.receipt_long_rounded, color: AppColors.primaryCyan),
+              icon: const Icon(Icons.receipt_long_outlined),
+              selectedIcon: Icon(Icons.receipt_long_rounded, color: Theme.of(context).colorScheme.primary),
               label: 'Expenses',
             ),
             NavigationDestination(
-              icon: Icon(Icons.insert_chart_outlined_rounded),
-              selectedIcon: Icon(Icons.insert_chart_rounded, color: AppColors.primaryCyan),
+              icon: const Icon(Icons.insert_chart_outlined_rounded),
+              selectedIcon: Icon(Icons.insert_chart_rounded, color: Theme.of(context).colorScheme.primary),
               label: 'Insights',
             ),
             NavigationDestination(
-              icon: Icon(Icons.auto_awesome_outlined),
+              icon: const Icon(Icons.auto_awesome_outlined),
               selectedIcon: Icon(Icons.auto_awesome_rounded, color: AppColors.primaryViolet),
               label: 'AI Advisor',
             ),
             NavigationDestination(
-              icon: Icon(Icons.person_outline_rounded),
-              selectedIcon: Icon(Icons.person_rounded, color: AppColors.primaryCyan),
+              icon: const Icon(Icons.person_outline_rounded),
+              selectedIcon: Icon(Icons.person_rounded, color: Theme.of(context).colorScheme.primary),
               label: 'Profile',
             ),
           ],

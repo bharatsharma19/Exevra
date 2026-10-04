@@ -316,12 +316,12 @@ class DashboardScreen extends ConsumerWidget {
                         ),
                         GestureDetector(
                           onTap: () => context.push('/insights'),
-                          child: const Text(
+                          child: Text(
                             'Full Analytics →',
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
-                              color: AppColors.primaryCyan,
+                              color: Theme.of(context).colorScheme.primary,
                             ),
                           ),
                         ),
@@ -406,12 +406,12 @@ class DashboardScreen extends ConsumerWidget {
                         ),
                         GestureDetector(
                           onTap: () => context.push('/expenses'),
-                          child: const Text(
+                          child: Text(
                             'View All',
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
-                              color: AppColors.primaryCyan,
+                              color: Theme.of(context).colorScheme.primary,
                             ),
                           ),
                         ),
@@ -419,7 +419,15 @@ class DashboardScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: 12),
 
-                    if (recentExpenses.isEmpty) ...[
+                    if (expenseState.isLoading && expenseState.expenses.isEmpty) ...[
+                      GlassCard(
+                        borderRadius: 20,
+                        padding: const EdgeInsets.all(24),
+                        child: Center(
+                          child: CircularProgressIndicator(),
+                        ),
+                      ),
+                    ] else if (recentExpenses.isEmpty) ...[
                       GlassCard(
                         borderRadius: 20,
                         padding: const EdgeInsets.all(24),
@@ -502,8 +510,8 @@ class DashboardScreen extends ConsumerWidget {
           AppHaptics.selection();
           AddEditExpenseSheet.show(context);
         },
-        backgroundColor: AppColors.primaryCyan,
-        foregroundColor: Colors.black,
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Theme.of(context).colorScheme.onPrimary,
         elevation: 4,
         child: const Icon(Icons.add_rounded, size: 28),
       ).animate().scale(delay: 400.ms, curve: Curves.easeOutBack),

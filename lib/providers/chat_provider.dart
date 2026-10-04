@@ -59,13 +59,13 @@ class ChatState {
     List<ChatMessage>? messages,
     bool? isGenerating,
     String? activeModel,
-    String? errorMessage,
+    Object? errorMessage = const Object(),
   }) {
     return ChatState(
       messages: messages ?? this.messages,
       isGenerating: isGenerating ?? this.isGenerating,
       activeModel: activeModel ?? this.activeModel,
-      errorMessage: errorMessage,
+      errorMessage: errorMessage == const Object() ? this.errorMessage : errorMessage as String?,
     );
   }
 }

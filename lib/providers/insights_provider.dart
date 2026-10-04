@@ -22,13 +22,13 @@ class InsightState {
     String? timeframe,
     FinancialInsight? insight,
     bool? isLoading,
-    String? errorMessage,
+    Object? errorMessage = const Object(),
   }) {
     return InsightState(
       timeframe: timeframe ?? this.timeframe,
       insight: insight ?? this.insight,
       isLoading: isLoading ?? this.isLoading,
-      errorMessage: errorMessage,
+      errorMessage: errorMessage == const Object() ? this.errorMessage : errorMessage as String?,
     );
   }
 }

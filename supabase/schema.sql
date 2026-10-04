@@ -67,6 +67,29 @@ CREATE INDEX IF NOT EXISTS idx_expenses_category ON public.expenses(category);
 CREATE INDEX IF NOT EXISTS idx_group_members_user ON public.group_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_group_members_group ON public.group_members(group_id);
 
+-- Trigger to cleanup profiles.group_id on member removal
+CREATE OR REPLACE FUNCTION public.handle_member_removal()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- If a user's membership is deleted, check if their active group_id was this group
+    IF (TG_OP = 'DELETE') THEN
+        UPDATE public.profiles
+        SET group_id = (
+            SELECT group_id FROM public.group_members
+            WHERE user_id = OLD.user_id
+            LIMIT 1
+        )
+        WHERE id = OLD.user_id AND (group_id = OLD.group_id OR group_id IS NULL);
+    END IF;
+    RETURN OLD;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_member_removal ON public.group_members;
+CREATE TRIGGER trigger_member_removal
+    AFTER DELETE ON public.group_members
+    FOR EACH ROW EXECUTE FUNCTION public.handle_member_removal();
+
 -- 6. TRIGGERS FOR UPDATED_AT
 CREATE OR REPLACE FUNCTION public.handle_updated_at()
 RETURNS TRIGGER AS $$
@@ -119,6 +142,12 @@ CREATE TRIGGER on_auth_user_created
 -- 8. ROW LEVEL SECURITY (RLS) POLICIES
 -- ==============================================================================
 
+-- Helper function to get user groups, avoids infinite recursion in RLS
+CREATE OR REPLACE FUNCTION public.get_auth_user_groups()
+RETURNS SETOF UUID AS $$
+    SELECT group_id FROM public.group_members WHERE user_id = auth.uid();
+$$ LANGUAGE sql SECURITY DEFINER;
+
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.groups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.group_members ENABLE ROW LEVEL SECURITY;
@@ -135,7 +164,7 @@ CREATE POLICY "Users can view own profile"
         OR (
             group_id IS NOT NULL 
             AND group_id IN (
-                SELECT gm.group_id FROM public.group_members gm WHERE gm.user_id = auth.uid()
+                SELECT public.get_auth_user_groups()
             )
         )
     );
@@ -159,10 +188,7 @@ CREATE POLICY "Members can view their group"
     ON public.groups FOR SELECT
     USING (
         admin_id = auth.uid()
-        OR EXISTS (
-            SELECT 1 FROM public.group_members gm
-            WHERE gm.group_id = groups.id AND gm.user_id = auth.uid()
-        )
+        OR id IN (SELECT public.get_auth_user_groups())
     );
 
 DROP POLICY IF EXISTS "Authenticated users can create groups" ON public.groups;
@@ -189,10 +215,7 @@ CREATE POLICY "Members can view group membership"
     ON public.group_members FOR SELECT
     USING (
         user_id = auth.uid()
-        OR EXISTS (
-            SELECT 1 FROM public.group_members self_m
-            WHERE self_m.group_id = group_members.group_id AND self_m.user_id = auth.uid()
-        )
+        OR group_id IN (SELECT public.get_auth_user_groups())
     );
 
 DROP POLICY IF EXISTS "Users can join or admins can add members" ON public.group_members;
@@ -252,10 +275,7 @@ CREATE POLICY "Select Expenses Policy"
         -- Group expense: any active member in the group
         (
             group_id IS NOT NULL 
-            AND EXISTS (
-                SELECT 1 FROM public.group_members gm
-                WHERE gm.group_id = expenses.group_id AND gm.user_id = auth.uid()
-            )
+            AND group_id IN (SELECT public.get_auth_user_groups())
         )
     );
 
@@ -280,8 +300,25 @@ CREATE POLICY "Insert Expenses Policy"
 DROP POLICY IF EXISTS "Update Expenses Policy" ON public.expenses;
 CREATE POLICY "Update Expenses Policy"
     ON public.expenses FOR UPDATE
-    USING (user_id = auth.uid())
-    WITH CHECK (user_id = auth.uid());
+    USING (
+        user_id = auth.uid()
+        AND (
+            group_id IS NULL
+            OR group_id IN (SELECT public.get_auth_user_groups())
+        )
+    )
+    WITH CHECK (
+        user_id = auth.uid()
+        AND (
+            group_id IS NULL
+            OR EXISTS (
+                SELECT 1 FROM public.group_members gm
+                WHERE gm.group_id = expenses.group_id 
+                  AND gm.user_id = auth.uid()
+                  AND gm.role IN ('admin', 'member')
+            )
+        )
+    );
 
 -- DELETE: Personal expenses: creator only. Group expenses: designated Group Admin ONLY.
 DROP POLICY IF EXISTS "Delete Expenses Policy" ON public.expenses;
@@ -386,6 +423,16 @@ DECLARE
 BEGIN
     IF v_user_id IS NULL THEN
         RAISE EXCEPTION 'Not authenticated';
+    END IF;
+
+    -- Verify group membership to prevent unauthorized access
+    IF p_group_id IS NOT NULL THEN
+        IF NOT EXISTS (
+            SELECT 1 FROM public.group_members
+            WHERE group_id = p_group_id AND user_id = v_user_id
+        ) THEN
+            RAISE EXCEPTION 'Not authorized to view this group''s insights';
+        END IF;
     END IF;
 
     -- Set timeframe boundaries

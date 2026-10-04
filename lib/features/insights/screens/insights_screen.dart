@@ -42,7 +42,7 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
           ),
         ],
       ),
-      body: insightState.isLoading
+      body: (insightState.isLoading && insightState.insight.expenseCount == 0 && insightState.insight.totalAmount == 0.0)
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               onRefresh: () => ref.read(insightProvider.notifier).loadInsights(),
@@ -413,13 +413,16 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
 
   Widget _buildTimeframePill(String label, String value, String current) {
     final isSelected = value == current;
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final onPrimaryColor = Theme.of(context).colorScheme.onPrimary;
+
     return Expanded(
       child: GestureDetector(
         onTap: () => ref.read(insightProvider.notifier).setTimeframe(value),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 9),
           decoration: BoxDecoration(
-            color: isSelected ? AppColors.primaryCyan : Colors.transparent,
+            color: isSelected ? primaryColor : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Text(
@@ -428,7 +431,7 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
             style: TextStyle(
               fontSize: 13,
               fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
-              color: isSelected ? Colors.black : Colors.grey,
+              color: isSelected ? onPrimaryColor : Colors.grey,
             ),
           ),
         ),

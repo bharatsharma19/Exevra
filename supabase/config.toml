@@ -1,0 +1,79 @@
+# A string used to distinguish different Supabase projects on the same host. Defaults to the
+# working directory name when running `supabase init`.
+project_id = "exevra"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+
+[db.pooler]
+enabled = false
+port = 54329
+pool_mode = "transaction"
+default_pool_size = 20
+max_client_conn = 100
+
+[studio]
+enabled = true
+port = 54323
+pgadmin_port = 54324
+
+# Email testing server. Emails sent with the local dev setup are not actually sent - rather, they
+# are monitored, and you can view the emails that would have been sent from the web interface.
+[inbucket]
+enabled = true
+port = 54324
+smtp_port = 54325
+pop3_port = 54326
+
+[storage]
+enabled = true
+port = 54326
+image_transformation_enabled = true
+
+[auth]
+enabled = true
+port = 54327
+issuer = "supabase"
+site_url = "io.antigravity.expensemanager://login-callback"
+additional_redirect_urls = [
+  "https://localhost:3000",
+  "https://exevra.com",
+]
+jwt_expiry = 3600
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = true
+# 10 emails per hour rate limit
+max_frequency = "10s"
+
+[auth.email.template.confirmation]
+subject = "Verify your email for Exevra | Intelligent Financial Telemetry"
+content_path = "./supabase/email_templates/confirm_signup.html"
+
+[auth.email.template.invite]
+subject = "You've been invited to Exevra"
+content_path = "./supabase/email_templates/invite.html"
+
+[auth.sms]
+enable_signup = true
+enable_confirmations = true
+template = "Your code is {{ .Code }}"
+
+[auth.email.smtp]
+enable = true
+host = "smtp.mailgun.org"
+port = 587
+user = "postmaster@exevra.com"
+pass = "env(SMTP_PASS)"
+sender_name = "Exevra"
+admin_email = "admin@exevra.com"

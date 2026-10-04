@@ -13,14 +13,19 @@ import '../../features/dashboard/screens/main_navigation_shell.dart';
 import '../../features/expenses/screens/expenses_screen.dart';
 import '../../features/insights/screens/insights_screen.dart';
 import '../../features/chat/screens/chat_screen.dart';
+import '../../features/profile/screens/invite_screen.dart';
 import '../../features/profile/screens/profile_screen.dart';
 
 final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
-final GlobalKey<NavigatorState> _dashboardNavigatorKey = GlobalKey<NavigatorState>();
-final GlobalKey<NavigatorState> _expensesNavigatorKey = GlobalKey<NavigatorState>();
-final GlobalKey<NavigatorState> _insightsNavigatorKey = GlobalKey<NavigatorState>();
+final GlobalKey<NavigatorState> _dashboardNavigatorKey =
+    GlobalKey<NavigatorState>();
+final GlobalKey<NavigatorState> _expensesNavigatorKey =
+    GlobalKey<NavigatorState>();
+final GlobalKey<NavigatorState> _insightsNavigatorKey =
+    GlobalKey<NavigatorState>();
 final GlobalKey<NavigatorState> _chatNavigatorKey = GlobalKey<NavigatorState>();
-final GlobalKey<NavigatorState> _profileNavigatorKey = GlobalKey<NavigatorState>();
+final GlobalKey<NavigatorState> _profileNavigatorKey =
+    GlobalKey<NavigatorState>();
 
 CustomTransitionPage<T> _buildAnimatedPage<T>({
   required BuildContext context,
@@ -54,16 +59,13 @@ CustomTransitionPage<T> _buildAnimatedPage<T>({
 class RouterNotifier extends ChangeNotifier {
   final Ref _ref;
   RouterNotifier(this._ref) {
-    _ref.listen<AppAuthState>(
-      authNotifierProvider,
-      (previous, next) {
-        if (previous?.status != next.status ||
-            previous?.isEmailVerified != next.isEmailVerified ||
-            previous?.user?.emailConfirmedAt != next.user?.emailConfirmedAt) {
-          notifyListeners();
-        }
-      },
-    );
+    _ref.listen<AppAuthState>(authNotifierProvider, (previous, next) {
+      if (previous?.status != next.status ||
+          previous?.isEmailVerified != next.isEmailVerified ||
+          previous?.user?.emailConfirmedAt != next.user?.emailConfirmedAt) {
+        notifyListeners();
+      }
+    });
   }
 }
 
@@ -80,20 +82,27 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isVerified = authState.isEmailVerified;
       final loc = state.matchedLocation;
 
-      final isAuthRoute = loc == '/login' ||
+      final isAuthRoute =
+          loc == '/login' ||
           loc == '/register' ||
           loc == '/phone-auth' ||
           loc == '/forgot-password' ||
           loc == '/reset-password';
 
-      // 1. Not authenticated: send to /login unless already on an auth route
-      if (!isAuth && !isAuthRoute) {
+      final isInviteRoute = loc.startsWith('/invite');
+
+      // 1. Not authenticated: send to /login unless already on an auth route or invite route
+      if (!isAuth && !isAuthRoute && !isInviteRoute) {
         return '/login';
       }
 
-      // 2. Authenticated but unverified: redirect to /verify-email
+      // 2. Authenticated but unverified: redirect to /verify-email (except invite route to allow viewing)
       if (isAuth && !isVerified) {
-        if (loc != '/verify-email') {
+        if (loc != '/verify-email' && !isInviteRoute) {
+          final returnTo = state.uri.queryParameters['returnTo'];
+          if (returnTo != null && returnTo.isNotEmpty) {
+            return '/verify-email?returnTo=${Uri.encodeComponent(returnTo)}';
+          }
           return '/verify-email';
         }
         return null;
@@ -101,6 +110,11 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // 3. Authenticated & verified: do not stay on auth routes or verify-email
       if (isAuth && isVerified && (isAuthRoute || loc == '/verify-email')) {
+        // If there's a returnTo parameter (e.g. from invite), go there instead
+        final returnTo = state.uri.queryParameters['returnTo'];
+        if (returnTo != null && returnTo.isNotEmpty) {
+          return returnTo;
+        }
         return '/dashboard';
       }
 
@@ -110,6 +124,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       // -----------------------------------------------------------------------
       // AUTHENTICATION & VERIFICATION ROUTES
       // -----------------------------------------------------------------------
+      GoRoute(
+        path: '/invite',
+        builder: (context, state) {
+          final token = state.uri.queryParameters['token'] ?? '';
+          return InviteScreen(token: token);
+        },
+      ),
       GoRoute(
         path: '/login',
         pageBuilder: (context, state) => _buildAnimatedPage(

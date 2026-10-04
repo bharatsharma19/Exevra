@@ -217,10 +217,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   minimumSize: Size.zero,
                                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                 ),
-                                child: const Text(
+                                child: Text(
                                   'Forgot Password?',
                                   style: TextStyle(
-                                    color: AppColors.primaryCyan,
+                                    color: Theme.of(context).colorScheme.primary,
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -233,8 +233,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               child: ElevatedButton(
                                 onPressed: authState.isLoading ? null : _submitLogin,
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppColors.primaryCyan,
-                                  foregroundColor: Colors.black,
                                   padding: const EdgeInsets.symmetric(vertical: 16),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(16),
@@ -378,13 +376,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           ),
                           TextButton(
                             onPressed: () {
-                              AppHaptics.selection();
-                              context.push('/register');
+                              final returnTo = GoRouterState.of(context).uri.queryParameters['returnTo'];
+                              if (returnTo != null) {
+                                context.push('/register?returnTo=${Uri.encodeComponent(returnTo)}');
+                              } else {
+                                context.push('/register');
+                              }
                             },
-                            child: const Text(
+                            child: Text(
                               'Sign Up',
                               style: TextStyle(
-                                color: AppColors.primaryCyan,
+                                color: Theme.of(context).colorScheme.primary,
                                 fontWeight: FontWeight.w700,
                                 fontSize: 14,
                               ),
