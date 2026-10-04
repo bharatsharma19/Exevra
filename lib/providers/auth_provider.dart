@@ -114,7 +114,7 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
       final user = data.session?.user;
       final event = data.event;
 
-      if (event == supabase.AuthChangeEvent.signedOut || event == supabase.AuthChangeEvent.userDeleted) {
+      if (event == supabase.AuthChangeEvent.signedOut) {
         state = state.copyWith(
           status: AuthStatus.unauthenticated,
           user: null,
@@ -261,7 +261,7 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
         AppHaptics.success();
       }
     } catch (e) {
-      if (token == '123456') {
+      if (_supabaseService.isDemoMode && token == '123456') {
         _enterDemoSession('phone-user@antigravity.io', displayName: 'Phone User', phone: phone);
         return;
       }
@@ -374,6 +374,24 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
   Future<void> updateProfile(UserProfile updated) async {
     state = state.copyWith(profile: updated);
     await _supabaseService.updateProfile(updated);
+  }
+
+  Future<void> setActiveGroupId(String? groupId) async {
+    if (state.profile != null) {
+      final updated = state.profile!.copyWith(groupId: groupId);
+      state = state.copyWith(profile: updated);
+      await _supabaseService.switchActiveGroup(groupId);
+    }
+  }
+
+  Future<void> refreshProfile() async {
+    final uid = state.user?.id;
+    if (uid != null) {
+      final p = await _supabaseService.fetchProfile(uid);
+      if (p != null) {
+        state = state.copyWith(profile: p);
+      }
+    }
   }
 
   Future<void> setThemeMode(String mode) async {

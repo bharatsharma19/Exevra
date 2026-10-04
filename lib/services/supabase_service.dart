@@ -7,6 +7,7 @@ import '../models/user_profile.dart';
 import '../models/group_model.dart';
 import '../models/expense_model.dart';
 import '../models/insight_model.dart';
+import 'email_service.dart';
 
 /// Supabase Client Wrapper and Enterprise Data Access Layer
 class SupabaseService {
@@ -29,7 +30,10 @@ class SupabaseService {
   final List<Expense> _localExpenses = [];
   UserProfile? _localProfile;
   ExpenseGroup? _localGroup;
+  final List<ExpenseGroup> _localGroups = [];
   final List<GroupMember> _localMembers = [];
+  final List<GroupInvitation> _localInvitations = [];
+  final List<Settlement> _localSettlements = [];
 
   // ---------------------------------------------------------------------------
   // PROFILE MANAGEMENT
@@ -94,8 +98,75 @@ class SupabaseService {
   }
 
   // ---------------------------------------------------------------------------
-  // GROUP MANAGEMENT
+  // GROUP MANAGEMENT & MULTI-GROUP SUPPORT
   // ---------------------------------------------------------------------------
+
+  Future<List<ExpenseGroup>> fetchUserGroups() async {
+    final userId = currentUser?.id ?? 'demo-user-id';
+    try {
+      final res = await client.rpc('get_user_groups');
+      if (res is List) {
+        final groups = res
+            .map((item) => ExpenseGroup.fromJson(Map<String, dynamic>.from(item)))
+            .toList();
+        _localGroups.clear();
+        _localGroups.addAll(groups);
+        return groups;
+      }
+    } catch (e) {
+      debugPrint('[SupabaseService] fetchUserGroups RPC fallback: $e');
+      try {
+        final res = await client
+            .from('group_members')
+            .select('group_id, role, groups(*)')
+            .eq('user_id', userId);
+        final List<ExpenseGroup> groups = [];
+        for (final item in (res as List)) {
+          if (item['groups'] != null) {
+            final gData = Map<String, dynamic>.from(item['groups'] as Map);
+            final members = await client
+                .from('group_members')
+                .select('id')
+                .eq('group_id', gData['id']);
+            gData['members_count'] = members.length;
+            groups.add(ExpenseGroup.fromJson(gData));
+          }
+        }
+        if (groups.isNotEmpty) {
+          _localGroups.clear();
+          _localGroups.addAll(groups);
+          return groups;
+        }
+      } catch (e2) {
+        debugPrint('[SupabaseService] fetchUserGroups table fallback: $e2');
+      }
+    }
+
+    if (_localGroups.isNotEmpty) return List.unmodifiable(_localGroups);
+    if (_localGroup != null) return [_localGroup!];
+    return [];
+  }
+
+  Future<void> switchActiveGroup(String? groupId) async {
+    final userId = currentUser?.id ?? 'demo-user-id';
+    try {
+      await client
+          .from('profiles')
+          .update({'group_id': groupId})
+          .eq('id', userId);
+    } catch (e) {
+      debugPrint('[SupabaseService] switchActiveGroup fallback: $e');
+    }
+    if (_localProfile != null) {
+      _localProfile = _localProfile!.copyWith(groupId: groupId);
+    }
+    if (groupId != null) {
+      _localGroup = _localGroups.where((g) => g.id == groupId).firstOrNull ??
+          _localGroup;
+    } else {
+      _localGroup = null;
+    }
+  }
 
   Future<ExpenseGroup?> fetchGroup(String groupId) async {
     try {
@@ -110,15 +181,19 @@ class SupabaseService {
             .from('group_members')
             .select('id')
             .eq('group_id', groupId);
-        
+
         final data = Map<String, dynamic>.from(response);
         data['members_count'] = members.length;
-        return ExpenseGroup.fromJson(data);
+        final grp = ExpenseGroup.fromJson(data);
+        if (!_localGroups.any((g) => g.id == grp.id)) {
+          _localGroups.add(grp);
+        }
+        return grp;
       }
     } catch (e) {
       debugPrint('[SupabaseService] fetchGroup fallback: $e');
     }
-    return _localGroup;
+    return _localGroups.where((g) => g.id == groupId).firstOrNull ?? _localGroup;
   }
 
   Future<ExpenseGroup> createGroup(String name) async {
@@ -153,10 +228,19 @@ class SupabaseService {
       // Update profile
       await client.from('profiles').update({'group_id': created.id}).eq('id', userId);
 
+      if (!_localGroups.any((g) => g.id == created.id)) {
+        _localGroups.add(created);
+      }
       _localGroup = created;
+      if (_localProfile != null) {
+        _localProfile = _localProfile!.copyWith(groupId: created.id);
+      }
       return created;
     } catch (e) {
       debugPrint('[SupabaseService] createGroup fallback: $e');
+      if (!_localGroups.any((g) => g.id == newGroup.id)) {
+        _localGroups.add(newGroup);
+      }
       _localGroup = newGroup;
       if (_localProfile != null) {
         _localProfile = _localProfile!.copyWith(groupId: newGroup.id);
@@ -173,28 +257,44 @@ class SupabaseService {
       );
 
       if (result != null && result['group_id'] != null) {
-        return await fetchGroup(result['group_id'] as String);
+        final grp = await fetchGroup(result['group_id'] as String);
+        if (grp != null) {
+          if (!_localGroups.any((g) => g.id == grp.id)) {
+            _localGroups.add(grp);
+          }
+          _localGroup = grp;
+          return grp;
+        }
       }
     } catch (e) {
       debugPrint('[SupabaseService] joinGroupByInvite fallback: $e');
     }
 
-    if (_localGroup != null && _localGroup!.inviteCode.toLowerCase() == inviteCode.trim().toLowerCase()) {
+    final target = _localGroups.where(
+      (g) => g.inviteCode.toLowerCase() == inviteCode.trim().toLowerCase(),
+    ).firstOrNull ?? _localGroup;
+
+    if (target != null && target.inviteCode.toLowerCase() == inviteCode.trim().toLowerCase()) {
       final userId = currentUser?.id ?? 'demo-user-id';
       if (_localProfile != null) {
-        _localProfile = _localProfile!.copyWith(groupId: _localGroup!.id);
+        _localProfile = _localProfile!.copyWith(groupId: target.id);
       }
-      if (!_localMembers.any((m) => m.userId == userId)) {
+      if (!_localMembers.any((m) => m.groupId == target.id && m.userId == userId)) {
         _localMembers.add(GroupMember(
           id: 'mem-${DateTime.now().millisecondsSinceEpoch}',
-          groupId: _localGroup!.id,
+          groupId: target.id,
           userId: userId,
-          role: 'viewer', // Pending Admin Review
-          displayName: _localProfile?.displayName ?? (currentUser?.email?.split('@').first ?? 'User'),
+          role: target.adminId == userId ? 'admin' : 'member',
+          displayName: _localProfile?.displayName ??
+              (currentUser?.email?.split('@').first ?? 'User'),
           joinedAt: DateTime.now(),
         ));
       }
-      return _localGroup;
+      _localGroup = target;
+      if (!_localGroups.any((g) => g.id == target.id)) {
+        _localGroups.add(target);
+      }
+      return target;
     }
     return null;
   }
@@ -205,14 +305,16 @@ class SupabaseService {
           .from('group_members')
           .update({'role': 'member'})
           .match({'group_id': groupId, 'user_id': memberUserId});
-      final idx = _localMembers.indexWhere((m) => m.groupId == groupId && m.userId == memberUserId);
+      final idx = _localMembers.indexWhere(
+          (m) => m.groupId == groupId && m.userId == memberUserId);
       if (idx != -1) {
         _localMembers[idx] = _localMembers[idx].copyWith(role: 'member');
       }
       return true;
     } catch (e) {
       debugPrint('[SupabaseService] approveGroupMember: $e');
-      final idx = _localMembers.indexWhere((m) => m.groupId == groupId && m.userId == memberUserId);
+      final idx = _localMembers.indexWhere(
+          (m) => m.groupId == groupId && m.userId == memberUserId);
       if (idx != -1) {
         _localMembers[idx] = _localMembers[idx].copyWith(role: 'member');
         return true;
@@ -227,7 +329,8 @@ class SupabaseService {
         'group_id': groupId,
         'user_id': memberUserId,
       });
-      _localMembers.removeWhere((m) => m.groupId == groupId && m.userId == memberUserId);
+      _localMembers.removeWhere(
+          (m) => m.groupId == groupId && m.userId == memberUserId);
       return true;
     } catch (e) {
       debugPrint('[SupabaseService] removeGroupMember: $e');
@@ -254,14 +357,15 @@ class SupabaseService {
         groupId: groupId,
         userId: userId,
         role: 'admin',
-        displayName: _localProfile?.displayName ?? (currentUser?.email?.split('@').first ?? 'User'),
+        displayName: _localProfile?.displayName ??
+            (currentUser?.email?.split('@').first ?? 'User'),
         joinedAt: DateTime.now().subtract(const Duration(days: 15)),
       ));
     }
-    return _localMembers;
+    return _localMembers.where((m) => m.groupId == groupId).toList();
   }
 
-  Future<void> leaveGroup(String groupId) async {
+  Future<String?> leaveGroup(String groupId) async {
     final userId = currentUser?.id ?? 'demo-user-id';
     String? nextGroupId;
     try {
@@ -269,55 +373,374 @@ class SupabaseService {
         'group_id': groupId,
         'user_id': userId,
       });
-      
+
       final remaining = await client
           .from('group_members')
           .select('group_id')
           .eq('user_id', userId)
           .limit(1);
-          
+
       if (remaining.isNotEmpty) {
         nextGroupId = remaining[0]['group_id'] as String;
-        await client.from('profiles').update({'group_id': nextGroupId}).eq('id', userId);
+        await client
+            .from('profiles')
+            .update({'group_id': nextGroupId})
+            .eq('id', userId);
       } else {
-        await client.from('profiles').update({'group_id': null}).eq('id', userId);
+        await client
+            .from('profiles')
+            .update({'group_id': null})
+            .eq('id', userId);
       }
     } catch (e) {
       debugPrint('[SupabaseService] leaveGroup fallback: $e');
     }
-    
+
+    _localGroups.removeWhere((g) => g.id == groupId);
+    nextGroupId ??= _localGroups.firstOrNull?.id;
+
     if (_localProfile != null) {
       _localProfile = _localProfile!.copyWith(groupId: nextGroupId);
     }
-    _localGroup = null;
+    _localGroup = _localGroups.where((g) => g.id == nextGroupId).firstOrNull;
+    return nextGroupId;
   }
 
-  Future<void> deleteGroup(String groupId) async {
+  Future<String?> deleteGroup(String groupId) async {
     final userId = currentUser?.id ?? 'demo-user-id';
     String? nextGroupId;
     try {
       await client.from('groups').delete().eq('id', groupId);
-      
+
       final remaining = await client
           .from('group_members')
           .select('group_id')
           .eq('user_id', userId)
           .limit(1);
-          
+
       if (remaining.isNotEmpty) {
         nextGroupId = remaining[0]['group_id'] as String;
-        await client.from('profiles').update({'group_id': nextGroupId}).eq('id', userId);
+        await client
+            .from('profiles')
+            .update({'group_id': nextGroupId})
+            .eq('id', userId);
       } else {
-        await client.from('profiles').update({'group_id': null}).eq('id', userId);
+        await client
+            .from('profiles')
+            .update({'group_id': null})
+            .eq('id', userId);
       }
     } catch (e) {
       debugPrint('[SupabaseService] deleteGroup fallback: $e');
     }
-    
+
+    _localGroups.removeWhere((g) => g.id == groupId);
+    nextGroupId ??= _localGroups.firstOrNull?.id;
+
     if (_localProfile != null && _localProfile!.groupId == groupId) {
       _localProfile = _localProfile!.copyWith(groupId: nextGroupId);
     }
-    _localGroup = null;
+    _localGroup = _localGroups.where((g) => g.id == nextGroupId).firstOrNull;
+    return nextGroupId;
+  }
+
+  // ---------------------------------------------------------------------------
+  // GROUP INVITATIONS & EMAIL DISPATCH
+  // ---------------------------------------------------------------------------
+
+  Future<GroupInvitation?> createGroupInvitation({
+    required String groupId,
+    required String email,
+    String role = 'member',
+  }) async {
+    final userId = currentUser?.id ?? 'demo-user-id';
+    try {
+      final res = await client.rpc('create_group_invitation', params: {
+        'p_group_id': groupId,
+        'p_email': email.trim().toLowerCase(),
+        'p_role': role,
+      });
+
+      if (res != null && res['success'] == true) {
+        final group = await fetchGroup(groupId);
+        final inv = GroupInvitation(
+          id: res['invitation_id'] as String? ?? 'inv-${DateTime.now().millisecondsSinceEpoch}',
+          groupId: groupId,
+          groupName: group?.name ?? 'Shared Group',
+          inviterId: userId,
+          inviterName: _localProfile?.displayName ?? (currentUser?.email?.split('@').first ?? 'Member'),
+          email: res['email'] as String? ?? email.trim().toLowerCase(),
+          role: res['role'] as String? ?? role,
+          token: res['token'] as String,
+          status: res['status'] as String? ?? 'pending',
+          expiresAt: res['expires_at'] != null
+              ? DateTime.parse(res['expires_at'] as String)
+              : DateTime.now().add(const Duration(days: 7)),
+          createdAt: DateTime.now(),
+        );
+        _localInvitations.insert(0, inv);
+        return inv;
+      }
+    } catch (e) {
+      debugPrint('[SupabaseService] createGroupInvitation RPC fallback: $e');
+    }
+
+    // Demo/Offline Fallback
+    final now = DateTime.now();
+    final group = _localGroups.where((g) => g.id == groupId).firstOrNull ?? _localGroup;
+    final token = 'tok_${now.millisecondsSinceEpoch}_${email.hashCode.abs().toRadixString(16)}';
+    final inv = GroupInvitation(
+      id: 'inv-${now.millisecondsSinceEpoch}',
+      groupId: groupId,
+      groupName: group?.name ?? 'My Group',
+      inviterId: userId,
+      inviterName: _localProfile?.displayName ?? (currentUser?.email?.split('@').first ?? 'Member'),
+      email: email.trim().toLowerCase(),
+      role: role,
+      token: token,
+      status: 'pending',
+      expiresAt: now.add(const Duration(days: 7)),
+      createdAt: now,
+    );
+    _localInvitations.insert(0, inv);
+    return inv;
+  }
+
+  Future<bool> sendGroupInviteEmail({
+    required GroupInvitation invitation,
+    String? inviteCode,
+    String? inviterName,
+  }) async {
+    return await EmailService.instance.sendGroupInvitation(
+      toEmail: invitation.email,
+      groupName: invitation.groupName ?? 'Shared Household Group',
+      inviterName: inviterName ?? invitation.inviterName ?? 'A member',
+      token: invitation.token,
+      inviteCode: inviteCode,
+    );
+  }
+
+  Future<List<GroupInvitation>> fetchGroupInvitations(String groupId) async {
+    try {
+      final res = await client
+          .from('group_invitations')
+          .select('*, groups(name), profiles:inviter_id(display_name)')
+          .eq('group_id', groupId)
+          .order('created_at', ascending: false);
+
+      return (res as List).map((item) {
+        final map = Map<String, dynamic>.from(item);
+        if (map['groups'] != null) {
+          map['group_name'] = map['groups']['name'];
+        }
+        if (map['profiles'] != null) {
+          map['inviter_name'] = map['profiles']['display_name'];
+        }
+        return GroupInvitation.fromJson(map);
+      }).toList();
+    } catch (e) {
+      debugPrint('[SupabaseService] fetchGroupInvitations fallback: $e');
+    }
+
+    return _localInvitations.where((i) => i.groupId == groupId).toList();
+  }
+
+  Future<bool> revokeGroupInvitation(String invitationId) async {
+    try {
+      await client
+          .from('group_invitations')
+          .update({'status': 'revoked'})
+          .eq('id', invitationId);
+    } catch (e) {
+      debugPrint('[SupabaseService] revokeGroupInvitation fallback: $e');
+    }
+
+    final idx = _localInvitations.indexWhere((i) => i.id == invitationId);
+    if (idx != -1) {
+      final old = _localInvitations[idx];
+      _localInvitations[idx] = GroupInvitation(
+        id: old.id,
+        groupId: old.groupId,
+        groupName: old.groupName,
+        inviterId: old.inviterId,
+        inviterName: old.inviterName,
+        email: old.email,
+        role: old.role,
+        token: old.token,
+        status: 'revoked',
+        expiresAt: old.expiresAt,
+        createdAt: old.createdAt,
+        acceptedAt: old.acceptedAt,
+      );
+      return true;
+    }
+    return false;
+  }
+
+  Future<Map<String, dynamic>?> getInvitationDetails(String token) async {
+    try {
+      final res = await client.rpc('get_invitation_details', params: {
+        'p_token': token.trim(),
+      });
+      if (res != null && res is Map) {
+        return Map<String, dynamic>.from(res);
+      }
+    } catch (e) {
+      debugPrint('[SupabaseService] getInvitationDetails fallback: $e');
+    }
+
+    final local = _localInvitations.where((i) => i.token == token.trim()).firstOrNull;
+    if (local != null) {
+      return {
+        'valid': true,
+        'invitation_id': local.id,
+        'group_id': local.groupId,
+        'group_name': local.groupName ?? _localGroup?.name ?? 'Group',
+        'inviter_name': local.inviterName ?? 'A member',
+        'email': local.email,
+        'role': local.role,
+        'status': local.status,
+        'expires_at': local.expiresAt.toIso8601String(),
+      };
+    }
+    return null;
+  }
+
+  Future<ExpenseGroup?> acceptGroupInvitation(String token) async {
+    try {
+      final res = await client.rpc('accept_group_invitation', params: {
+        'p_token': token.trim(),
+      });
+      if (res != null && res['group_id'] != null) {
+        final groupId = res['group_id'] as String;
+        final grp = await fetchGroup(groupId);
+        if (grp != null) {
+          if (!_localGroups.any((g) => g.id == grp.id)) {
+            _localGroups.add(grp);
+          }
+          _localGroup = grp;
+          if (_localProfile != null) {
+            _localProfile = _localProfile!.copyWith(groupId: grp.id);
+          }
+          return grp;
+        }
+      }
+    } catch (e) {
+      debugPrint('[SupabaseService] acceptGroupInvitation fallback: $e');
+    }
+
+    final local = _localInvitations.where((i) => i.token == token.trim()).firstOrNull;
+    if (local != null) {
+      if (local.isExpired) throw Exception('This invitation has expired');
+      if (local.status == 'accepted') throw Exception('This invitation has already been accepted');
+      if (local.status == 'revoked') throw Exception('This invitation has been revoked');
+
+      final userId = currentUser?.id ?? 'demo-user-id';
+      final grp = _localGroups.where((g) => g.id == local.groupId).firstOrNull ?? _localGroup;
+      if (grp != null) {
+        if (!_localMembers.any((m) => m.groupId == grp.id && m.userId == userId)) {
+          _localMembers.add(GroupMember(
+            id: 'mem-${DateTime.now().millisecondsSinceEpoch}',
+            groupId: grp.id,
+            userId: userId,
+            role: local.role,
+            displayName: _localProfile?.displayName ??
+                (currentUser?.email?.split('@').first ?? 'User'),
+            joinedAt: DateTime.now(),
+            invitedBy: local.inviterId,
+          ));
+        }
+        if (_localProfile != null) {
+          _localProfile = _localProfile!.copyWith(groupId: grp.id);
+        }
+        _localGroup = grp;
+        if (!_localGroups.any((g) => g.id == grp.id)) {
+          _localGroups.add(grp);
+        }
+        return grp;
+      }
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // SETTLEMENTS & PEER-TO-PEER PAYMENTS
+  // ---------------------------------------------------------------------------
+
+  Future<Settlement> recordSettlement({
+    required String groupId,
+    required String payeeId,
+    required double amount,
+    String? notes,
+  }) async {
+    final userId = currentUser?.id ?? 'demo-user-id';
+    try {
+      final res = await client.rpc('record_settlement', params: {
+        'p_group_id': groupId,
+        'p_payee_id': payeeId,
+        'p_amount': amount,
+        'p_notes': notes,
+      });
+
+      if (res != null && res['settlement_id'] != null) {
+        final settlement = Settlement(
+          id: res['settlement_id'] as String,
+          groupId: groupId,
+          payerId: userId,
+          payerName: _localProfile?.displayName ?? 'You',
+          payeeId: payeeId,
+          payeeName: _localMembers.where((m) => m.userId == payeeId).firstOrNull?.displayName ?? 'Member',
+          amount: amount,
+          date: DateTime.now(),
+          notes: notes,
+          createdAt: DateTime.now(),
+        );
+        _localSettlements.insert(0, settlement);
+        return settlement;
+      }
+    } catch (e) {
+      debugPrint('[SupabaseService] recordSettlement RPC fallback: $e');
+    }
+
+    final settlement = Settlement(
+      id: 'stl-${DateTime.now().millisecondsSinceEpoch}',
+      groupId: groupId,
+      payerId: userId,
+      payerName: _localProfile?.displayName ?? 'You',
+      payeeId: payeeId,
+      payeeName: _localMembers.where((m) => m.userId == payeeId).firstOrNull?.displayName ?? 'Member',
+      amount: amount,
+      date: DateTime.now(),
+      notes: notes,
+      createdAt: DateTime.now(),
+    );
+    _localSettlements.insert(0, settlement);
+    return settlement;
+  }
+
+  Future<List<Settlement>> fetchSettlements(String groupId) async {
+    try {
+      final res = await client
+          .from('settlements')
+          .select('*, payer:payer_id(display_name), payee:payee_id(display_name)')
+          .eq('group_id', groupId)
+          .order('date', ascending: false);
+
+      return (res as List).map((item) {
+        final map = Map<String, dynamic>.from(item);
+        if (map['payer'] != null) {
+          map['payer_name'] = map['payer']['display_name'];
+        }
+        if (map['payee'] != null) {
+          map['payee_name'] = map['payee']['display_name'];
+        }
+        return Settlement.fromJson(map);
+      }).toList();
+    } catch (e) {
+      debugPrint('[SupabaseService] fetchSettlements fallback: $e');
+    }
+
+    return _localSettlements.where((s) => s.groupId == groupId).toList();
   }
 
   // ---------------------------------------------------------------------------
@@ -331,13 +754,15 @@ class SupabaseService {
     DateTime? startDate,
     DateTime? endDate,
   }) async {
+    final currentUid = currentUser?.id ?? 'demo-user-id';
     try {
       var query = client.from('expenses').select('*, profiles(display_name)');
 
       if (isPersonal == true) {
         query = query.filter('group_id', 'is', null);
       } else if (groupId != null) {
-        query = query.eq('group_id', groupId);
+        // Fetch personal expenses of the user PLUS expenses of the active group
+        query = query.or('group_id.eq.$groupId,and(group_id.is.null,user_id.eq.$currentUid)');
       }
 
       if (category != null && category.isNotEmpty && category != 'All') {
@@ -365,7 +790,8 @@ class SupabaseService {
 
     return _localExpenses.where((exp) {
       if (isPersonal == true && !exp.isPersonal) return false;
-      if (groupId != null && exp.groupId != groupId) return false;
+      if (groupId != null && !exp.isPersonal && exp.groupId != groupId) return false;
+      if (exp.isPersonal && exp.userId != currentUid && currentUid != 'demo-user-id') return false;
       if (category != null && category.isNotEmpty && category != 'All' && exp.category != category) {
         return false;
       }

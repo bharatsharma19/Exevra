@@ -11,6 +11,7 @@ import 'package:expense_manager/models/expense_model.dart';
 import 'package:expense_manager/models/group_model.dart';
 import 'package:expense_manager/models/user_profile.dart';
 import 'package:expense_manager/providers/auth_provider.dart';
+import 'package:expense_manager/providers/expense_provider.dart';
 import 'package:expense_manager/providers/app_lock_provider.dart';
 import 'package:expense_manager/features/auth/screens/email_verification_screen.dart';
 import 'package:expense_manager/features/auth/screens/app_lock_screen.dart';
@@ -354,4 +355,385 @@ void main() {
       expect(AppConstants.keyBiometricsEnabled, 'app_biometrics_enabled');
     });
   });
+
+  group('10. Multi-Group Support & Data Isolation Tests', () {
+    test('A user can belong to multiple groups simultaneously', () {
+      final now = DateTime.now();
+      final group1 = ExpenseGroup(
+        id: 'grp-apartment',
+        name: 'Apartment 4B',
+        inviteCode: 'APT4B',
+        adminId: 'user-a',
+        createdAt: now,
+        membersCount: 3,
+      );
+      final group2 = ExpenseGroup(
+        id: 'grp-trip',
+        name: 'Iceland Roadtrip',
+        inviteCode: 'ICE2026',
+        adminId: 'user-b',
+        createdAt: now,
+        membersCount: 4,
+      );
+      final group3 = ExpenseGroup(
+        id: 'grp-project',
+        name: 'Startup Team',
+        inviteCode: 'START99',
+        adminId: 'user-a',
+        createdAt: now,
+        membersCount: 5,
+      );
+
+      final state = ExpenseState(
+        currentGroup: group1,
+        userGroups: [group1, group2, group3],
+      );
+
+      expect(state.userGroups.length, 3);
+      expect(state.currentGroup?.id, 'grp-apartment');
+      expect(state.userGroups.map((g) => g.id), containsAll(['grp-apartment', 'grp-trip', 'grp-project']));
+    });
+
+    test('Switching active group isolates group data while preserving personal expenses', () {
+      final now = DateTime.now();
+      final personalExp = Expense(
+        id: 'exp-personal-1',
+        userId: 'user-a',
+        groupId: null,
+        title: 'Morning Coffee',
+        amount: 5.50,
+        category: 'Food',
+        date: now,
+        isPersonal: true,
+        createdAt: now,
+        updatedAt: now,
+      );
+
+      final grp1Exp = Expense(
+        id: 'exp-grp1-1',
+        userId: 'user-a',
+        groupId: 'grp-1',
+        title: 'WiFi Bill',
+        amount: 60.00,
+        category: 'Bills',
+        date: now,
+        isPersonal: false,
+        createdAt: now,
+        updatedAt: now,
+      );
+
+      // State when active in Group 1
+      final stateGroup1 = ExpenseState(
+        expenses: [personalExp, grp1Exp],
+        currentGroup: ExpenseGroup(
+          id: 'grp-1',
+          name: 'Flatmates',
+          inviteCode: 'FLAT1',
+          adminId: 'user-a',
+          createdAt: now,
+          membersCount: 2,
+        ),
+      );
+
+      expect(stateGroup1.expenses.length, 2);
+      expect(stateGroup1.personalSpent, 5.50);
+      expect(stateGroup1.groupSpent, 60.00);
+
+      // When switched to personal only, group expenses are excluded from active state
+      final statePersonalOnly = ExpenseState(
+        expenses: [personalExp],
+        currentGroup: null,
+      );
+
+      expect(statePersonalOnly.expenses.length, 1);
+      expect(statePersonalOnly.personalSpent, 5.50);
+      expect(statePersonalOnly.groupSpent, 0.0);
+    });
+  });
+
+  group('11. Dynamic Split & Settlement Math Tests (2, 3, 4+ members)', () {
+    final now = DateTime.now();
+
+    test('Exact 2-member equal split debt calculation', () {
+      final members = [
+        GroupMember(id: 'm1', groupId: 'g1', userId: 'user-a', role: 'admin', displayName: 'Alice', joinedAt: now),
+        GroupMember(id: 'm2', groupId: 'g1', userId: 'user-b', role: 'member', displayName: 'Bob', joinedAt: now),
+      ];
+
+      // Alice pays 100 for groceries
+      final expenses = [
+        Expense(
+          id: 'e1',
+          userId: 'user-a',
+          groupId: 'g1',
+          title: 'Groceries',
+          amount: 100.0,
+          category: 'Food',
+          date: now,
+          isPersonal: false,
+          createdAt: now,
+          updatedAt: now,
+        ),
+      ];
+
+      final state = ExpenseState(
+        currentGroup: ExpenseGroup(id: 'g1', name: 'Test', inviteCode: 'T1', adminId: 'user-a', createdAt: now, membersCount: 2),
+        groupMembers: members,
+        expenses: expenses,
+      );
+
+      final debts = state.settlements;
+      expect(debts.length, 1);
+      expect(debts.first.fromUserId, 'user-b');
+      expect(debts.first.toUserId, 'user-a');
+      expect(debts.first.amount, 50.0);
+      expect(debts.first.fromUserName, 'Bob');
+      expect(debts.first.toUserName, 'Alice');
+    });
+
+    test('3-member dynamic split with fair remainder distribution and greedy matching', () {
+      final members = [
+        GroupMember(id: 'm1', groupId: 'g1', userId: 'user-a', role: 'admin', displayName: 'Alice', joinedAt: now),
+        GroupMember(id: 'm2', groupId: 'g1', userId: 'user-b', role: 'member', displayName: 'Bob', joinedAt: now),
+        GroupMember(id: 'm3', groupId: 'g1', userId: 'user-c', role: 'member', displayName: 'Charlie', joinedAt: now),
+      ];
+
+      // Total spent = 100.00
+      // 10000 cents ~/ 3 = 3333 cents with 1 cent remainder.
+      // Alice share: 33.34, Bob share: 33.33, Charlie share: 33.33.
+      // Alice paid 100.00 -> balance +66.66.
+      // Bob paid 0.00 -> balance -33.33.
+      // Charlie paid 0.00 -> balance -33.33.
+      final expenses = [
+        Expense(
+          id: 'e1',
+          userId: 'user-a',
+          groupId: 'g1',
+          title: 'Dinner',
+          amount: 100.0,
+          category: 'Food',
+          date: now,
+          isPersonal: false,
+          createdAt: now,
+          updatedAt: now,
+        ),
+      ];
+
+      final state = ExpenseState(
+        currentGroup: ExpenseGroup(id: 'g1', name: 'Trio', inviteCode: 'T3', adminId: 'user-a', createdAt: now, membersCount: 3),
+        groupMembers: members,
+        expenses: expenses,
+      );
+
+      final debts = state.settlements;
+      expect(debts.length, 2);
+      final totalSettled = debts.fold(0.0, (sum, d) => sum + d.amount);
+      expect(double.parse(totalSettled.toStringAsFixed(2)), 66.66);
+
+      for (final d in debts) {
+        expect(d.toUserId, 'user-a');
+        expect(d.toUserName, 'Alice');
+      }
+    });
+
+    test('4-member complex multi-payer split with minimized debt transactions', () {
+      final members = [
+        GroupMember(id: 'm1', groupId: 'g1', userId: 'user-a', role: 'admin', displayName: 'Alice', joinedAt: now),
+        GroupMember(id: 'm2', groupId: 'g1', userId: 'user-b', role: 'member', displayName: 'Bob', joinedAt: now),
+        GroupMember(id: 'm3', groupId: 'g1', userId: 'user-c', role: 'member', displayName: 'Charlie', joinedAt: now),
+        GroupMember(id: 'm4', groupId: 'g1', userId: 'user-d', role: 'member', displayName: 'Diana', joinedAt: now),
+      ];
+
+      // Alice paid 200, Bob paid 100, Charlie paid 60, Diana paid 0.
+      // Total = 360. Each share is 90.00.
+      // Alice: 200 - 90 = +110. (Creditor)
+      // Bob: 100 - 90 = +10. (Creditor)
+      // Charlie: 60 - 90 = -30. (Debtor)
+      // Diana: 0 - 90 = -90. (Debtor)
+      // Greedy match:
+      // Diana (owes 90) pays Alice (owed 110) 90.
+      // Alice is still owed 20.
+      // Charlie (owes 30) pays Alice (owed 20) 20.
+      // Charlie (owes 10) pays Bob (owed 10) 10.
+      // Total transactions = 3 (strictly minimized)!
+      final expenses = [
+        Expense(id: 'e1', userId: 'user-a', groupId: 'g1', title: 'Hotel', amount: 200.0, category: 'Travel', date: now, isPersonal: false, createdAt: now, updatedAt: now),
+        Expense(id: 'e2', userId: 'user-b', groupId: 'g1', title: 'Car Rental', amount: 100.0, category: 'Travel', date: now, isPersonal: false, createdAt: now, updatedAt: now),
+        Expense(id: 'e3', userId: 'user-c', groupId: 'g1', title: 'Snacks', amount: 60.0, category: 'Food', date: now, isPersonal: false, createdAt: now, updatedAt: now),
+      ];
+
+      final state = ExpenseState(
+        currentGroup: ExpenseGroup(id: 'g1', name: 'Roadtrip', inviteCode: 'ROAD', adminId: 'user-a', createdAt: now, membersCount: 4),
+        groupMembers: members,
+        expenses: expenses,
+      );
+
+      final debts = state.settlements;
+      expect(debts.length, 3);
+      final totalPaidToAlice = debts.where((d) => d.toUserId == 'user-a').fold(0.0, (sum, d) => sum + d.amount);
+      final totalPaidToBob = debts.where((d) => d.toUserId == 'user-b').fold(0.0, (sum, d) => sum + d.amount);
+      expect(totalPaidToAlice, 110.0);
+      expect(totalPaidToBob, 10.0);
+    });
+  });
+
+  group('12. Settlement Recording & Debt Offset Math Tests', () {
+    final now = DateTime.now();
+
+    test('Recorded settlement payment reduces or eliminates outstanding debt', () {
+      final members = [
+        GroupMember(id: 'm1', groupId: 'g1', userId: 'user-a', role: 'admin', displayName: 'Alice', joinedAt: now),
+        GroupMember(id: 'm2', groupId: 'g1', userId: 'user-b', role: 'member', displayName: 'Bob', joinedAt: now),
+      ];
+
+      // Alice paid 100. Bob owes 50.
+      final expenses = [
+        Expense(id: 'e1', userId: 'user-a', groupId: 'g1', title: 'Electric Bill', amount: 100.0, category: 'Bills', date: now, isPersonal: false, createdAt: now, updatedAt: now),
+      ];
+
+      // Bob records a partial settlement payment of 30.00 to Alice
+      final settlementPartial = Settlement(
+        id: 's1',
+        groupId: 'g1',
+        payerId: 'user-b',
+        payerName: 'Bob',
+        payeeId: 'user-a',
+        payeeName: 'Alice',
+        amount: 30.0,
+        date: now,
+        notes: 'Bank transfer',
+        createdAt: now,
+      );
+
+      final stateWithPartial = ExpenseState(
+        currentGroup: ExpenseGroup(id: 'g1', name: 'Apartment', inviteCode: 'APT', adminId: 'user-a', createdAt: now, membersCount: 2),
+        groupMembers: members,
+        expenses: expenses,
+        settlementHistory: [settlementPartial],
+      );
+
+      final partialDebts = stateWithPartial.settlements;
+      expect(partialDebts.length, 1);
+      expect(partialDebts.first.amount, 20.0);
+
+      // Now Bob records the remaining 20.00
+      final settlementFull = Settlement(
+        id: 's2',
+        groupId: 'g1',
+        payerId: 'user-b',
+        payerName: 'Bob',
+        payeeId: 'user-a',
+        payeeName: 'Alice',
+        amount: 20.0,
+        date: now,
+        notes: 'Cash',
+        createdAt: now,
+      );
+
+      final stateSettled = ExpenseState(
+        currentGroup: ExpenseGroup(id: 'g1', name: 'Apartment', inviteCode: 'APT', adminId: 'user-a', createdAt: now, membersCount: 2),
+        groupMembers: members,
+        expenses: expenses,
+        settlementHistory: [settlementFull, settlementPartial],
+      );
+
+      expect(stateSettled.settlements, isEmpty);
+    });
+  });
+
+  group('13. Group Invitations & Cryptographic Tokens Tests', () {
+    final now = DateTime.now();
+
+    test('GroupInvitation model serialization and active state check', () {
+      final inv = GroupInvitation(
+        id: 'inv-101',
+        groupId: 'grp-test',
+        groupName: 'Fintech Squad',
+        inviterId: 'user-a',
+        inviterName: 'Alice',
+        email: 'bob@example.com',
+        role: 'member',
+        token: 'cryptosecuretoken1234567890',
+        status: 'pending',
+        expiresAt: now.add(const Duration(days: 7)),
+        createdAt: now,
+      );
+
+      expect(inv.isExpired, isFalse);
+      expect(inv.status, 'pending');
+      expect(inv.email, 'bob@example.com');
+      expect(inv.role, 'member');
+
+      final json = inv.toJson();
+      expect(json['token'], 'cryptosecuretoken1234567890');
+      expect(json['status'], 'pending');
+
+      final deserialized = GroupInvitation.fromJson(json);
+      expect(deserialized.id, 'inv-101');
+      expect(deserialized.groupName, 'Fintech Squad');
+      expect(deserialized.token, 'cryptosecuretoken1234567890');
+    });
+
+    test('GroupInvitation accurately identifies expired invitations', () {
+      final expiredInv = GroupInvitation(
+        id: 'inv-expired',
+        groupId: 'grp-test',
+        inviterId: 'user-a',
+        email: 'charlie@example.com',
+        role: 'member',
+        token: 'expiredtoken123',
+        status: 'pending',
+        expiresAt: now.subtract(const Duration(hours: 1)),
+        createdAt: now.subtract(const Duration(days: 8)),
+      );
+
+      expect(expiredInv.isExpired, isTrue);
+    });
+  });
+
+  group('14. Personal Payments vs Group Expenses Outflow Tests', () {
+    final now = DateTime.now();
+
+    test('Accurately distinguishes personal payment from shared group expense', () {
+      final personalPayment = Expense(
+        id: 'p1',
+        userId: 'user-a',
+        groupId: null,
+        title: 'Gym Subscription',
+        amount: 45.0,
+        category: 'Health',
+        date: now,
+        isPersonal: true,
+        createdAt: now,
+        updatedAt: now,
+      );
+
+      final groupExpense = Expense(
+        id: 'g1',
+        userId: 'user-b',
+        groupId: 'grp-1',
+        title: 'Dinner for 4',
+        amount: 200.0,
+        category: 'Food',
+        date: now,
+        isPersonal: false,
+        createdAt: now,
+        updatedAt: now,
+      );
+
+      final state = ExpenseState(
+        expenses: [personalPayment, groupExpense],
+      );
+
+      expect(state.personalSpent, 45.0);
+      expect(state.groupSpent, 200.0);
+      expect(state.totalSpent, 245.0);
+
+      // User A out of pocket spent is only 45.0, because the 200 was paid out of pocket by User B!
+      expect(state.userTotalOutflow('user-a'), 45.0);
+      // User B out of pocket spent is 200.0
+      expect(state.userTotalOutflow('user-b'), 200.0);
+    });
+  });
 }
+

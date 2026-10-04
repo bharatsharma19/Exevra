@@ -89,7 +89,26 @@ final routerProvider = Provider<GoRouter>((ref) {
           loc == '/forgot-password' ||
           loc == '/reset-password';
 
+      // Routes that an already authenticated & verified user should NOT stay on
+      final isAuthScreenToExit =
+          loc == '/login' ||
+          loc == '/register' ||
+          loc == '/phone-auth' ||
+          loc == '/forgot-password';
+
       final isInviteRoute = loc.startsWith('/invite');
+
+      bool isValidReturnTo(String? path) {
+        if (path == null || path.trim().isEmpty) return false;
+        final trimmed = path.trim();
+        // Prevent open redirect to external domains: must start with / and not //
+        return trimmed.startsWith('/') &&
+            !trimmed.startsWith('//') &&
+            !trimmed.contains('\\');
+      }
+
+      final rawReturnTo = state.uri.queryParameters['returnTo'];
+      final safeReturnTo = isValidReturnTo(rawReturnTo) ? rawReturnTo! : null;
 
       // 1. Not authenticated: send to /login unless already on an auth route or invite route
       if (!isAuth && !isAuthRoute && !isInviteRoute) {
@@ -98,22 +117,20 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // 2. Authenticated but unverified: redirect to /verify-email (except invite route to allow viewing)
       if (isAuth && !isVerified) {
-        if (loc != '/verify-email' && !isInviteRoute) {
-          final returnTo = state.uri.queryParameters['returnTo'];
-          if (returnTo != null && returnTo.isNotEmpty) {
-            return '/verify-email?returnTo=${Uri.encodeComponent(returnTo)}';
+        if (loc != '/verify-email' && !isInviteRoute && loc != '/reset-password') {
+          if (safeReturnTo != null) {
+            return '/verify-email?returnTo=${Uri.encodeComponent(safeReturnTo)}';
           }
           return '/verify-email';
         }
         return null;
       }
 
-      // 3. Authenticated & verified: do not stay on auth routes or verify-email
-      if (isAuth && isVerified && (isAuthRoute || loc == '/verify-email')) {
-        // If there's a returnTo parameter (e.g. from invite), go there instead
-        final returnTo = state.uri.queryParameters['returnTo'];
-        if (returnTo != null && returnTo.isNotEmpty) {
-          return returnTo;
+      // 3. Authenticated & verified: exit auth entry screens
+      // NOTE: /reset-password is purposefully excluded so users recovering passwords can submit new password!
+      if (isAuth && isVerified && (isAuthScreenToExit || loc == '/verify-email')) {
+        if (safeReturnTo != null) {
+          return safeReturnTo;
         }
         return '/dashboard';
       }

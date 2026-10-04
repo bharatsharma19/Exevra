@@ -23,6 +23,109 @@ class DashboardScreen extends ConsumerWidget {
     return 'Good Evening';
   }
 
+  void _showGroupSwitcher(BuildContext context, WidgetRef ref) {
+    AppHaptics.selection();
+    final expenseState = ref.read(expenseProvider);
+    final userGroups = expenseState.userGroups;
+    final currentGroupId = expenseState.currentGroup?.id;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return Container(
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.darkCard : AppColors.lightCard,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.white24 : Colors.black12,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Switch Active Group',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: CircleAvatar(
+                  backgroundColor: currentGroupId == null
+                      ? AppColors.primaryCyan
+                      : Colors.grey.withValues(alpha: 0.2),
+                  child: Icon(
+                    Icons.person_rounded,
+                    color: currentGroupId == null ? Colors.black : Colors.grey,
+                  ),
+                ),
+                title: const Text(
+                  'Personal Outflow Only',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                trailing: currentGroupId == null
+                    ? const Icon(Icons.check_rounded, color: AppColors.primaryCyan)
+                    : null,
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  ref.read(expenseProvider.notifier).switchGroup(null);
+                },
+              ),
+              if (userGroups.isNotEmpty) const Divider(),
+              ...userGroups.map((g) {
+                final isCurrent = g.id == currentGroupId;
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: CircleAvatar(
+                    backgroundColor: isCurrent
+                        ? AppColors.primaryViolet
+                        : Colors.grey.withValues(alpha: 0.2),
+                    child: Icon(
+                      Icons.groups_rounded,
+                      color: isCurrent ? Colors.white : Colors.grey,
+                    ),
+                  ),
+                  title: Text(g.name, style: const TextStyle(fontWeight: FontWeight.w700)),
+                  trailing: isCurrent
+                      ? const Icon(Icons.check_rounded, color: AppColors.primaryViolet)
+                      : null,
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    ref.read(expenseProvider.notifier).switchGroup(g.id);
+                  },
+                );
+              }),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(ctx).pop();
+                    context.push('/profile');
+                  },
+                  icon: const Icon(Icons.settings_outlined, size: 16),
+                  label: const Text('Manage Groups in Profile'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final authState = ref.watch(authNotifierProvider);
@@ -37,7 +140,8 @@ class DashboardScreen extends ConsumerWidget {
     final currency = profile?.currency ?? AppConstants.defaultCurrency;
     final group = expenseState.currentGroup;
 
-    final totalSpent = expenseState.totalSpent;
+    final currentUserId = authState.user?.id;
+    final totalSpent = expenseState.userTotalOutflow(currentUserId);
     final personalSpent = expenseState.personalSpent;
     final groupSpent = expenseState.groupSpent;
     final recentExpenses = expenseState.expenses.take(5).toList();
@@ -112,10 +216,7 @@ class DashboardScreen extends ConsumerWidget {
                         ),
                         // Group badge or avatar
                         GestureDetector(
-                          onTap: () {
-                            AppHaptics.selection();
-                            context.push('/profile');
-                          },
+                          onTap: () => _showGroupSwitcher(context, ref),
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                             decoration: BoxDecoration(
@@ -298,6 +399,107 @@ class DashboardScreen extends ConsumerWidget {
                         ),
                       ],
                     ).animate().fadeIn(delay: 250.ms),
+
+                    if (group != null && expenseState.settlements.isNotEmpty) ...[
+                      const SizedBox(height: 18),
+                      GlassCard(
+                        borderRadius: 20,
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Row(
+                                  children: [
+                                    Icon(
+                                      Icons.account_balance_wallet_rounded,
+                                      size: 18,
+                                      color: AppColors.primaryEmerald,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'Group Balances & Debts',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                GestureDetector(
+                                  onTap: () => context.push('/profile'),
+                                  child: const Text(
+                                    'Settle Up →',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.primaryCyan,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            ...expenseState.settlements.take(2).map((d) {
+                              final iOwe = d.fromUserId == currentUserId;
+                              final owedToMe = d.toUserId == currentUserId;
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      iOwe
+                                          ? Icons.arrow_circle_up_rounded
+                                          : (owedToMe
+                                              ? Icons.arrow_circle_down_rounded
+                                              : Icons.swap_horiz_rounded),
+                                      size: 16,
+                                      color: iOwe
+                                          ? AppColors.primaryRose
+                                          : (owedToMe
+                                              ? AppColors.primaryEmerald
+                                              : AppColors.primaryCyan),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        iOwe
+                                            ? 'You owe ${d.toUserName}'
+                                            : (owedToMe
+                                                ? '${d.fromUserName} owes you'
+                                                : '${d.fromUserName} owes ${d.toUserName}'),
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    Text(
+                                      CurrencyFormatter.format(
+                                        d.amount,
+                                        currencyCode: currency,
+                                      ),
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                        color: iOwe
+                                            ? AppColors.primaryRose
+                                            : (owedToMe
+                                                ? AppColors.primaryEmerald
+                                                : null),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }),
+                          ],
+                        ),
+                      ).animate().fadeIn(delay: 280.ms),
+                    ],
 
                     const SizedBox(height: 24),
 

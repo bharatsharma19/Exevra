@@ -38,6 +38,9 @@ class ExpenseState {
   final String? errorMessage;
   final ExpenseGroup? currentGroup;
   final List<GroupMember> groupMembers;
+  final List<ExpenseGroup> userGroups;
+  final List<Settlement> settlementHistory;
+  final List<GroupInvitation> pendingInvitations;
 
   const ExpenseState({
     this.expenses = const [],
@@ -46,6 +49,9 @@ class ExpenseState {
     this.errorMessage,
     this.currentGroup,
     this.groupMembers = const [],
+    this.userGroups = const [],
+    this.settlementHistory = const [],
+    this.pendingInvitations = const [],
   });
 
   List<Expense> get filteredExpenses {
@@ -58,7 +64,8 @@ class ExpenseState {
         return false;
       }
       // Category filter
-      if (filter.category != 'All' && item.category.toLowerCase() != filter.category.toLowerCase()) {
+      if (filter.category != 'All' &&
+          item.category.toLowerCase() != filter.category.toLowerCase()) {
         return false;
       }
       // Search query
@@ -85,6 +92,29 @@ class ExpenseState {
       .where((e) => !e.isPersonal)
       .fold(0.0, (sum, e) => sum + e.amount);
 
+  /// Computes the actual out-of-pocket money spent by the current user:
+  /// all personal and group expenses where the current user is the payer.
+  double userTotalOutflow(String? currentUserId) {
+    if (currentUserId == null) return totalSpent;
+    return expenses
+        .where((e) => e.userId == currentUserId)
+        .fold(0.0, (sum, e) => sum + e.amount);
+  }
+
+  double userPersonalSpent(String? currentUserId) {
+    if (currentUserId == null) return personalSpent;
+    return expenses
+        .where((e) => e.isPersonal && e.userId == currentUserId)
+        .fold(0.0, (sum, e) => sum + e.amount);
+  }
+
+  double userGroupSpent(String? currentUserId) {
+    if (currentUserId == null) return groupSpent;
+    return expenses
+        .where((e) => !e.isPersonal && e.userId == currentUserId)
+        .fold(0.0, (sum, e) => sum + e.amount);
+  }
+
   bool canUserAddGroupExpenses(String? userId) {
     if (userId == null || currentGroup == null) return false;
     if (currentGroup!.adminId == userId) return true;
@@ -103,74 +133,104 @@ class ExpenseState {
   List<GroupMember> get pendingReviewMembers =>
       groupMembers.where((m) => m.isViewerOnly).toList();
 
+  /// Calculates dynamic debts among all group members using integer-cent math,
+  /// remainder distribution, recorded settlement offsets, and greedy minimization.
   List<SettlementDebt> get settlements {
-    if (currentGroup == null || groupMembers.isEmpty) return [];
+    if (currentGroup == null || groupMembers.length < 2) return [];
 
     final groupExpenses = expenses.where((e) => !e.isPersonal).toList();
-    if (groupExpenses.isEmpty) return [];
+    if (groupExpenses.isEmpty && settlementHistory.isEmpty) return [];
 
-    double totalSpent = 0.0;
-    final balances = <String, double>{};
-    for (var m in groupMembers) {
-      balances[m.userId] = 0.0;
-    }
+    final memberNameMap = <String, String>{
+      for (final m in groupMembers)
+        m.userId: (m.displayName != null && m.displayName!.trim().isNotEmpty)
+            ? m.displayName!.trim()
+            : 'Member',
+    };
 
-    for (var expense in groupExpenses) {
-      final amount = expense.amount;
+    // Initialize balance in integer cents for each member
+    final balancesInCents = <String, int>{
+      for (final m in groupMembers) m.userId: 0,
+    };
+
+    // 1. Credit payers with their out-of-pocket payment
+    int totalGroupCents = 0;
+    for (final expense in groupExpenses) {
+      final cents = (expense.amount * 100).round();
       final payer = expense.userId;
-      if (!balances.containsKey(payer)) {
-        balances[payer] = 0.0;
-      }
-      balances[payer] = balances[payer]! + amount;
-      totalSpent += amount;
+      balancesInCents[payer] = (balancesInCents[payer] ?? 0) + cents;
+      totalGroupCents += cents;
     }
 
+    // 2. Deduct fair share evenly across all members with fair remainder distribution
     final memberCount = groupMembers.length;
-    int totalCents = (totalSpent * 100).round();
-    int splitCents = totalCents ~/ memberCount;
-    int remainder = totalCents % memberCount;
+    if (memberCount > 0 && totalGroupCents > 0) {
+      final fairShareCents = totalGroupCents ~/ memberCount;
+      final remainderCents = totalGroupCents % memberCount;
 
-    for (var i = 0; i < memberCount; i++) {
-      final m = groupMembers[i].userId;
-      int toDeduct = splitCents + (i < remainder ? 1 : 0);
-      balances[m] = balances[m]! - (toDeduct / 100.0);
+      for (var idx = 0; idx < memberCount; idx++) {
+        final userId = groupMembers[idx].userId;
+        final share = fairShareCents + (idx < remainderCents ? 1 : 0);
+        balancesInCents[userId] = (balancesInCents[userId] ?? 0) - share;
+      }
     }
 
-    final debtors = <String, double>{};
-    final creditors = <String, double>{};
+    // 3. Adjust balances with recorded settlements (payer credited, receiver debited)
+    for (final settlement in settlementHistory) {
+      final sCents = (settlement.amount * 100).round();
+      balancesInCents[settlement.payerId] =
+          (balancesInCents[settlement.payerId] ?? 0) + sCents;
+      balancesInCents[settlement.payeeId] =
+          (balancesInCents[settlement.payeeId] ?? 0) - sCents;
+    }
 
-    balances.forEach((userId, balance) {
-      final b = double.parse(balance.toStringAsFixed(2));
-      if (b < 0) {
-        debtors[userId] = -b;
-      } else if (b > 0) {
-        creditors[userId] = b;
+    // 4. Partition into debtors and creditors
+    final debtors = <String, int>{};
+    final creditors = <String, int>{};
+
+    balancesInCents.forEach((userId, balanceCents) {
+      if (balanceCents < 0) {
+        debtors[userId] = -balanceCents;
+      } else if (balanceCents > 0) {
+        creditors[userId] = balanceCents;
       }
     });
 
+    // 5. Greedily match largest debtor with largest creditor to minimize transactions
+    final debtorKeys = debtors.keys.toList()
+      ..sort((a, b) => debtors[b]!.compareTo(debtors[a]!));
+    final creditorKeys = creditors.keys.toList()
+      ..sort((a, b) => creditors[b]!.compareTo(creditors[a]!));
+
     final List<SettlementDebt> debts = [];
-    final debtorKeys = debtors.keys.toList();
-    final creditorKeys = creditors.keys.toList();
+    int dIdx = 0;
+    int cIdx = 0;
 
-    int i = 0, j = 0;
-    while (i < debtorKeys.length && j < creditorKeys.length) {
-      final debtor = debtorKeys[i];
-      final creditor = creditorKeys[j];
+    while (dIdx < debtorKeys.length && cIdx < creditorKeys.length) {
+      final debtor = debtorKeys[dIdx];
+      final creditor = creditorKeys[cIdx];
 
-      final dAmount = debtors[debtor]!;
-      final cAmount = creditors[creditor]!;
+      final dCents = debtors[debtor]!;
+      final cCents = creditors[creditor]!;
+      final minCents = (dCents < cCents) ? dCents : cCents;
 
-      final min = (dAmount < cAmount) ? dAmount : cAmount;
-
-      if (min > 0) {
-        debts.add(SettlementDebt(fromUserId: debtor, toUserId: creditor, amount: min));
+      if (minCents > 0) {
+        debts.add(
+          SettlementDebt(
+            fromUserId: debtor,
+            toUserId: creditor,
+            amount: minCents / 100.0,
+            fromUserName: memberNameMap[debtor] ?? 'Member',
+            toUserName: memberNameMap[creditor] ?? 'Member',
+          ),
+        );
       }
 
-      debtors[debtor] = double.parse((dAmount - min).toStringAsFixed(2));
-      creditors[creditor] = double.parse((cAmount - min).toStringAsFixed(2));
+      debtors[debtor] = dCents - minCents;
+      creditors[creditor] = cCents - minCents;
 
-      if (debtors[debtor]! <= 0) i++;
-      if (creditors[creditor]! <= 0) j++;
+      if (debtors[debtor]! <= 0) dIdx++;
+      if (creditors[creditor]! <= 0) cIdx++;
     }
 
     return debts;
@@ -183,14 +243,22 @@ class ExpenseState {
     Object? errorMessage = const Object(),
     ExpenseGroup? currentGroup,
     List<GroupMember>? groupMembers,
+    List<ExpenseGroup>? userGroups,
+    List<Settlement>? settlementHistory,
+    List<GroupInvitation>? pendingInvitations,
   }) {
     return ExpenseState(
       expenses: expenses ?? this.expenses,
       filter: filter ?? this.filter,
       isLoading: isLoading ?? this.isLoading,
-      errorMessage: errorMessage == const Object() ? this.errorMessage : errorMessage as String?,
+      errorMessage: errorMessage == const Object()
+          ? this.errorMessage
+          : errorMessage as String?,
       currentGroup: currentGroup ?? this.currentGroup,
       groupMembers: groupMembers ?? this.groupMembers,
+      userGroups: userGroups ?? this.userGroups,
+      settlementHistory: settlementHistory ?? this.settlementHistory,
+      pendingInvitations: pendingInvitations ?? this.pendingInvitations,
     );
   }
 }
@@ -203,26 +271,53 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
     loadAll();
   }
 
-  Future<void> loadAll() async {
+  Future<void> loadAll({String? preferredGroupId}) async {
     state = state.copyWith(isLoading: true, errorMessage: null);
     try {
-      state = state.copyWith(errorMessage: null);
       final authState = _ref.read(authNotifierProvider);
-      final groupId = authState.profile?.groupId;
 
-      final expenses = await _service.fetchExpenses(groupId: groupId);
+      // 1. Fetch all groups the current user belongs to
+      final userGroups = await _service.fetchUserGroups();
+
+      // 2. Determine active group ID
+      String? activeGroupId;
+      if (preferredGroupId != null &&
+          userGroups.any((g) => g.id == preferredGroupId)) {
+        activeGroupId = preferredGroupId;
+      } else if (authState.profile?.groupId != null &&
+          userGroups.any((g) => g.id == authState.profile!.groupId)) {
+        activeGroupId = authState.profile!.groupId;
+      } else if (userGroups.isNotEmpty) {
+        activeGroupId = userGroups.first.id;
+      }
+
+      // 3. Keep profile synchronized if active group changed
+      if (activeGroupId != authState.profile?.groupId) {
+        _ref.read(authNotifierProvider.notifier).setActiveGroupId(activeGroupId);
+      }
+
+      // 4. Fetch expenses: includes both user's personal expenses and active group's expenses
+      final expenses = await _service.fetchExpenses(groupId: activeGroupId);
 
       ExpenseGroup? group;
       List<GroupMember> members = [];
-      if (groupId != null) {
-        group = await _service.fetchGroup(groupId);
-        members = await _service.fetchGroupMembers(groupId);
+      List<GroupInvitation> invitations = [];
+      List<Settlement> settlements = [];
+
+      if (activeGroupId != null) {
+        group = await _service.fetchGroup(activeGroupId);
+        members = await _service.fetchGroupMembers(activeGroupId);
+        invitations = await _service.fetchGroupInvitations(activeGroupId);
+        settlements = await _service.fetchSettlements(activeGroupId);
       }
 
       state = state.copyWith(
         expenses: expenses,
         currentGroup: group,
         groupMembers: members,
+        userGroups: userGroups,
+        pendingInvitations: invitations,
+        settlementHistory: settlements,
         isLoading: false,
       );
     } catch (e) {
@@ -269,7 +364,7 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       AppHaptics.light();
       final auth = _ref.read(authNotifierProvider);
       final userId = auth.user?.id ?? 'demo-user-id';
-      final groupId = isGroup ? auth.profile?.groupId : null;
+      final groupId = isGroup ? (state.currentGroup?.id ?? auth.profile?.groupId) : null;
 
       final newExpense = Expense(
         id: 'opt-${DateTime.now().millisecondsSinceEpoch}',
@@ -292,11 +387,16 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
 
       try {
         final created = await _service.createExpense(newExpense);
-        final updatedList = state.expenses.map((e) => e.id == newExpense.id ? created : e).toList();
+        final updatedList = state.expenses
+            .map((e) => e.id == newExpense.id ? created : e)
+            .toList();
         state = state.copyWith(expenses: updatedList);
         return true;
       } catch (e) {
-        state = state.copyWith(expenses: previousExpenses, errorMessage: e.toString());
+        state = state.copyWith(
+          expenses: previousExpenses,
+          errorMessage: e.toString(),
+        );
         AppHaptics.error();
         return false;
       }
@@ -314,23 +414,29 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       final auth = _ref.read(authNotifierProvider);
       final currentUserId = auth.user?.id ?? 'demo-user-id';
 
-      // Permission check: Any user who created an expense can edit it.
       if (!updatedExpense.canEdit(currentUserId) && currentUserId != 'demo-user-id') {
         throw Exception('Permission denied: You can only edit expenses you created.');
       }
 
       final previousExpenses = state.expenses;
-      final optimisticList = state.expenses.map((e) => e.id == updatedExpense.id ? updatedExpense : e).toList();
+      final optimisticList = state.expenses
+          .map((e) => e.id == updatedExpense.id ? updatedExpense : e)
+          .toList();
       state = state.copyWith(expenses: optimisticList);
       AppHaptics.success();
 
       try {
         final saved = await _service.updateExpense(updatedExpense);
-        final finalUpdatedList = state.expenses.map((e) => e.id == saved.id ? saved : e).toList();
+        final finalUpdatedList = state.expenses
+            .map((e) => e.id == saved.id ? saved : e)
+            .toList();
         state = state.copyWith(expenses: finalUpdatedList);
         return true;
       } catch (e) {
-        state = state.copyWith(expenses: previousExpenses, errorMessage: e.toString());
+        state = state.copyWith(
+          expenses: previousExpenses,
+          errorMessage: e.toString(),
+        );
         AppHaptics.error();
         return false;
       }
@@ -349,10 +455,8 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       final currentUserId = auth.user?.id ?? 'demo-user-id';
       final isGroupAdmin = state.currentGroup?.isAdmin(currentUserId) ?? true;
 
-      // Permission check:
-      // Personal: creator only
-      // Group: Group Admin ONLY
-      if (!expense.canDelete(currentUserId, isGroupAdmin) && currentUserId != 'demo-user-id') {
+      if (!expense.canDelete(currentUserId, isGroupAdmin) &&
+          currentUserId != 'demo-user-id') {
         throw Exception(
           expense.isPersonal
               ? 'Permission denied: Only the creator can delete personal expenses.'
@@ -361,7 +465,8 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       }
 
       final previousExpenses = state.expenses;
-      final optimisticList = state.expenses.where((e) => e.id != expenseId).toList();
+      final optimisticList =
+          state.expenses.where((e) => e.id != expenseId).toList();
       state = state.copyWith(expenses: optimisticList);
       AppHaptics.medium();
 
@@ -369,7 +474,10 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
         await _service.deleteExpense(expenseId);
         return true;
       } catch (e) {
-        state = state.copyWith(expenses: previousExpenses, errorMessage: e.toString());
+        state = state.copyWith(
+          expenses: previousExpenses,
+          errorMessage: e.toString(),
+        );
         AppHaptics.error();
         return false;
       }
@@ -381,28 +489,30 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
   }
 
   // ---------------------------------------------------------------------------
-  // GROUP MANAGEMENT
+  // MULTI-GROUP MANAGEMENT
   // ---------------------------------------------------------------------------
+
+  Future<void> switchGroup(String? groupId) async {
+    try {
+      state = state.copyWith(isLoading: true, errorMessage: null);
+      AppHaptics.selection();
+      await _service.switchActiveGroup(groupId);
+      await _ref.read(authNotifierProvider.notifier).setActiveGroupId(groupId);
+      await loadAll(preferredGroupId: groupId);
+      AppHaptics.success();
+    } catch (e) {
+      state = state.copyWith(isLoading: false, errorMessage: e.toString());
+      AppHaptics.error();
+    }
+  }
 
   Future<bool> createGroup(String name) async {
     try {
       state = state.copyWith(errorMessage: null);
       AppHaptics.light();
       final group = await _service.createGroup(name);
-      state = state.copyWith(
-        currentGroup: group,
-        groupMembers: [
-          GroupMember(
-            id: 'mem-admin',
-            groupId: group.id,
-            userId: group.adminId,
-            role: 'admin',
-            displayName: _ref.read(authNotifierProvider).profile?.displayName ?? 'You',
-            joinedAt: DateTime.now(),
-          )
-        ],
-      );
-      await loadAll();
+      await _ref.read(authNotifierProvider.notifier).setActiveGroupId(group.id);
+      await loadAll(preferredGroupId: group.id);
       AppHaptics.success();
       return true;
     } catch (e) {
@@ -418,8 +528,8 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       AppHaptics.light();
       final group = await _service.joinGroupByInvite(inviteCode);
       if (group != null) {
-        state = state.copyWith(currentGroup: group);
-        await loadAll();
+        await _ref.read(authNotifierProvider.notifier).setActiveGroupId(group.id);
+        await loadAll(preferredGroupId: group.id);
         AppHaptics.success();
         return true;
       } else {
@@ -432,13 +542,126 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
     }
   }
 
+  Future<bool> acceptInvitation(String token) async {
+    try {
+      state = state.copyWith(errorMessage: null);
+      AppHaptics.light();
+      final group = await _service.acceptGroupInvitation(token);
+      if (group != null) {
+        await _ref.read(authNotifierProvider.notifier).setActiveGroupId(group.id);
+        await loadAll(preferredGroupId: group.id);
+        AppHaptics.success();
+        return true;
+      } else {
+        throw Exception('Unable to accept invitation. It may be expired or already used.');
+      }
+    } catch (e) {
+      AppHaptics.error();
+      state = state.copyWith(errorMessage: e.toString());
+      return false;
+    }
+  }
+
+  Future<bool> inviteMemberByEmail({
+    required String email,
+    String role = 'member',
+  }) async {
+    final group = state.currentGroup;
+    if (group == null) return false;
+
+    try {
+      state = state.copyWith(errorMessage: null);
+      AppHaptics.light();
+      final auth = _ref.read(authNotifierProvider);
+      final inviterName = auth.profile?.displayName ?? 'A group member';
+
+      final invite = await _service.createGroupInvitation(
+        groupId: group.id,
+        email: email.trim(),
+        role: role,
+      );
+
+      if (invite != null) {
+        await _service.sendGroupInviteEmail(
+          invitation: invite,
+          inviteCode: group.inviteCode,
+          inviterName: inviterName,
+        );
+        final currentInvites = [
+          invite,
+          ...state.pendingInvitations.where((i) => i.id != invite.id),
+        ];
+        state = state.copyWith(pendingInvitations: currentInvites);
+        AppHaptics.success();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      state = state.copyWith(errorMessage: 'Failed to send invite: $e');
+      AppHaptics.error();
+      return false;
+    }
+  }
+
+  Future<bool> revokeInvitation(String invitationId) async {
+    try {
+      state = state.copyWith(errorMessage: null);
+      AppHaptics.medium();
+      final ok = await _service.revokeGroupInvitation(invitationId);
+      if (ok) {
+        state = state.copyWith(
+          pendingInvitations: state.pendingInvitations
+              .where((i) => i.id != invitationId)
+              .toList(),
+        );
+        AppHaptics.success();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      state = state.copyWith(errorMessage: 'Failed to revoke invite: $e');
+      AppHaptics.error();
+      return false;
+    }
+  }
+
+  Future<bool> recordSettlement({
+    required String toUserId,
+    required double amount,
+    String? notes,
+  }) async {
+    final group = state.currentGroup;
+    if (group == null) return false;
+
+    try {
+      state = state.copyWith(errorMessage: null);
+      AppHaptics.light();
+      final settlement = await _service.recordSettlement(
+        groupId: group.id,
+        payeeId: toUserId,
+        amount: amount,
+        notes: notes,
+      );
+
+      final updatedHistory = [settlement, ...state.settlementHistory];
+      state = state.copyWith(settlementHistory: updatedHistory);
+      AppHaptics.success();
+      return true;
+    } catch (e) {
+      state = state.copyWith(errorMessage: 'Failed to record payment: $e');
+      AppHaptics.error();
+      return false;
+    }
+  }
+
   Future<void> leaveGroup() async {
     if (state.currentGroup == null) return;
     try {
       state = state.copyWith(errorMessage: null);
       AppHaptics.light();
-      await _service.leaveGroup(state.currentGroup!.id);
-      state = state.copyWith(currentGroup: null, groupMembers: const []);
+      final groupId = state.currentGroup!.id;
+      await _service.leaveGroup(groupId);
+      await _ref.read(authNotifierProvider.notifier).setActiveGroupId(null);
       await loadAll();
       AppHaptics.medium();
     } catch (e) {
@@ -451,8 +674,9 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
     try {
       state = state.copyWith(errorMessage: null);
       AppHaptics.heavy();
-      await _service.deleteGroup(state.currentGroup!.id);
-      state = state.copyWith(currentGroup: null, groupMembers: const []);
+      final groupId = state.currentGroup!.id;
+      await _service.deleteGroup(groupId);
+      await _ref.read(authNotifierProvider.notifier).setActiveGroupId(null);
       await loadAll();
     } catch (e) {
       state = state.copyWith(errorMessage: e.toString());
@@ -484,6 +708,7 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
     }
     return false;
   }
+
   Future<bool> removeGroupMember(String memberUserId) async {
     final group = state.currentGroup;
     if (group == null) return false;
@@ -493,7 +718,9 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       final ok = await _service.removeGroupMember(group.id, memberUserId);
       if (ok) {
         state = state.copyWith(
-          groupMembers: state.groupMembers.where((m) => m.userId != memberUserId).toList(),
+          groupMembers: state.groupMembers
+              .where((m) => m.userId != memberUserId)
+              .toList(),
         );
         AppHaptics.medium();
         return true;
@@ -506,7 +733,8 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
   }
 }
 
-final expenseProvider = StateNotifierProvider<ExpenseNotifier, ExpenseState>((ref) {
+final expenseProvider =
+    StateNotifierProvider<ExpenseNotifier, ExpenseState>((ref) {
   final service = ref.watch(supabaseServiceProvider);
   return ExpenseNotifier(service, ref);
 });

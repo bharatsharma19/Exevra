@@ -121,7 +121,9 @@ class _AntigravityExpenseAppState extends ConsumerState<AntigravityExpenseApp>
       themeMode: themeMode,
       routerConfig: router,
       builder: (context, child) {
-        if (appLockState.isLocked && appLockState.isBiometricsEnabled) {
+        if (authState.isAuthenticated &&
+            appLockState.isLocked &&
+            appLockState.isBiometricsEnabled) {
           return Stack(
             children: [
               if (child != null) child,

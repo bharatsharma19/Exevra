@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/currency_formatter.dart';
 import '../../../core/utils/haptics.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/expense_provider.dart';
@@ -256,6 +257,372 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
   }
 
+  void _showInviteByEmailDialog() {
+    final emailController = TextEditingController();
+    String selectedRole = 'member';
+    bool isSending = false;
+    String? statusMessage;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.email_outlined, color: AppColors.primaryCyan),
+              SizedBox(width: 8),
+              Text('Invite by Email'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Send an official invitation link directly to the recipient\'s email address.',
+                  style: TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(
+                    labelText: 'Recipient Email',
+                    hintText: 'member@example.com',
+                    prefixIcon: Icon(Icons.alternate_email_rounded),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedRole,
+                  decoration: const InputDecoration(
+                    labelText: 'Role',
+                    prefixIcon: Icon(Icons.badge_outlined),
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'member',
+                      child: Text('Member (Add & Manage Expenses)'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'admin',
+                      child: Text('Admin (Full Control)'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'viewer',
+                      child: Text('Viewer (Read Only)'),
+                    ),
+                  ],
+                  onChanged: (val) {
+                    if (val != null) {
+                      setDialogState(() => selectedRole = val);
+                    }
+                  },
+                ),
+                if (statusMessage != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    statusMessage!,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.primaryEmerald,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+            isSending
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : ElevatedButton(
+                    onPressed: () async {
+                      final email = emailController.text.trim();
+                      if (email.isEmpty || !email.contains('@')) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Please enter a valid email address'),
+                            backgroundColor: AppColors.error,
+                          ),
+                        );
+                        return;
+                      }
+
+                      setDialogState(() {
+                        isSending = true;
+                        statusMessage = 'Dispatching invitation...';
+                      });
+
+                      final success = await ref
+                          .read(expenseProvider.notifier)
+                          .inviteMemberByEmail(
+                            email: email,
+                            role: selectedRole,
+                          );
+
+                      if (ctx.mounted) {
+                        Navigator.of(ctx).pop();
+                      }
+
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              success
+                                  ? 'Invitation dispatched to $email!'
+                                  : 'Could not send invitation. Please try again.',
+                            ),
+                            backgroundColor: success
+                                ? AppColors.primaryEmerald
+                                : AppColors.error,
+                          ),
+                        );
+                      }
+                    },
+                    child: const Text('Send Invitation'),
+                  ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSettleUpDialog({
+    String? prefilledToUserId,
+    double? prefilledAmount,
+  }) {
+    final expenseState = ref.read(expenseProvider);
+    final authState = ref.read(authNotifierProvider);
+    final currentUserId = authState.user?.id ?? 'demo-user-id';
+    final currency =
+        authState.profile?.currency ?? AppConstants.defaultCurrency;
+
+    final otherMembers = expenseState.groupMembers
+        .where((m) => m.userId != currentUserId)
+        .toList();
+
+    if (otherMembers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No other members in this group to settle with.'),
+          backgroundColor: AppColors.warning,
+        ),
+      );
+      return;
+    }
+
+    String selectedRecipientId =
+        (prefilledToUserId != null &&
+                otherMembers.any((m) => m.userId == prefilledToUserId))
+            ? prefilledToUserId
+            : otherMembers.first.userId;
+
+    final amountController = TextEditingController(
+      text: prefilledAmount != null && prefilledAmount > 0
+          ? prefilledAmount.toStringAsFixed(2)
+          : '',
+    );
+    final notesController = TextEditingController(text: 'Settled via Exevra');
+    bool isSubmitting = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.handshake_rounded, color: AppColors.primaryEmerald),
+              SizedBox(width: 8),
+              Text('Settle Up Debt'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Record a debt settlement payment between you and a group member.',
+                  style: TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedRecipientId,
+                  decoration: const InputDecoration(
+                    labelText: 'Paid To',
+                    prefixIcon: Icon(Icons.person_rounded),
+                  ),
+                  items: otherMembers.map((m) {
+                    final name = (m.displayName != null &&
+                            m.displayName!.trim().isNotEmpty)
+                        ? m.displayName!
+                        : 'Member';
+                    return DropdownMenuItem(value: m.userId, child: Text(name));
+                  }).toList(),
+                  onChanged: (val) {
+                    if (val != null) {
+                      setDialogState(() => selectedRecipientId = val);
+                    }
+                  },
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: amountController,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: 'Amount ($currency)',
+                    prefixIcon: const Icon(Icons.payments_rounded),
+                    hintText: '0.00',
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: notesController,
+                  decoration: const InputDecoration(
+                    labelText: 'Notes / Reference',
+                    prefixIcon: Icon(Icons.note_alt_outlined),
+                    hintText: 'e.g. Bank transfer, Cash, UPI',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+            isSubmitting
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : ElevatedButton(
+                    onPressed: () async {
+                      final amount =
+                          double.tryParse(amountController.text.trim());
+                      if (amount == null || amount <= 0) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Please enter a valid amount'),
+                            backgroundColor: AppColors.error,
+                          ),
+                        );
+                        return;
+                      }
+
+                      setDialogState(() => isSubmitting = true);
+
+                      final ok = await ref
+                          .read(expenseProvider.notifier)
+                          .recordSettlement(
+                            toUserId: selectedRecipientId,
+                            amount: amount,
+                            notes: notesController.text.trim(),
+                          );
+
+                      if (ctx.mounted) {
+                        Navigator.of(ctx).pop();
+                      }
+
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              ok
+                                  ? 'Settlement payment recorded successfully!'
+                                  : 'Failed to record settlement payment.',
+                            ),
+                            backgroundColor: ok
+                                ? AppColors.primaryEmerald
+                                : AppColors.error,
+                          ),
+                        );
+                      }
+                    },
+                    child: const Text('Record Payment'),
+                  ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showConfirmLeaveGroupDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Leave Group?'),
+        content: const Text(
+          'Are you sure you want to leave this group? You will no longer see shared expenses and balances for this group.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              ref.read(expenseProvider.notifier).leaveGroup();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Leave Group'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showConfirmDeleteGroupDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Group Permanently?'),
+        content: const Text(
+          'Are you sure you want to permanently delete this group? All shared expenses, debts, and member associations will be erased for everyone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              ref.read(expenseProvider.notifier).deleteGroup();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Delete Group'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showSignOutDialog() {
     AppHaptics.medium();
     showDialog(
@@ -470,6 +837,115 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ),
             const SizedBox(height: 10),
 
+            // 1. My Groups Multi-Group Switcher Card
+            GlassCard(
+              borderRadius: 20,
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.domain_rounded,
+                            size: 18,
+                            color: AppColors.primaryCyan,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'My Groups (${expenseState.userGroups.length})',
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          IconButton(
+                            tooltip: 'Create Group',
+                            icon: const Icon(
+                              Icons.add_circle_outline_rounded,
+                              size: 20,
+                              color: AppColors.primaryCyan,
+                            ),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: _showCreateGroupDialog,
+                          ),
+                          const SizedBox(width: 12),
+                          IconButton(
+                            tooltip: 'Join with Code',
+                            icon: const Icon(
+                              Icons.group_add_rounded,
+                              size: 20,
+                              color: AppColors.primaryViolet,
+                            ),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: _showJoinGroupDialog,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('Personal (No Group)'),
+                        selected: expenseState.currentGroup == null,
+                        avatar: expenseState.currentGroup == null
+                            ? const Icon(
+                                Icons.check_circle_rounded,
+                                size: 16,
+                                color: AppColors.primaryCyan,
+                              )
+                            : const Icon(
+                                Icons.person_rounded,
+                                size: 16,
+                                color: Colors.grey,
+                              ),
+                        onSelected: (_) => ref
+                            .read(expenseProvider.notifier)
+                            .switchGroup(null),
+                      ),
+                      ...expenseState.userGroups.map((g) {
+                        final isSelected =
+                            expenseState.currentGroup?.id == g.id;
+                        return ChoiceChip(
+                          label: Text(g.name),
+                          selected: isSelected,
+                          avatar: isSelected
+                              ? const Icon(
+                                  Icons.check_circle_rounded,
+                                  size: 16,
+                                  color: AppColors.primaryCyan,
+                                )
+                              : const Icon(
+                                  Icons.groups_rounded,
+                                  size: 16,
+                                  color: Colors.grey,
+                                ),
+                          onSelected: (_) => ref
+                              .read(expenseProvider.notifier)
+                              .switchGroup(g.id),
+                        );
+                      }),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 14),
+
             if (group != null) ...[
               GlassCard(
                 borderRadius: 20,
@@ -480,11 +956,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          group.name,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
+                        Expanded(
+                          child: Text(
+                            group.name,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         if (isGroupAdmin)
@@ -556,46 +1036,158 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 14),
 
-                    // Both Admin and Members can invite others
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          AppHaptics.selection();
-                          final exp = DateTime.now()
-                              .add(const Duration(days: 7))
-                              .millisecondsSinceEpoch;
-                          final token = base64Url.encode(
-                            utf8.encode('${group.inviteCode}|$exp'),
-                          );
-                          final shareText =
-                              'Join my group "${group.name}" on Exevra!\n\nClick this link to join:\nhttps://exevra.com/invite?token=$token';
-                          Clipboard.setData(ClipboardData(text: shareText));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Group invite copied to clipboard! Share with friends to invite them.',
+                    // Invite Actions: Email vs Share Link
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: _showInviteByEmailDialog,
+                            icon: const Icon(Icons.email_outlined, size: 16),
+                            label: const Text('Invite by Email'),
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
                               ),
-                              backgroundColor: AppColors.primaryCyan,
-                              duration: Duration(seconds: 3),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              AppHaptics.selection();
+                              final exp = DateTime.now()
+                                  .add(const Duration(days: 7))
+                                  .millisecondsSinceEpoch;
+                              final token = base64Url.encode(
+                                utf8.encode('${group.inviteCode}|$exp'),
+                              );
+                              final shareText =
+                                  'Join my group "${group.name}" on Exevra!\n\nClick this link to join:\nhttps://exevra.com/invite?token=$token';
+                              Clipboard.setData(
+                                ClipboardData(text: shareText),
+                              );
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Invite link copied to clipboard!',
+                                  ),
+                                  backgroundColor: AppColors.primaryCyan,
+                                  duration: Duration(seconds: 3),
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.share_rounded, size: 16),
+                            label: const Text('Share Link'),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    // Pending Invitations List (if any)
+                    if (expenseState.pendingInvitations.isNotEmpty) ...[
+                      const SizedBox(height: 18),
+                      Text(
+                        'Pending Invitations (${expenseState.pendingInvitations.length})',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: isDark
+                              ? AppColors.darkTextSecondary
+                              : AppColors.lightTextSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ListView.separated(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: expenseState.pendingInvitations.length,
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(height: 6),
+                        itemBuilder: (context, index) {
+                          final inv = expenseState.pendingInvitations[index];
+                          return Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              color: isDark
+                                  ? AppColors.darkCardElevated.withValues(
+                                      alpha: 0.4,
+                                    )
+                                  : AppColors.lightCardElevated,
+                              border: Border.all(
+                                color: isDark
+                                    ? AppColors.darkBorder
+                                    : AppColors.lightBorder,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.mail_outline_rounded,
+                                  size: 16,
+                                  color: AppColors.primaryCyan,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        inv.email,
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      Text(
+                                        'Role: ${inv.role} • Expires: ${inv.expiresAt.day}/${inv.expiresAt.month}',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: isDark
+                                              ? AppColors.darkTextTertiary
+                                              : AppColors.lightTextTertiary,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.cancel_outlined,
+                                    size: 18,
+                                    color: AppColors.error,
+                                  ),
+                                  tooltip: 'Revoke Invite',
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                  onPressed: () => ref
+                                      .read(expenseProvider.notifier)
+                                      .revokeInvitation(inv.id),
+                                ),
+                              ],
                             ),
                           );
                         },
-                        icon: const Icon(Icons.share_rounded, size: 16),
-                        label: const Text('Invite Friends to Group'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
                       ),
-                    ),
+                    ],
 
                     if (expenseState.groupMembers.isNotEmpty) ...[
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 18),
                       Text(
                         'Group Members (${expenseState.groupMembers.length})',
                         style: TextStyle(
@@ -773,21 +1365,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       ),
                     ],
 
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 16),
                     Row(
                       children: [
                         TextButton.icon(
-                          onPressed: () =>
-                              ref.read(expenseProvider.notifier).leaveGroup(),
+                          onPressed: _showConfirmLeaveGroupDialog,
                           icon: const Icon(Icons.exit_to_app_rounded, size: 16),
                           label: const Text('Leave Group'),
                         ),
                         if (isGroupAdmin) ...[
                           const Spacer(),
                           TextButton.icon(
-                            onPressed: () => ref
-                                .read(expenseProvider.notifier)
-                                .deleteGroup(),
+                            onPressed: _showConfirmDeleteGroupDialog,
                             icon: const Icon(
                               Icons.delete_outline_rounded,
                               size: 16,
@@ -804,30 +1393,235 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   ],
                 ),
               ),
-            ] else ...[
+
+              const SizedBox(height: 18),
+
+              // Group Balances & Debt Settlements Card
               GlassCard(
                 borderRadius: 20,
                 padding: const EdgeInsets.all(18),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _showCreateGroupDialog,
-                        icon: const Icon(
-                          Icons.add_circle_outline_rounded,
-                          size: 18,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.account_balance_wallet_rounded,
+                              size: 18,
+                              color: AppColors.primaryEmerald,
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Group Balances & Debts',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
                         ),
-                        label: const Text('Create Group'),
-                      ),
+                        TextButton.icon(
+                          onPressed: () => _showSettleUpDialog(),
+                          icon: const Icon(Icons.handshake_rounded, size: 16),
+                          label: const Text('Settle Up'),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _showJoinGroupDialog,
-                        icon: const Icon(Icons.group_add_rounded, size: 18),
-                        label: const Text('Join Group'),
+                    const SizedBox(height: 10),
+                    if (expenseState.settlements.isEmpty) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          color: AppColors.primaryEmerald.withValues(alpha: 0.1),
+                          border: Border.all(
+                            color: AppColors.primaryEmerald.withValues(
+                              alpha: 0.3,
+                            ),
+                          ),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(
+                              Icons.check_circle_rounded,
+                              color: AppColors.primaryEmerald,
+                              size: 20,
+                            ),
+                            SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'All balances are settled! 🎉 No pending debts among members.',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
+                    ] else ...[
+                      ListView.separated(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: expenseState.settlements.length,
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(height: 8),
+                        itemBuilder: (context, index) {
+                          final debt = expenseState.settlements[index];
+                          final iOwe = debt.fromUserId == currentUserId;
+                          final owedToMe = debt.toUserId == currentUserId;
+
+                          return Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              color: isDark
+                                  ? AppColors.darkCardElevated.withValues(
+                                      alpha: 0.5,
+                                    )
+                                  : AppColors.lightCardElevated,
+                              border: Border.all(
+                                color: iOwe
+                                    ? AppColors.primaryRose.withValues(alpha: 0.4)
+                                    : (owedToMe
+                                        ? AppColors.primaryEmerald.withValues(
+                                            alpha: 0.4,
+                                          )
+                                        : (isDark
+                                            ? AppColors.darkBorder
+                                            : AppColors.lightBorder)),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  iOwe
+                                      ? Icons.arrow_circle_up_rounded
+                                      : (owedToMe
+                                          ? Icons.arrow_circle_down_rounded
+                                          : Icons.swap_horiz_rounded),
+                                  color: iOwe
+                                      ? AppColors.primaryRose
+                                      : (owedToMe
+                                          ? AppColors.primaryEmerald
+                                          : AppColors.primaryCyan),
+                                  size: 22,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        iOwe
+                                            ? 'You owe ${debt.toUserName}'
+                                            : (owedToMe
+                                                ? '${debt.fromUserName} owes you'
+                                                : '${debt.fromUserName} owes ${debt.toUserName}'),
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      Text(
+                                        CurrencyFormatter.format(
+                                          debt.amount,
+                                          currencyCode:
+                                              authState.profile?.currency ??
+                                              AppConstants.defaultCurrency,
+                                        ),
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w800,
+                                          color: iOwe
+                                              ? AppColors.primaryRose
+                                              : (owedToMe
+                                                  ? AppColors.primaryEmerald
+                                                  : (isDark
+                                                      ? AppColors
+                                                          .darkTextPrimary
+                                                      : AppColors
+                                                          .lightTextPrimary)),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (iOwe)
+                                  ElevatedButton(
+                                    onPressed: () => _showSettleUpDialog(
+                                      prefilledToUserId: debt.toUserId,
+                                      prefilledAmount: debt.amount,
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 6,
+                                      ),
+                                      minimumSize: Size.zero,
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                    child: const Text('Pay'),
+                                  ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+
+                    // Recent Settlements History
+                    if (expenseState.settlementHistory.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      Text(
+                        'Recent Settlement Payments (${expenseState.settlementHistory.length})',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: isDark
+                              ? AppColors.darkTextSecondary
+                              : AppColors.lightTextSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      ...expenseState.settlementHistory.take(3).map((s) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.check_circle_outline_rounded,
+                                size: 14,
+                                color: AppColors.primaryEmerald,
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'Payment of ${CurrencyFormatter.format(s.amount, currencyCode: authState.profile?.currency ?? AppConstants.defaultCurrency)}${s.notes != null ? " • ${s.notes}" : ""}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark
+                                        ? AppColors.darkTextTertiary
+                                        : AppColors.lightTextTertiary,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
                   ],
                 ),
               ),
