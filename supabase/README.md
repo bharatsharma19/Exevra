@@ -6,11 +6,11 @@ idempotent and safe to apply to a database that already holds user data.
 | Path | Purpose |
 |---|---|
 | `migrations/` | Ordered SQL migrations (`YYYYMMDDHHMMSS_name.sql`). Never edit one that has been applied to the hosted project; add a new one. |
-| `tests/` | pgTAP tests for access control and data rules, run with `supabase test db`. |
+| `tests/` | pgTAP tests (access control, money, splits, balances, settlements, insights, AI, account deletion, schema-wide checks), run with `supabase test db`. |
 | `config.toml` | Local stack configuration (Supabase CLI v3). Hosted auth settings are configured in the dashboard. |
 | `email_templates/` | Auth email templates (confirmation, password recovery code, email change). |
 | `seed.sql` | Local-only seed data (applied by `supabase db reset`). |
-| `schema.sql` | Pointer to this file; kept so old links do not mislead. |
+| `schema.sql` | Comment-only pointer to this file (the project README still links to it). Not a schema. |
 
 ## Local development
 
@@ -47,14 +47,29 @@ Advisors in the dashboard.
 
 ### Scheduled cleanup
 
-`public.purge_old_invitations()` (service role only) marks overdue invitations as expired, deletes
-answered or expired invitations older than 90 days and clears old invite-code attempt records. If the
-`pg_cron` extension is enabled, the invitations migration schedules it daily; otherwise enable
-`pg_cron` and run:
+Two maintenance functions are callable by the service role only:
+
+| Function | What it does | pg_cron job |
+|---|---|---|
+| `public.purge_old_invitations()` | marks overdue invitations as expired, deletes answered or expired invitations older than 90 days and old invite-code attempt records | `purge-old-invitations`, daily 03:17 UTC |
+| `public.purge_old_ai_usage()` | deletes AI usage records older than 180 days | `purge-old-ai-usage`, daily 03:37 UTC |
+
+If the `pg_cron` extension is enabled when the migrations run, the jobs are scheduled automatically.
+Otherwise enable `pg_cron` (Dashboard > Database > Extensions) and run:
 
 ```sql
 select cron.schedule('purge-old-invitations', '17 3 * * *', 'select public.purge_old_invitations();');
+select cron.schedule('purge-old-ai-usage', '37 3 * * *', 'select public.purge_old_ai_usage();');
 ```
+
+### Account deletion
+
+The `delete-account` Edge Function calls `public.prepare_account_deletion(user_id)` with the service
+role and then `auth.admin.deleteUser(user_id)`. The function hands over or deletes the groups the user
+administers, voids their pending settlements, and deletes their memberships, personal expenses, AI
+data, invitations and profile. Shared group history stays and shows the user as "Former member". A
+trigger on `auth.users` runs the same function before any user is deleted, so deleting a user from the
+dashboard is also safe for the other members of their groups.
 
 ### Auth settings to mirror in the dashboard
 
