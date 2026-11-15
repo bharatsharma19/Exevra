@@ -3,7 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
+import '../../../core/router/app_routes.dart';
+import '../../../core/router/navigation.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_theme.dart';
@@ -141,7 +142,7 @@ class DashboardScreen extends ConsumerWidget {
                   child: OutlinedButton.icon(
                     onPressed: () {
                       Navigator.of(ctx).pop();
-                      unawaited(context.push('/profile'));
+                      goTab(context, AppRoutes.profile);
                     },
                     icon: const Icon(Icons.settings_outlined, size: 16),
                     label: const Text('Manage Groups in Profile'),
@@ -157,7 +158,7 @@ class DashboardScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final authState = ref.watch(authNotifierProvider);
+    final authState = ref.watch(authControllerProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final profile = ref.watch(userProfileProvider);
@@ -531,7 +532,7 @@ class DashboardScreen extends ConsumerWidget {
                           child: GestureDetector(
                             onTap: () {
                               AppHaptics.selection();
-                              unawaited(context.push('/chat'));
+                              goTab(context, AppRoutes.chat);
                             },
                             child: const GlassCard(
                               borderRadius: 18,
@@ -592,7 +593,8 @@ class DashboardScreen extends ConsumerWidget {
                                   ],
                                 ),
                                 GestureDetector(
-                                  onTap: () => context.push('/profile'),
+                                  onTap: () =>
+                                      goTab(context, AppRoutes.profile),
                                   child: const Text(
                                     'Settle Up →',
                                     style: TextStyle(
@@ -682,7 +684,7 @@ class DashboardScreen extends ConsumerWidget {
                           ),
                         ),
                         GestureDetector(
-                          onTap: () => context.push('/insights'),
+                          onTap: () => goTab(context, AppRoutes.insights),
                           child: Text(
                             'Full Analytics →',
                             style: TextStyle(
@@ -790,7 +792,7 @@ class DashboardScreen extends ConsumerWidget {
                           ),
                         ),
                         GestureDetector(
-                          onTap: () => context.push('/expenses'),
+                          onTap: () => goTab(context, AppRoutes.expenses),
                           child: Text(
                             'View All',
                             style: TextStyle(

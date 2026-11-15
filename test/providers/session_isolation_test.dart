@@ -83,7 +83,7 @@ void main() {
       expect(container.read(chatProvider).messages.length, greaterThan(1));
 
       // A signs out.
-      await container.read(authNotifierProvider.notifier).signOut();
+      await container.read(authControllerProvider.notifier).signOut();
       await settle();
 
       expect(container.read(currentUserIdProvider), isNull);
@@ -103,7 +103,7 @@ void main() {
       expect(container.read(themePreferenceProvider), ThemePreference.dark);
 
       // B signs in.
-      backend.auth.signIn('B');
+      backend.auth.signInAs('B');
       await settle();
       await container.read(groupsProvider.future);
       await settle();

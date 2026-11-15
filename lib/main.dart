@@ -8,7 +8,9 @@ import 'core/config/app_config.dart';
 import 'core/constants/app_constants.dart';
 import 'core/logging/app_logger.dart';
 import 'core/router/app_router.dart';
+import 'core/router/deep_links.dart';
 import 'core/storage/preferences.dart';
+import 'core/storage/secure_session_storage.dart';
 import 'core/theme/app_theme.dart';
 import 'core/utils/app_locale.dart';
 import 'features/auth/screens/app_lock_screen.dart';
@@ -57,8 +59,16 @@ Future<void> main() async {
     await Supabase.initialize(
       url: config.supabaseUrl,
       publishableKey: config.supabaseAnonKey,
-      authOptions: const FlutterAuthClientOptions(
+      authOptions: FlutterAuthClientOptions(
         authFlowType: AuthFlowType.pkce,
+        // Tokens and the PKCE verifier live in the keystore.
+        localStorage: SecureSessionStorage(
+          persistSessionKey: SecureSessionStorage.keyFor(config.supabaseUrl),
+        ),
+        pkceAsyncStorage: const SecurePkceStorage(),
+        // Only the auth callback is an auth link; invitations are handled
+        // by the app's own link handler.
+        detectSessionInUriPredicate: isAuthCallback,
       ),
     );
   } catch (e, stackTrace) {
@@ -77,6 +87,12 @@ Future<void> main() async {
     ),
   );
 }
+
+/// Whether [uri] is the auth email callback that supabase_flutter should
+/// exchange for a session.
+bool isAuthCallback(Uri uri) =>
+    DeepLinks.parse(uri, appLinkHost: AppConfig.environment.appLinkHost)
+        is AuthCallbackLink;
 
 class ExevraApp extends ConsumerStatefulWidget {
   const ExevraApp({super.key});
@@ -113,7 +129,9 @@ class _ExevraAppState extends ConsumerState<ExevraApp>
   @override
   Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
-    final authState = ref.watch(authNotifierProvider);
+    // Opens invitation links for as long as the app runs.
+    ref.watch(deepLinkHandlerProvider);
+    final signedIn = ref.watch(currentUserIdProvider) != null;
     final appLockState = ref.watch(appLockProvider);
 
     final themeMode = switch (ref.watch(themePreferenceProvider)) {
@@ -130,7 +148,7 @@ class _ExevraAppState extends ConsumerState<ExevraApp>
       themeMode: themeMode,
       routerConfig: router,
       builder: (context, child) {
-        if (authState.isAuthenticated &&
+        if (signedIn &&
             appLockState.isLocked &&
             appLockState.isBiometricsEnabled) {
           return Stack(

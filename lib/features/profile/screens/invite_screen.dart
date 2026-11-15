@@ -14,6 +14,9 @@ import '../../../models/invitation.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/group_detail_providers.dart';
 import '../../../providers/groups_provider.dart';
+import '../../../providers/pending_invite_provider.dart';
+import '../../../core/router/app_routes.dart';
+import '../../../core/router/navigation.dart';
 
 class InviteScreen extends ConsumerStatefulWidget {
   final String token;
@@ -30,6 +33,31 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
   AppFailure? _actionFailure;
 
   String get _token => widget.token.trim();
+
+  @override
+  void initState() {
+    super.initState();
+    // Keep the invitation until a signed-in user has seen it, so it
+    // survives signing in (and a restart while signed out).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final pending = ref.read(pendingInviteProvider.notifier);
+      if (ref.read(currentUserIdProvider) == null) {
+        pending.set(_token);
+      } else {
+        pending.clear();
+      }
+    });
+  }
+
+  /// Signed in with another address: sign out and keep the invitation
+  /// for the next sign-in.
+  Future<void> _switchAccount() async {
+    await ref.read(authControllerProvider.notifier).signOut();
+    if (!mounted) return;
+    ref.read(pendingInviteProvider.notifier).set(_token);
+    setState(() => _actionFailure = null);
+  }
 
   Future<void> _acceptInvitation() async {
     setState(() {
@@ -85,12 +113,10 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
         title: const Text('Group Invitation'),
         leading: IconButton(
           icon: const Icon(Icons.close_rounded),
+          tooltip: 'Close',
           onPressed: () {
-            if (context.canPop()) {
-              context.pop();
-            } else {
-              context.go('/dashboard');
-            }
+            ref.read(pendingInviteProvider.notifier).clear();
+            popOrGo(context, AppRoutes.root);
           },
         ),
       ),
@@ -134,9 +160,10 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
     final expiresAt = details?.expiresAt.toLocal();
     // Invitations are bound to the invited address, which is the
     // signed-in user's own email once details load.
-    final recipientEmail = details == null
-        ? null
-        : ref.watch(authNotifierProvider).user?.email;
+    final signedInEmail = ref.watch(authControllerProvider).user?.email;
+    final recipientEmail = details == null ? null : signedInEmail;
+    final isEmailMismatch =
+        failure is AppFailure && failure.key == 'invite_email_mismatch';
 
     if (async.isLoading && details == null) {
       return Column(
@@ -184,6 +211,18 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
             style: const TextStyle(fontSize: 14, color: AppColors.error),
             textAlign: TextAlign.center,
           ),
+          if (isEmailMismatch && signedInEmail != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              "You're signed in as $signedInEmail.",
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () => unawaited(_switchAccount()),
+              child: const Text('Sign out and use the invited address'),
+            ),
+          ],
           const SizedBox(height: 24),
           if (_actionFailure != null) ...[
             OutlinedButton(
@@ -446,20 +485,16 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
           const SizedBox(height: 14),
           ElevatedButton(
             onPressed: () {
-              final returnTo = Uri.encodeComponent(
-                '/invite?token=${widget.token}',
-              );
-              context.go('/login?returnTo=$returnTo');
+              ref.read(pendingInviteProvider.notifier).set(_token);
+              context.go(AppRoutes.login);
             },
             child: const Text('Sign In to Accept'),
           ),
           const SizedBox(height: 10),
           OutlinedButton(
             onPressed: () {
-              final returnTo = Uri.encodeComponent(
-                '/invite?token=${widget.token}',
-              );
-              context.go('/register?returnTo=$returnTo');
+              ref.read(pendingInviteProvider.notifier).set(_token);
+              context.go(AppRoutes.register);
             },
             child: const Text('Create New Account'),
           ),

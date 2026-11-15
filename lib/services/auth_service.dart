@@ -1,225 +1,332 @@
 import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../core/config/app_config.dart';
+import '../core/errors/app_failure.dart';
 import '../core/logging/app_logger.dart';
+import '../core/security/nonce.dart';
+import '../data/supabase_client_provider.dart';
 
-/// Authentication service for email/password, Google and Apple sign-in.
-class AuthService {
-  static AuthService? _instance;
-  static AuthService get instance => _instance ??= AuthService._();
+/// Outcome of an email sign-up.
+enum SignUpOutcome {
+  /// The server returned a session (email confirmation is off).
+  signedIn,
 
-  AuthService._();
+  /// The account was created and a confirmation email (link and 6-digit
+  /// code) was sent. There is no session until the email is confirmed.
+  confirmationSent,
 
-  SupabaseClient get _client => Supabase.instance.client;
+  /// The address is already registered. With confirmations on, the server
+  /// hides this by returning a user with no identities.
+  alreadyRegistered,
+}
 
-  User? get currentUser => _client.auth.currentUser;
-  Session? get currentSession => _client.auth.currentSession;
-  bool get isAuthenticated => currentUser != null;
+/// The name Apple shares on the first authorisation only.
+@immutable
+class AppleName {
+  const AppleName({this.givenName, this.familyName});
 
-  Stream<AuthState> get authStateChanges => _client.auth.onAuthStateChange;
+  final String? givenName;
+  final String? familyName;
 
-  // ---------------------------------------------------------------------------
-  // EMAIL & PASSWORD AUTHENTICATION
-  // ---------------------------------------------------------------------------
+  /// "Given Family", or null when Apple shared no name.
+  String? get fullName {
+    final parts = [
+      givenName,
+      familyName,
+    ].map((p) => p?.trim() ?? '').where((p) => p.isNotEmpty);
+    return parts.isEmpty ? null : parts.join(' ');
+  }
+}
 
-  Future<AuthResponse> signUpWithEmail({
+/// Result of a completed Apple sign-in.
+@immutable
+class AppleSignInResult {
+  const AppleSignInResult({required this.user, required this.name});
+
+  final User? user;
+  final AppleName name;
+}
+
+/// Authentication against Supabase plus the native Google and Apple SDKs.
+///
+/// Every method throws an [AppFailure] on error. A user cancelling a social
+/// sign-in is not an error: those methods return null/false.
+abstract interface class AuthService {
+  User? get currentUser;
+  Session? get currentSession;
+
+  /// Supabase auth events. Replays the events emitted so far (starting with
+  /// `initialSession`) to each new listener.
+  Stream<AuthState> get authStateChanges;
+
+  Future<SignUpOutcome> signUp({
     required String email,
     required String password,
-    String? displayName,
-  }) async {
-    try {
-      final response = await _client.auth.signUp(
-        email: email.trim(),
-        password: password,
-        data: {
-          if (displayName != null && displayName.isNotEmpty)
-            'full_name': displayName.trim(),
-        },
-      );
-      return response;
-    } catch (e) {
-      AppLogger.warn('AuthService: signUpWithEmail error', e);
-      rethrow;
-    }
-  }
+    required String displayName,
+  });
 
-  Future<AuthResponse> signInWithEmail({
+  Future<void> signIn({required String email, required String password});
+
+  /// Resends the sign-up confirmation email (works without a session).
+  Future<void> resendSignupConfirmation(String email);
+
+  /// Confirms the sign-up with the 6-digit code from the email and signs in.
+  Future<void> verifySignupCode({required String email, required String code});
+
+  /// Emails a 6-digit password reset code.
+  Future<void> sendPasswordResetCode(String email);
+
+  /// Exchanges a reset code for a recovery session. Returns the session's
+  /// access token so the caller can recognise its own recovery event.
+  Future<String?> verifyRecoveryCode({
     required String email,
-    required String password,
-  }) async {
-    try {
-      final response = await _client.auth.signInWithPassword(
-        email: email.trim(),
-        password: password,
-      );
-      return response;
-    } catch (e) {
-      AppLogger.warn('AuthService: signInWithEmail error', e);
-      rethrow;
-    }
-  }
+    required String code,
+  });
 
-  // ---------------------------------------------------------------------------
-  // SOCIAL SIGN-INS: GOOGLE & APPLE
-  // ---------------------------------------------------------------------------
+  Future<void> updatePassword(String newPassword);
+
+  /// Re-reads the signed-in user from the server, or returns null when
+  /// there is no session.
+  Future<User?> reloadUser();
+
+  /// Returns false when the user cancelled.
+  Future<bool> signInWithGoogle();
+
+  /// Returns null when the user cancelled.
+  Future<AppleSignInResult?> signInWithApple();
+
+  /// Stores [fullName] in the auth user's metadata.
+  Future<void> updateFullName(String fullName);
+
+  /// Ends the local session (and the Google account selection). Never
+  /// throws: the local session is always removed.
+  Future<void> signOut();
+}
+
+final authServiceProvider = Provider<AuthService>(
+  (ref) => SupabaseAuthService(ref.watch(supabaseClientProvider).auth),
+);
+
+class SupabaseAuthService implements AuthService {
+  SupabaseAuthService(this._auth, [this._config = AppConfig.environment]);
+
+  final GoTrueClient _auth;
+  final AppConfig _config;
 
   static const List<String> _googleScopes = ['email', 'profile'];
-
   Future<void>? _googleInit;
 
-  /// Whether Google sign-in has the client configuration it needs.
-  bool get isGoogleSignInConfigured =>
-      AppConfig.environment.isGoogleSignInConfigured;
+  @override
+  User? get currentUser => _auth.currentUser;
 
-  /// Initializes Google sign-in once. A failed attempt is not cached, so the
-  /// next sign-in retries it.
+  @override
+  Session? get currentSession => _auth.currentSession;
+
+  @override
+  Stream<AuthState> get authStateChanges => _auth.onAuthStateChange;
+
+  static String _normalise(String email) => email.trim().toLowerCase();
+
+  @override
+  Future<SignUpOutcome> signUp({
+    required String email,
+    required String password,
+    required String displayName,
+  }) => ErrorMapper.guard(() async {
+    final response = await _auth.signUp(
+      email: _normalise(email),
+      password: password,
+      emailRedirectTo: AppConfig.authCallbackUrl,
+      data: {'full_name': displayName.trim()},
+    );
+    if (response.session != null) return SignUpOutcome.signedIn;
+    final identities = response.user?.identities;
+    if (response.user != null && identities != null && identities.isEmpty) {
+      return SignUpOutcome.alreadyRegistered;
+    }
+    return SignUpOutcome.confirmationSent;
+  });
+
+  @override
+  Future<void> signIn({required String email, required String password}) =>
+      ErrorMapper.guard(
+        () => _auth.signInWithPassword(
+          email: _normalise(email),
+          password: password,
+        ),
+      );
+
+  @override
+  Future<void> resendSignupConfirmation(String email) => ErrorMapper.guard(
+    () => _auth.resend(
+      type: OtpType.signup,
+      email: _normalise(email),
+      emailRedirectTo: AppConfig.authCallbackUrl,
+    ),
+  );
+
+  @override
+  Future<void> verifySignupCode({
+    required String email,
+    required String code,
+  }) => ErrorMapper.guard(
+    () => _auth.verifyOTP(
+      type: OtpType.signup,
+      email: _normalise(email),
+      token: code.trim(),
+    ),
+  );
+
+  @override
+  Future<void> sendPasswordResetCode(String email) => ErrorMapper.guard(
+    () => _auth.resetPasswordForEmail(
+      _normalise(email),
+      redirectTo: AppConfig.authCallbackUrl,
+    ),
+  );
+
+  @override
+  Future<String?> verifyRecoveryCode({
+    required String email,
+    required String code,
+  }) => ErrorMapper.guard(() async {
+    final response = await _auth.verifyOTP(
+      type: OtpType.recovery,
+      email: _normalise(email),
+      token: code.trim(),
+    );
+    return response.session?.accessToken;
+  });
+
+  @override
+  Future<void> updatePassword(String newPassword) => ErrorMapper.guard(
+    () => _auth.updateUser(UserAttributes(password: newPassword)),
+  );
+
+  @override
+  Future<User?> reloadUser() => ErrorMapper.guard(() async {
+    if (_auth.currentSession == null) return null;
+    final response = await _auth.refreshSession();
+    return response.user ?? _auth.currentUser;
+  });
+
+  // ---------------------------------------------------------------------------
+  // Google
+  // ---------------------------------------------------------------------------
+
   Future<void> _ensureGoogleInitialized() {
     return _googleInit ??= GoogleSignIn.instance
         .initialize(
-          serverClientId: AppConfig.environment.googleWebClientId,
-          clientId: AppConfig.environment.googleIosClientId.isEmpty
+          serverClientId: _config.googleWebClientId,
+          clientId: _config.googleIosClientId.isEmpty
               ? null
-              : AppConfig.environment.googleIosClientId,
+              : _config.googleIosClientId,
         )
         .catchError((Object error, StackTrace stackTrace) {
+          // Not cached, so the next attempt retries.
           _googleInit = null;
           Error.throwWithStackTrace(error, stackTrace);
         });
   }
 
-  /// Signs in with Google and exchanges the ID token with Supabase.
-  ///
-  /// Returns `null` when the user cancels the Google account picker.
-  /// Throws [GoogleSignInUnavailableException] when the build carries no
-  /// Google client configuration.
-  Future<AuthResponse?> signInWithGoogle() async {
-    if (!isGoogleSignInConfigured) {
-      throw const GoogleSignInUnavailableException();
+  @override
+  Future<bool> signInWithGoogle() async {
+    if (!_config.isGoogleSignInConfigured) {
+      throw const AppFailure.business('google_unavailable');
     }
     try {
       await _ensureGoogleInitialized();
-      final googleSignIn = GoogleSignIn.instance;
-
-      final GoogleSignInAccount account = await googleSignIn.authenticate(
+      final account = await GoogleSignIn.instance.authenticate(
         scopeHint: _googleScopes,
       );
-
       final idToken = account.authentication.idToken;
-      if (idToken == null) {
-        throw Exception('Failed to obtain Google ID Token');
-      }
-
-      // Supabase only needs the ID token for Google, so no separate
-      // authorization (access token) request is made here.
-      return await _client.auth.signInWithIdToken(
-        provider: OAuthProvider.google,
-        idToken: idToken,
+      if (idToken == null) throw const AppFailure.business('google_failed');
+      // Supabase verifies both tokens when both are present.
+      final client = account.authorizationClient;
+      final authorization =
+          await client.authorizationForScopes(_googleScopes) ??
+          await client.authorizeScopes(_googleScopes);
+      await ErrorMapper.guard(
+        () => _auth.signInWithIdToken(
+          provider: OAuthProvider.google,
+          idToken: idToken,
+          accessToken: authorization.accessToken,
+        ),
       );
+      return true;
     } on GoogleSignInException catch (e) {
-      if (e.code == GoogleSignInExceptionCode.canceled) {
-        return null;
-      }
-      AppLogger.warn('AuthService: Google Sign-In', e.code);
-      rethrow;
-    } catch (e) {
-      AppLogger.warn('AuthService: Google Sign-In', e);
-      rethrow;
+      if (e.code == GoogleSignInExceptionCode.canceled) return false;
+      AppLogger.warn('Google sign-in failed', e.code);
+      throw const AppFailure.business('google_failed');
     }
   }
 
-  Future<AuthResponse> signInWithApple() async {
+  // ---------------------------------------------------------------------------
+  // Apple
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<AppleSignInResult?> signInWithApple() async {
+    final rawNonce = Nonce.generate();
     try {
-      final appleCredential = await SignInWithApple.getAppleIDCredential(
-        scopes: [
+      final credential = await SignInWithApple.getAppleIDCredential(
+        scopes: const [
           AppleIDAuthorizationScopes.email,
           AppleIDAuthorizationScopes.fullName,
         ],
+        nonce: Nonce.sha256Hex(rawNonce),
       );
-
-      final idToken = appleCredential.identityToken;
-      if (idToken == null) {
-        throw Exception('Failed to obtain Apple Identity Token');
-      }
-
-      return await _client.auth.signInWithIdToken(
-        provider: OAuthProvider.apple,
-        idToken: idToken,
+      final idToken = credential.identityToken;
+      if (idToken == null) throw const AppFailure.business('apple_failed');
+      final response = await ErrorMapper.guard(
+        () => _auth.signInWithIdToken(
+          provider: OAuthProvider.apple,
+          idToken: idToken,
+          nonce: rawNonce,
+        ),
       );
-    } catch (e) {
-      AppLogger.warn('AuthService: Apple Sign-In', e);
-      rethrow;
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // PASSWORD RECOVERY & RESET
-  // ---------------------------------------------------------------------------
-
-  Future<void> sendPasswordResetEmail(String email) async {
-    try {
-      await _client.auth.resetPasswordForEmail(
-        email.trim(),
-        redirectTo: 'io.antigravity.expensemanager://reset-password',
+      return AppleSignInResult(
+        user: response.user,
+        name: AppleName(
+          givenName: credential.givenName,
+          familyName: credential.familyName,
+        ),
       );
-    } catch (e) {
-      AppLogger.warn('AuthService: sendPasswordResetEmail error', e);
-      rethrow;
+    } on SignInWithAppleAuthorizationException catch (e) {
+      if (e.code == AuthorizationErrorCode.canceled) return null;
+      AppLogger.warn('Apple sign-in failed', e.code);
+      throw const AppFailure.business('apple_failed');
+    } on SignInWithAppleNotSupportedException {
+      throw const AppFailure.business('apple_failed');
     }
   }
-
-  Future<UserResponse> updatePassword(String newPassword) async {
-    try {
-      return await _client.auth.updateUser(
-        UserAttributes(password: newPassword),
-      );
-    } catch (e) {
-      AppLogger.warn('AuthService: updatePassword error', e);
-      rethrow;
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // EMAIL VERIFICATION & SESSION REFRESH
-  // ---------------------------------------------------------------------------
-
-  Future<AuthResponse> refreshSession() async {
-    try {
-      final response = await _client.auth.refreshSession();
-      return response;
-    } catch (e) {
-      AppLogger.warn('AuthService: refreshSession error', e);
-      rethrow;
-    }
-  }
-
-  Future<void> resendVerificationEmail(String email) async {
-    try {
-      await _client.auth.resend(type: OtpType.signup, email: email.trim());
-    } catch (e) {
-      AppLogger.warn('AuthService: resendVerificationEmail error', e);
-      rethrow;
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // SIGN OUT
-  // ---------------------------------------------------------------------------
-
-  Future<void> signOut() async {
-    try {
-      await _client.auth.signOut();
-    } catch (e) {
-      AppLogger.warn('AuthService: signOut error', e);
-    }
-  }
-}
-
-/// Thrown when Google sign-in is not configured for this build.
-class GoogleSignInUnavailableException implements Exception {
-  const GoogleSignInUnavailableException();
 
   @override
-  String toString() => 'Google sign-in is not available right now.';
+  Future<void> updateFullName(String fullName) => ErrorMapper.guard(
+    () => _auth.updateUser(UserAttributes(data: {'full_name': fullName})),
+  );
+
+  @override
+  Future<void> signOut() async {
+    try {
+      await _auth.signOut();
+    } on Object catch (e) {
+      // The local session is removed before the server call; a failed
+      // server call only leaves the refresh token to expire.
+      AppLogger.warn('Server sign-out failed', e.runtimeType);
+    }
+    if (_googleInit != null) {
+      try {
+        await GoogleSignIn.instance.signOut();
+      } on Object catch (e) {
+        AppLogger.warn('Google sign-out failed', e.runtimeType);
+      }
+    }
+  }
 }

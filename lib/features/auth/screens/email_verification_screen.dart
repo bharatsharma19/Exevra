@@ -1,12 +1,17 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../core/constants/app_colors.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/haptics.dart';
-import '../../../providers/auth_provider.dart';
 
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../core/errors/app_failure.dart';
+import '../../../core/errors/failure_messages.dart';
+import '../../../core/utils/validators.dart';
+import '../../../providers/auth_provider.dart';
+import '../widgets/auth_widgets.dart';
+
+/// Waits for the email address to be confirmed. The user can follow the
+/// link in the email, type the 6-digit code from it (works on any
+/// device), resend it, or start over with another address.
 class EmailVerificationScreen extends ConsumerStatefulWidget {
   const EmailVerificationScreen({super.key});
 
@@ -16,426 +21,172 @@ class EmailVerificationScreen extends ConsumerStatefulWidget {
 }
 
 class _EmailVerificationScreenState
-    extends ConsumerState<EmailVerificationScreen> {
-  int _cooldownSeconds = 60;
-  Timer? _timer;
-  bool _canResend = false;
-  bool _isRefreshing = false;
+    extends ConsumerState<EmailVerificationScreen>
+    with WidgetsBindingObserver {
+  final _codeFormKey = GlobalKey<FormState>();
+  final _code = TextEditingController();
+  final _password = TextEditingController();
+  Timer? _ticker;
+  AppFailure? _failure;
+  String? _notice;
+  bool _needsPassword = false;
 
   @override
   void initState() {
     super.initState();
-    _startCooldown();
-  }
-
-  void _startCooldown() {
-    setState(() {
-      _cooldownSeconds = 60;
-      _canResend = false;
-    });
-
-    _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      if (_cooldownSeconds > 1) {
-        setState(() {
-          _cooldownSeconds--;
-        });
-      } else {
-        setState(() {
-          _cooldownSeconds = 0;
-          _canResend = true;
-        });
-        timer.cancel();
+    WidgetsBinding.instance.addObserver(this);
+    // Redraws the resend countdown.
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      final at = ref.read(authControllerProvider).resendAvailableAt;
+      if (mounted && at != null && !DateTime.now().isAfter(at)) {
+        setState(() {});
       }
     });
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _ticker?.cancel();
+    _code.dispose();
+    _password.dispose();
     super.dispose();
   }
 
-  Future<void> _handleRefreshStatus() async {
-    setState(() {
-      _isRefreshing = true;
-    });
-    AppHaptics.medium();
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Back from the mail app: check quietly whether the link was used.
+    if (state == AppLifecycleState.resumed) unawaited(_check(quiet: true));
+  }
 
-    final isVerified = await ref
-        .read(authNotifierProvider.notifier)
-        .refreshEmailVerificationStatus();
+  AuthController get _controller => ref.read(authControllerProvider.notifier);
 
+  void _show({AppFailure? failure, String? notice}) {
     if (!mounted) return;
-
     setState(() {
-      _isRefreshing = false;
+      _failure = failure;
+      _notice = notice;
     });
+  }
 
-    if (isVerified) {
-      AppHaptics.success();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Email confirmed! Unlocking your dashboard...'),
-          backgroundColor: AppColors.primaryEmerald,
-          duration: Duration(seconds: 2),
-        ),
-      );
-    } else {
-      AppHaptics.medium();
-      _showPasswordSignInDialog();
+  Future<void> _resend() async {
+    _show();
+    final failure = await _controller.resendVerification();
+    _show(
+      failure: failure,
+      notice: failure == null ? 'We sent a new email. Check your inbox.' : null,
+    );
+  }
+
+  Future<void> _verifyCode() async {
+    if (!(_codeFormKey.currentState?.validate() ?? false)) return;
+    _show();
+    final failure = await _controller.verifySignupCode(_code.text);
+    _show(failure: failure);
+  }
+
+  Future<void> _check({bool quiet = false}) async {
+    if (ref.read(authControllerProvider).isLoading) return;
+    if (quiet && _needsPassword) return;
+    if (!quiet) _show();
+    final (result, failure) = await _controller.checkVerified(
+      password: _password.text.isEmpty ? null : _password.text,
+    );
+    if (!mounted || quiet) return;
+    switch (result) {
+      case VerificationCheck.verified:
+        _show(); // The router moves on.
+      case VerificationCheck.needsPassword:
+        setState(() => _needsPassword = true);
+        _show(notice: 'Enter your password to continue.');
+      case VerificationCheck.notYet:
+        _show(
+          failure: failure,
+          notice: failure == null
+              ? "Your email isn't confirmed yet. Open the link or enter the "
+                    'code from the email.'
+              : null,
+        );
     }
-  }
-
-  void _showPasswordSignInDialog() {
-    final passwordController = TextEditingController();
-    final authState = ref.read(authNotifierProvider);
-    final email = authState.user?.email ?? '';
-
-    unawaited(
-      showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Complete Verification Sign-In'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Once you click the link in your email, enter your password below to finalize sign-in and save your session.',
-                style: TextStyle(fontSize: 13, height: 1.4),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: passwordController,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Password',
-                  prefixIcon: Icon(Icons.lock_outline_rounded),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                unawaited(ref.read(authNotifierProvider.notifier).signOut());
-              },
-              child: const Text('Back to Login'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final pwd = passwordController.text.trim();
-                if (pwd.isNotEmpty) {
-                  Navigator.of(ctx).pop();
-                  await ref
-                      .read(authNotifierProvider.notifier)
-                      .signInWithEmail(email, pwd);
-                }
-              },
-              child: const Text('Sign In'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _handleResendEmail() async {
-    if (!_canResend) return;
-
-    AppHaptics.light();
-    await ref.read(authNotifierProvider.notifier).resendVerificationEmail();
-
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Verification link dispatched. Please check your inbox and spam.',
-        ),
-        backgroundColor: AppColors.primaryCyan,
-        duration: Duration(seconds: 3),
-      ),
-    );
-
-    _startCooldown();
   }
 
   @override
   Widget build(BuildContext context) {
-    ref.listen<AppAuthState>(authNotifierProvider, (previous, next) {
-      if (next.errorMessage != null && next.errorMessage!.isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(next.errorMessage!),
-            backgroundColor: AppColors.primaryRose,
-          ),
-        );
-      }
-    });
+    final auth = ref.watch(authControllerProvider);
+    final email = auth.verificationEmail ?? '';
+    final scheme = Theme.of(context).colorScheme;
+    final at = auth.resendAvailableAt;
+    final wait = at == null ? 0 : at.difference(DateTime.now()).inSeconds + 1;
+    final canResend = !auth.isLoading && (at == null || wait <= 0);
 
-    final authState = ref.watch(authNotifierProvider);
-    final userEmail = authState.user?.email ?? 'your email address';
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // Animated Glowing Email Icon
-                Container(
-                      width: 96,
-                      height: 96,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: LinearGradient(
-                          colors: [
-                            AppColors.primaryCyan.withValues(alpha: 0.2),
-                            AppColors.primaryViolet.withValues(alpha: 0.2),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        border: Border.all(
-                          color: AppColors.primaryCyan.withValues(alpha: 0.4),
-                          width: 2,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.primaryCyan.withValues(
-                              alpha: 0.25,
-                            ),
-                            blurRadius: 30,
-                            spreadRadius: 2,
-                          ),
-                        ],
-                      ),
-                      child: const Icon(
-                        Icons.mark_email_unread_rounded,
-                        size: 48,
-                        color: AppColors.primaryCyan,
-                      ),
-                    )
-                    .animate(
-                      onPlay: (controller) => controller.repeat(reverse: true),
-                    )
-                    .scale(
-                      begin: const Offset(0.96, 0.96),
-                      end: const Offset(1.04, 1.04),
-                      duration: 1600.ms,
-                      curve: Curves.easeInOut,
-                    ),
-
-                const SizedBox(height: 28),
-
-                // Title
-                Text(
-                  'Verify Your Email',
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.5,
-                    color: isDark
-                        ? AppColors.darkTextPrimary
-                        : AppColors.lightTextPrimary,
-                  ),
-                ).animate().fadeIn(duration: 400.ms).slideY(begin: 0.1, end: 0),
-
-                const SizedBox(height: 12),
-
-                // Description
-                Text(
-                  'We sent a confirmation link to your registered email address:',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 14,
-                    height: 1.4,
-                    color: isDark
-                        ? AppColors.darkTextSecondary
-                        : AppColors.lightTextSecondary,
-                  ),
-                ).animate().fadeIn(delay: 100.ms, duration: 400.ms),
-
-                const SizedBox(height: 12),
-
-                // Highlighted User Email Badge
-                GlassCard(
-                  borderRadius: 14,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.alternate_email_rounded,
-                        size: 18,
-                        color: AppColors.primaryCyan,
-                      ),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          userEmail,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.primaryCyan,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ).animate().fadeIn(delay: 200.ms, duration: 400.ms),
-
-                const SizedBox(height: 18),
-
-                Text(
-                  'Click the activation link inside the email to immediately unlock your dashboard, expense tracking, and group telemetry.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 13,
-                    height: 1.4,
-                    color: isDark
-                        ? AppColors.darkTextTertiary
-                        : AppColors.lightTextTertiary,
-                  ),
-                ).animate().fadeIn(delay: 250.ms, duration: 400.ms),
-
-                const SizedBox(height: 32),
-
-                // Primary Action: Refresh Status / "I've Verified My Email"
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton.icon(
-                    onPressed: _isRefreshing ? null : _handleRefreshStatus,
-                    icon: _isRefreshing
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              color: Colors.black,
-                            ),
-                          )
-                        : const Icon(
-                            Icons.check_circle_outline_rounded,
-                            size: 20,
-                          ),
-                    label: Text(
-                      _isRefreshing
-                          ? 'Checking Confirmation...'
-                          : "I've Verified My Email",
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primaryCyan,
-                      foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                  ),
-                ).animate().fadeIn(delay: 300.ms).slideY(begin: 0.1, end: 0),
-
-                const SizedBox(height: 16),
-
-                // Secondary Action: Resend Verification Email with Cooldown
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: OutlinedButton.icon(
-                    onPressed: _canResend ? _handleResendEmail : null,
-                    icon: const Icon(Icons.refresh_rounded, size: 18),
-                    label: Text(
-                      _canResend
-                          ? 'Resend Verification Email'
-                          : 'Resend Email ($_cooldownSeconds s)',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      side: BorderSide(
-                        color: _canResend
-                            ? AppColors.primaryCyan
-                            : Colors.white24,
-                      ),
-                    ),
-                  ),
-                ).animate().fadeIn(delay: 350.ms).slideY(begin: 0.1, end: 0),
-
-                const SizedBox(height: 12),
-
-                // Already verified? Direct password sign-in
-                TextButton.icon(
-                  onPressed: () {
-                    AppHaptics.selection();
-                    _showPasswordSignInDialog();
-                  },
-                  icon: const Icon(
-                    Icons.vpn_key_rounded,
-                    size: 16,
-                    color: AppColors.primaryCyan,
-                  ),
-                  label: const Text(
-                    'Already confirmed in browser? Enter Password to Sign In',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.primaryCyan,
-                    ),
-                  ),
-                ).animate().fadeIn(delay: 380.ms),
-
-                const SizedBox(height: 16),
-
-                // Sign Out / Back to Login
-                TextButton.icon(
-                  onPressed: () {
-                    AppHaptics.light();
-                    unawaited(
-                      ref.read(authNotifierProvider.notifier).signOut(),
-                    );
-                  },
-                  icon: const Icon(
-                    Icons.logout_rounded,
-                    size: 16,
-                    color: AppColors.darkTextSecondary,
-                  ),
-                  label: const Text(
-                    'Sign Out / Back to Login',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.darkTextSecondary,
-                    ),
-                  ),
-                ).animate().fadeIn(delay: 400.ms),
-              ],
-            ),
+    return AuthScaffold(
+      title: 'Verify your email',
+      subtitle: 'We sent a confirmation link and a 6-digit code to',
+      icon: Icons.mark_email_unread_outlined,
+      content: [
+        Text(
+          email,
+          textAlign: TextAlign.center,
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 16),
+        if (_failure != null) ...[
+          AuthMessage(friendlyMessage(_failure!)),
+          const SizedBox(height: 16),
+        ] else if (_notice != null) ...[
+          AuthMessage(_notice!, isError: false),
+          const SizedBox(height: 16),
+        ],
+        Form(
+          key: _codeFormKey,
+          child: OtpField(
+            controller: _code,
+            validator: Validators.validateOtp,
+            onSubmitted: (_) => unawaited(_verifyCode()),
           ),
         ),
-      ),
+        const SizedBox(height: 12),
+        AuthPrimaryButton(
+          label: 'Verify code',
+          busy: auth.isLoading,
+          onPressed: () => unawaited(_verifyCode()),
+        ),
+        const SizedBox(height: 20),
+        if (_needsPassword) ...[
+          AutofillGroup(
+            child: PasswordField(
+              controller: _password,
+              onSubmitted: (_) => unawaited(_check()),
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        OutlinedButton(
+          onPressed: auth.isLoading ? null : () => unawaited(_check()),
+          child: const Text("I've confirmed my email"),
+        ),
+        const SizedBox(height: 8),
+        TextButton(
+          onPressed: canResend ? () => unawaited(_resend()) : null,
+          child: Text(canResend ? 'Resend email' : 'Resend email in ${wait}s'),
+        ),
+      ],
+      footer: [
+        const SizedBox(height: 16),
+        Text(
+          "Can't find it? Check your spam folder.",
+          textAlign: TextAlign.center,
+          style: TextStyle(color: scheme.onSurfaceVariant),
+        ),
+        TextButton(
+          onPressed: auth.isLoading
+              ? null
+              : () => unawaited(_controller.cancelVerification()),
+          child: const Text('Use a different email'),
+        ),
+      ],
     );
   }
 }

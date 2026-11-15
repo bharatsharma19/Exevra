@@ -682,9 +682,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Sign Out'),
+          title: const Text('Sign out?'),
           content: const Text(
-            'Are you sure you want to sign out of your account on this device?',
+            'Your data stays in your account. To come back, sign in again '
+            'with your email and password or Google. App Lock is turned off '
+            'on this device.',
           ),
           actions: [
             TextButton(
@@ -694,7 +696,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ElevatedButton(
               onPressed: () {
                 Navigator.of(ctx).pop();
-                unawaited(ref.read(authNotifierProvider.notifier).signOut());
+                unawaited(ref.read(authControllerProvider.notifier).signOut());
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.error,
@@ -715,12 +717,20 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         context: context,
         builder: (ctx) => AlertDialog(
           title: const Text(
-            'Delete Account Permanently',
+            'Delete your account?',
             style: TextStyle(color: AppColors.error),
           ),
-          content: const Text(
-            'This action is irreversible according to Store Compliance policies. '
-            'All your personal expenses, records, profile metadata, and group associations will be permanently purged.',
+          content: const SingleChildScrollView(
+            child: Text(
+              'This permanently deletes your profile, your personal expenses, '
+              'your settings and your AI assistant history.\n\n'
+              'Expenses you added to shared groups stay with those groups so '
+              "the other members' balances remain correct; they will show as "
+              '"Former member". If you are a group admin, the longest-standing '
+              'member becomes admin; groups with no other members are '
+              'deleted.\n\n'
+              "This can't be undone.",
+            ),
           ),
           actions: [
             TextButton(
@@ -736,7 +746,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 backgroundColor: AppColors.error,
                 foregroundColor: Colors.white,
               ),
-              child: const Text('Permanently Delete'),
+              child: const Text('Delete account'),
             ),
           ],
         ),
@@ -771,20 +781,25 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         ),
       ),
     );
+    final messenger = ScaffoldMessenger.of(context);
     final failure = await ref
-        .read(authNotifierProvider.notifier)
+        .read(authControllerProvider.notifier)
         .deleteAccount();
     if (navigator.mounted) navigator.pop();
-    if (failure != null && mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(friendlyMessage(failure))));
-    }
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          failure == null
+              ? 'Your account was deleted.'
+              : friendlyMessage(failure),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final authState = ref.watch(authNotifierProvider);
+    final authState = ref.watch(authControllerProvider);
     final appLockState = ref.watch(appLockProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 

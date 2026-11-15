@@ -12,7 +12,9 @@ import 'package:expense_manager/models/money.dart';
 import 'package:expense_manager/models/profile.dart';
 import 'package:expense_manager/providers/auth_provider.dart';
 import 'package:expense_manager/services/auth_service.dart';
+import 'package:expense_manager/core/router/deep_links.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
@@ -26,51 +28,206 @@ supabase.User fakeUser(String id, {bool verified = true}) => supabase.User(
   emailConfirmedAt: verified ? '2026-01-01T00:00:00Z' : null,
 );
 
-/// Auth with a controllable session and event stream.
+/// Auth with a controllable session and an event stream that, like
+/// gotrue's, replays past events (starting with `initialSession`) to every
+/// new listener.
 class FakeAuthService implements AuthService {
-  FakeAuthService({String? signedInAs}) {
+  FakeAuthService({String? signedInAs, bool emitInitialSession = true}) {
     if (signedInAs != null) _user = fakeUser(signedInAs);
+    if (emitInitialSession) emitInitial();
   }
 
-  final _events = StreamController<supabase.AuthState>.broadcast();
+  final List<supabase.AuthState> _history = [];
+  final List<StreamController<supabase.AuthState>> _listeners = [];
   supabase.User? _user;
   int signOutCalls = 0;
+
+  /// Outcome of the next [signUp].
+  SignUpOutcome signUpOutcome = SignUpOutcome.confirmationSent;
+
+  /// Thrown by the next email/password, code or password call.
+  AppFailure? failNext;
+
+  /// Users known to the fake "server" (email -> confirmed).
+  final Map<String, bool> confirmedEmails = {};
+
+  /// Result of the next Google / Apple sign-in (null = cancelled).
+  String? googleUserId;
+  AppleSignInResult? Function()? appleResult;
+
+  final List<String> calls = [];
+
+  supabase.Session _session(supabase.User user) => supabase.Session(
+    accessToken: 'token-${user.id}-${_history.length}',
+    tokenType: 'bearer',
+    user: user,
+  );
+
+  void emit(supabase.AuthChangeEvent event, [supabase.User? user]) {
+    final state = supabase.AuthState(
+      event,
+      user == null ? null : _session(user),
+    );
+    _history.add(state);
+    for (final c in _listeners) {
+      c.add(state);
+    }
+  }
+
+  void emitInitial() => emit(supabase.AuthChangeEvent.initialSession, _user);
+
+  AppFailure? _takeFailure() {
+    final f = failNext;
+    failNext = null;
+    return f;
+  }
 
   @override
   supabase.User? get currentUser => _user;
 
   @override
-  supabase.Session? get currentSession => null;
+  supabase.Session? get currentSession =>
+      _user == null ? null : _session(_user!);
 
   @override
-  bool get isAuthenticated => _user != null;
-
-  @override
-  Stream<supabase.AuthState> get authStateChanges => _events.stream;
-
-  void signIn(String id) {
-    final user = fakeUser(id);
-    _user = user;
-    _events.add(
-      supabase.AuthState(
-        supabase.AuthChangeEvent.signedIn,
-        supabase.Session(accessToken: 't', tokenType: 'bearer', user: user),
-      ),
+  Stream<supabase.AuthState> get authStateChanges {
+    late final StreamController<supabase.AuthState> controller;
+    controller = StreamController<supabase.AuthState>(
+      onCancel: () => _listeners.remove(controller),
     );
+    _history.forEach(controller.add);
+    _listeners.add(controller);
+    return controller.stream;
+  }
+
+  /// The server signs [id] in (for example from another flow).
+  void signInAs(String id, {bool verified = true}) {
+    final user = fakeUser(id, verified: verified);
+    _user = user;
+    emit(supabase.AuthChangeEvent.signedIn, user);
+  }
+
+  @override
+  Future<SignUpOutcome> signUp({
+    required String email,
+    required String password,
+    required String displayName,
+  }) async {
+    calls.add('signUp:$email');
+    final f = _takeFailure();
+    if (f != null) throw f;
+    if (signUpOutcome == SignUpOutcome.signedIn) {
+      signInAs(email.split('@').first);
+    }
+    return signUpOutcome;
+  }
+
+  @override
+  Future<void> signIn({required String email, required String password}) async {
+    calls.add('signIn:$email');
+    final f = _takeFailure();
+    if (f != null) throw f;
+    final confirmed = confirmedEmails[email.trim().toLowerCase()];
+    if (confirmed == false) throw const AppFailure.emailNotConfirmed();
+    signInAs(email.split('@').first);
+  }
+
+  @override
+  Future<void> resendSignupConfirmation(String email) async {
+    calls.add('resend:$email');
+    final f = _takeFailure();
+    if (f != null) throw f;
+  }
+
+  @override
+  Future<void> verifySignupCode({
+    required String email,
+    required String code,
+  }) async {
+    calls.add('verifySignup:$code');
+    final f = _takeFailure();
+    if (f != null) throw f;
+    signInAs(email.split('@').first);
+  }
+
+  @override
+  Future<void> sendPasswordResetCode(String email) async {
+    calls.add('sendReset:$email');
+    final f = _takeFailure();
+    if (f != null) throw f;
+  }
+
+  @override
+  Future<String?> verifyRecoveryCode({
+    required String email,
+    required String code,
+  }) async {
+    calls.add('verifyRecovery:$code');
+    final f = _takeFailure();
+    if (f != null) throw f;
+    final user = fakeUser(email.split('@').first);
+    _user = user;
+    emit(supabase.AuthChangeEvent.passwordRecovery, user);
+    return currentSession?.accessToken;
+  }
+
+  /// Thrown by the next [updatePassword] (independent of [failNext]).
+  AppFailure? failPasswordUpdate;
+
+  @override
+  Future<void> updatePassword(String newPassword) async {
+    calls.add('updatePassword');
+    final f = failPasswordUpdate;
+    failPasswordUpdate = null;
+    if (f != null) throw f;
+    emit(supabase.AuthChangeEvent.userUpdated, _user);
+  }
+
+  /// The user [reloadUser] returns next (defaults to the current one).
+  supabase.User? reloadedUser;
+
+  @override
+  Future<supabase.User?> reloadUser() async {
+    calls.add('reloadUser');
+    if (_user == null) return null;
+    final user = reloadedUser ?? _user;
+    _user = user;
+    return user;
+  }
+
+  @override
+  Future<bool> signInWithGoogle() async {
+    calls.add('google');
+    final f = _takeFailure();
+    if (f != null) throw f;
+    final id = googleUserId;
+    if (id == null) return false;
+    signInAs(id);
+    return true;
+  }
+
+  @override
+  Future<AppleSignInResult?> signInWithApple() async {
+    calls.add('apple');
+    final result = appleResult?.call();
+    if (result?.user != null) {
+      _user = result!.user;
+      emit(supabase.AuthChangeEvent.signedIn, _user);
+    }
+    return result;
+  }
+
+  @override
+  Future<void> updateFullName(String fullName) async {
+    calls.add('fullName:$fullName');
   }
 
   @override
   Future<void> signOut() async {
     signOutCalls++;
     _user = null;
-    _events.add(
-      const supabase.AuthState(supabase.AuthChangeEvent.signedOut, null),
-    );
+    emit(supabase.AuthChangeEvent.signedOut);
   }
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) =>
-      throw UnimplementedError(invocation.memberName.toString());
 }
 
 UserProfile profileOf(String id, {String? activeGroupId, String? locale}) =>
@@ -261,12 +418,16 @@ class TestBackend {
   late final FakeGroupRepository groups;
   final FakeExpenseRepository expenses = FakeExpenseRepository();
 
+  /// Incoming links (set before [container] to simulate a cold start).
+  FakeLinkSource links = FakeLinkSource();
+
   Future<ProviderContainer> container({
     Map<String, Object> prefs = const {},
+    List<Override> extraOverrides = const [],
   }) async {
     SharedPreferences.setMockInitialValues(prefs);
     final preferences = await SharedPreferences.getInstance();
-    return ProviderContainer(
+    final container = ProviderContainer(
       retry: (_, _) => null,
       overrides: [
         sharedPreferencesProvider.overrideWithValue(preferences),
@@ -275,8 +436,17 @@ class TestBackend {
         groupRepositoryProvider.overrideWithValue(groups),
         expenseRepositoryProvider.overrideWithValue(expenses),
         deviceTimeZoneProvider.overrideWith((ref) async => 'Asia/Kolkata'),
+        linkSourceProvider.overrideWithValue(links),
+        ...extraOverrides,
       ],
     );
+    // Deliver the replayed initial auth event (microtasks only, so this
+    // also works inside testWidgets' fake async zone).
+    container.read(authControllerProvider);
+    for (var i = 0; i < 10; i++) {
+      await Future<void>.microtask(() {});
+    }
+    return container;
   }
 }
 
@@ -285,4 +455,20 @@ Future<void> settle([int rounds = 5]) async {
   for (var i = 0; i < rounds; i++) {
     await Future<void>.delayed(Duration.zero);
   }
+}
+
+/// Incoming links pushed by the test.
+class FakeLinkSource implements LinkSource {
+  FakeLinkSource({this.initial});
+
+  final Uri? initial;
+  final StreamController<Uri> controller = StreamController<Uri>.broadcast();
+
+  @override
+  Future<Uri?> initialLink() async => initial;
+
+  @override
+  Stream<Uri> get links => controller.stream;
+
+  Future<void> close() => controller.close();
 }
