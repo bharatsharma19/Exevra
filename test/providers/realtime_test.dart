@@ -25,7 +25,7 @@ void main() {
     container
       ..listen(groupsProvider, (_, _) {})
       ..listen(groupRealtimeProvider, (_, _) {});
-    await container.read(groupsProvider.future);
+    await container.read(groupsProvider.notifier).loaded;
     await settle();
     final key = container.read(dashboardExpenseKeyProvider)!;
     container.listen(expenseListProvider(key), (_, _) {});

@@ -24,7 +24,7 @@ void main() {
     container = await backend.container();
     addTearDown(container.dispose);
     container.listen(groupsProvider, (_, _) {});
-    await container.read(groupsProvider.future);
+    await container.read(groupsProvider.notifier).loaded;
     await settle();
   }
 

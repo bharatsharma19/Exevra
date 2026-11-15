@@ -129,14 +129,16 @@ void main() {
 
     test('the cap counts pending payments outside the loaded page', () async {
       container.listen(settlementsProvider('g1'), (_, _) {});
-      final history = await container.read(settlementsProvider('g1').future);
+      final history = await container
+          .read(settlementsProvider('g1').notifier)
+          .loaded;
       expect(history.items, hasLength(SettlementsNotifier.pageSize));
       expect(history.items.any((s) => s.id == 'old-pending'), isFalse);
 
       container.listen(pendingSettlementsProvider('g1'), (_, _) {});
-      final pending = await container.read(
-        pendingSettlementsProvider('g1').future,
-      );
+      final pending = await container
+          .read(pendingSettlementsProvider('g1').notifier)
+          .loaded;
       expect(pending.map((s) => s.id), ['old-pending']);
       expect(
         settlementLimit(
@@ -151,7 +153,7 @@ void main() {
 
     test('older payments load page by page without gaps', () async {
       container.listen(settlementsProvider('g1'), (_, _) {});
-      await container.read(settlementsProvider('g1').future);
+      await container.read(settlementsProvider('g1').notifier).loaded;
       expect(container.read(settlementsProvider('g1')).value!.hasMore, isTrue);
 
       await container.read(settlementsProvider('g1').notifier).loadMore();

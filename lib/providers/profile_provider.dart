@@ -16,6 +16,7 @@ import '../models/json_reader.dart';
 import '../models/profile.dart';
 import 'auth_provider.dart';
 import 'failure_reporter.dart';
+import 'user_scoped.dart';
 
 /// The device locale as a BCP-47 tag (for example `en-IN`).
 final deviceLocaleProvider = Provider<String>(
@@ -51,25 +52,30 @@ final themePreferenceProvider =
       ThemePreferenceNotifier.new,
     );
 
-/// The signed-in user's profile. Null when signed out. Rebuilt (and
-/// refetched) whenever the user changes.
-class ProfileNotifier extends AsyncNotifier<UserProfile?> {
+/// The signed-in user's profile. Null when signed out. Refetched whenever
+/// the user changes, starting over at loading with no value (see
+/// [UserScopedNotifier]).
+class ProfileNotifier extends UserScopedNotifier<UserProfile?> {
   ProfileRepository get _repo => ref.read(profileRepositoryProvider);
 
   @override
-  Future<UserProfile?> build() async {
-    final userId = ref.watch(currentUserIdProvider);
-    if (userId == null) return null;
+  AsyncValue<UserProfile?> whenSignedOut() => const AsyncData(null);
 
+  @override
+  String? ownerOf(UserProfile? value) => value?.id;
+
+  @override
+  Future<UserProfile?> fetch(String userId) {
     final cachedHaptics = ref
         .read(sharedPreferencesProvider)
         .getBool(UserPrefs.key(userId, UserPrefs.haptics));
     if (cachedHaptics != null) AppHaptics.isEnabled = cachedHaptics;
+    return ref.watch(profileRepositoryProvider).fetch(userId);
+  }
 
-    final profile = await ref.watch(profileRepositoryProvider).fetch(userId);
-    // Side effects on other providers run after this build completes.
-    unawaited(Future(() => _afterLoad(userId, profile)));
-    return profile;
+  @override
+  void onLoaded(String userId, UserProfile? value) {
+    if (value != null) unawaited(_afterLoad(userId, value));
   }
 
   Future<void> _afterLoad(String userId, UserProfile profile) async {
@@ -202,9 +208,10 @@ class ProfileNotifier extends AsyncNotifier<UserProfile?> {
   }
 }
 
-final profileProvider = AsyncNotifierProvider<ProfileNotifier, UserProfile?>(
-  ProfileNotifier.new,
-);
+final profileProvider =
+    NotifierProvider<ProfileNotifier, AsyncValue<UserProfile?>>(
+      ProfileNotifier.new,
+    );
 
 /// The loaded profile of the signed-in user, or null while loading, on
 /// error or when signed out. A profile left over from a previous user

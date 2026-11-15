@@ -37,6 +37,23 @@ supabase.User fakeUser(String id, {bool verified = true}) => supabase.User(
   emailConfirmedAt: verified ? '2026-01-01T00:00:00Z' : null,
 );
 
+/// Holds or fails every read of user data that passes through it (the
+/// profile, groups, members, balances, settlements, invitations), so a
+/// test can look at the app while a user's data loads or after it failed.
+class ReadGate {
+  /// While set, reads wait for it.
+  Completer<void>? hold;
+
+  /// While set, reads (after [hold]) throw it.
+  AppFailure? failure;
+
+  Future<void> pass() async {
+    await hold?.future;
+    final f = failure;
+    if (f != null) throw f;
+  }
+}
+
 /// Auth with a controllable session and an event stream that, like
 /// gotrue's, replays past events (starting with `initialSession`) to every
 /// new listener.
@@ -269,6 +286,7 @@ UserProfile profileOf(String id, {String? activeGroupId, String? locale}) =>
     );
 
 class FakeProfileRepository implements ProfileRepository {
+  ReadGate gate = ReadGate();
   final Map<String, UserProfile> profiles = {};
   final List<(String, ProfileUpdate)> updates = [];
   AppFailure? failUpdates;
@@ -279,6 +297,7 @@ class FakeProfileRepository implements ProfileRepository {
 
   @override
   Future<UserProfile> fetch(String userId) async {
+    await gate.pass();
     final f = failFetch;
     if (f != null) throw f;
     final p = profiles[userId];
@@ -319,6 +338,7 @@ class FakeGroupRepository implements GroupRepository {
   FakeGroupRepository(this.currentUser);
 
   final String? Function() currentUser;
+  ReadGate gate = ReadGate();
   final Map<String, List<Group>> groupsByUser = {};
   final List<String?> activeGroupWrites = [];
   AppFailure? failSetActive;
@@ -347,6 +367,7 @@ class FakeGroupRepository implements GroupRepository {
   @override
   Future<List<Group>> fetchMyGroups() async {
     if (heldFetches.isNotEmpty) return heldFetches.removeAt(0).future;
+    await gate.pass();
     final failure = failFetch;
     if (failure != null) throw failure;
     return groupsByUser[currentUser()] ?? const [];
@@ -373,8 +394,10 @@ class FakeGroupRepository implements GroupRepository {
   int _ids = 0;
 
   @override
-  Future<List<GroupMember>> fetchMembers(String groupId) async =>
-      List.of(membersByGroup[groupId] ?? const []);
+  Future<List<GroupMember>> fetchMembers(String groupId) async {
+    await gate.pass();
+    return List.of(membersByGroup[groupId] ?? const []);
+  }
 
   void _updateMember(
     String groupId,
@@ -720,16 +743,21 @@ GroupBalance balanceOf(String? userId, int netMinor, {String name = ''}) =>
 
 /// Balances and suggestions per group, set by the test.
 class FakeBalanceRepository implements BalanceRepository {
+  ReadGate gate = ReadGate();
   final Map<String, List<GroupBalance>> balancesByGroup = {};
   final Map<String, List<SettleSuggestion>> suggestionsByGroup = {};
 
   @override
-  Future<List<GroupBalance>> balances(String groupId) async =>
-      balancesByGroup[groupId] ?? const [];
+  Future<List<GroupBalance>> balances(String groupId) async {
+    await gate.pass();
+    return balancesByGroup[groupId] ?? const [];
+  }
 
   @override
-  Future<List<SettleSuggestion>> suggestions(String groupId) async =>
-      suggestionsByGroup[groupId] ?? const [];
+  Future<List<SettleSuggestion>> suggestions(String groupId) async {
+    await gate.pass();
+    return suggestionsByGroup[groupId] ?? const [];
+  }
 }
 
 /// Settlements with the server's rules: the caller records as payer
@@ -739,6 +767,7 @@ class FakeSettlementRepository implements SettlementRepository {
   FakeSettlementRepository(this.currentUser);
 
   final String? Function() currentUser;
+  ReadGate gate = ReadGate();
   final List<Settlement> rows = [];
   final List<String> calls = [];
 
@@ -762,6 +791,7 @@ class FakeSettlementRepository implements SettlementRepository {
     int limit = 50,
   }) async {
     listCalls++;
+    await gate.pass();
     final sorted = rows.where((s) => s.groupId == groupId).toList()
       ..sort(_newestFirst);
     final rest = after == null
@@ -773,11 +803,15 @@ class FakeSettlementRepository implements SettlementRepository {
   @override
   Future<List<Settlement>> pending(String groupId) async {
     pendingCalls++;
+    await gate.pass();
     return rows.where((s) => s.groupId == groupId && s.isPending).toList();
   }
 
   @override
-  Future<List<SettlementEvent>> events(String settlementId) async => const [];
+  Future<List<SettlementEvent>> events(String settlementId) async {
+    await gate.pass();
+    return const [];
+  }
 
   @override
   Future<Settlement> record({
@@ -861,6 +895,7 @@ class FakeSettlementRepository implements SettlementRepository {
 
 /// Email invitations; [nextSend] decides whether the email "went out".
 class FakeInvitationRepository implements InvitationRepository {
+  ReadGate gate = ReadGate();
   final List<GroupInvitation> pending = [];
   final List<String> sentTo = [];
   final List<String> revoked = [];
@@ -895,8 +930,10 @@ class FakeInvitationRepository implements InvitationRepository {
   }
 
   @override
-  Future<List<GroupInvitation>> listPending(String groupId) async =>
-      pending.where((i) => i.groupId == groupId).toList();
+  Future<List<GroupInvitation>> listPending(String groupId) async {
+    await gate.pass();
+    return pending.where((i) => i.groupId == groupId).toList();
+  }
 
   @override
   Future<void> revoke(String invitationId) async {
@@ -932,9 +969,15 @@ class FakeConnectivitySource implements ConnectivitySource {
 class TestBackend {
   TestBackend({String? signedInAs})
     : auth = FakeAuthService(signedInAs: signedInAs) {
-    groups = FakeGroupRepository(() => auth.currentUser?.id);
-    settlements = FakeSettlementRepository(() => auth.currentUser?.id);
+    groups = FakeGroupRepository(() => auth.currentUser?.id)..gate = reads;
+    settlements = FakeSettlementRepository(() => auth.currentUser?.id)
+      ..gate = reads;
+    profiles.gate = reads;
+    balances.gate = reads;
   }
+
+  /// Every read of user data passes this gate (see [ReadGate]).
+  final ReadGate reads = ReadGate();
 
   final FakeAuthService auth;
   final FakeProfileRepository profiles = FakeProfileRepository();
@@ -973,7 +1016,9 @@ class TestBackend {
         connectivitySourceProvider.overrideWithValue(connectivity),
         shareServiceProvider.overrideWithValue(share),
         if (invitations case final invitations?)
-          invitationRepositoryProvider.overrideWithValue(invitations),
+          invitationRepositoryProvider.overrideWithValue(
+            invitations..gate = reads,
+          ),
         deviceTimeZoneProvider.overrideWith((ref) async => 'Asia/Kolkata'),
         linkSourceProvider.overrideWithValue(links),
         ...extraOverrides,

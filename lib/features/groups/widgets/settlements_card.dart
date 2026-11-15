@@ -132,7 +132,6 @@ class SettlementsCard extends ConsumerWidget {
           const SizedBox(height: 8),
           _Subheading('Balances (${group.currency})'),
           ...balancesAsync.when(
-            skipLoadingOnReload: true,
             loading: () => const [LinearProgressIndicator()],
             error: (error, _) => [
               FailureRetry(
@@ -152,7 +151,6 @@ class SettlementsCard extends ConsumerWidget {
           const SizedBox(height: 12),
           const _Subheading('Suggested payments'),
           ...suggestionsAsync.when(
-            skipLoadingOnReload: true,
             loading: () => const [LinearProgressIndicator()],
             error: (error, _) => [
               FailureRetry(
@@ -194,7 +192,6 @@ class SettlementsCard extends ConsumerWidget {
           const SizedBox(height: 12),
           const _Subheading('Payments'),
           ...settlementsAsync.when(
-            skipLoadingOnReload: true,
             loading: () => const [LinearProgressIndicator()],
             error: (error, _) => [
               FailureRetry(

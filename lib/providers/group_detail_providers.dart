@@ -19,15 +19,12 @@ import 'data_revision.dart';
 import 'expense_provider.dart';
 import 'failure_reporter.dart';
 import 'groups_provider.dart';
+import 'user_scoped.dart';
 
-/// Group data is only loaded for a signed-in user; this throws for a
-/// signed-out one so no stale data is shown.
-String _requireUser(Ref ref) {
-  final userId = ref.watch(currentUserIdProvider);
-  if (userId == null) throw const AppFailure.sessionExpired();
-  return userId;
-}
-
+/// Group data is only loaded for a signed-in user. Every provider here is
+/// a [UserScopedNotifier]: signed out it fails with "session expired", and
+/// when the user changes it starts over at loading, so no data of the
+/// previous user is shown.
 AppFailure _report(Ref ref, AppFailure failure, {bool report = true}) {
   AppHaptics.error();
   if (report && ref.mounted) {
@@ -38,19 +35,16 @@ AppFailure _report(Ref ref, AppFailure failure, {bool report = true}) {
 
 /// Members of a group as other members see them (no email or phone).
 /// Pending join requests are included only for the admin.
-class GroupMembersNotifier extends AsyncNotifier<List<GroupMember>> {
-  GroupMembersNotifier(this.groupId);
+class GroupMembersNotifier extends UserScopedFuture<List<GroupMember>> {
+  GroupMembersNotifier(this.groupId)
+    : super((ref, _) {
+        ref.watch(dataRevisionProvider.select((r) => r.members));
+        return ref.watch(groupRepositoryProvider).fetchMembers(groupId);
+      });
 
   final String groupId;
 
   GroupRepository get _repo => ref.read(groupRepositoryProvider);
-
-  @override
-  Future<List<GroupMember>> build() async {
-    _requireUser(ref);
-    ref.watch(dataRevisionProvider.select((r) => r.members));
-    return ref.watch(groupRepositoryProvider).fetchMembers(groupId);
-  }
 
   Future<AppFailure?> _act(
     Future<void> Function() action, {
@@ -95,8 +89,8 @@ class GroupMembersNotifier extends AsyncNotifier<List<GroupMember>> {
       _act(() => _repo.transferAdmin(groupId, userId));
 }
 
-final groupMembersProvider = AsyncNotifierProvider.autoDispose
-    .family<GroupMembersNotifier, List<GroupMember>, String>(
+final groupMembersProvider = NotifierProvider.autoDispose
+    .family<GroupMembersNotifier, AsyncValue<List<GroupMember>>, String>(
       GroupMembersNotifier.new,
     );
 
@@ -109,33 +103,48 @@ final activeGroupMembersProvider =
     });
 
 /// Per-member balances of a group (positive = others owe them).
-final groupBalancesProvider = FutureProvider.autoDispose
-    .family<List<GroupBalance>, String>((ref, groupId) {
-      _requireUser(ref);
-      ref.watch(dataRevisionProvider.select((r) => r.expenses));
-      ref.watch(dataRevisionProvider.select((r) => r.settlements));
-      ref.watch(dataRevisionProvider.select((r) => r.members));
-      return ref.watch(balanceRepositoryProvider).balances(groupId);
-    });
+final groupBalancesProvider = NotifierProvider.autoDispose
+    .family<
+      UserScopedFuture<List<GroupBalance>>,
+      AsyncValue<List<GroupBalance>>,
+      String
+    >(
+      (groupId) => UserScopedFuture((ref, _) {
+        ref.watch(dataRevisionProvider.select((r) => r.expenses));
+        ref.watch(dataRevisionProvider.select((r) => r.settlements));
+        ref.watch(dataRevisionProvider.select((r) => r.members));
+        return ref.watch(balanceRepositoryProvider).balances(groupId);
+      }),
+    );
 
 /// Fewest transfers that settle a group (pending payments accounted for).
-final settleSuggestionsProvider = FutureProvider.autoDispose
-    .family<List<SettleSuggestion>, String>((ref, groupId) {
-      _requireUser(ref);
-      ref.watch(dataRevisionProvider.select((r) => r.expenses));
-      ref.watch(dataRevisionProvider.select((r) => r.settlements));
-      ref.watch(dataRevisionProvider.select((r) => r.members));
-      return ref.watch(balanceRepositoryProvider).suggestions(groupId);
-    });
+final settleSuggestionsProvider = NotifierProvider.autoDispose
+    .family<
+      UserScopedFuture<List<SettleSuggestion>>,
+      AsyncValue<List<SettleSuggestion>>,
+      String
+    >(
+      (groupId) => UserScopedFuture((ref, _) {
+        ref.watch(dataRevisionProvider.select((r) => r.expenses));
+        ref.watch(dataRevisionProvider.select((r) => r.settlements));
+        ref.watch(dataRevisionProvider.select((r) => r.members));
+        return ref.watch(balanceRepositoryProvider).suggestions(groupId);
+      }),
+    );
 
 /// Every pending payment of a group (not only the loaded history), for
 /// the amount a payer may still record.
-final pendingSettlementsProvider = FutureProvider.autoDispose
-    .family<List<Settlement>, String>((ref, groupId) {
-      _requireUser(ref);
-      ref.watch(dataRevisionProvider.select((r) => r.settlements));
-      return ref.watch(settlementRepositoryProvider).pending(groupId);
-    });
+final pendingSettlementsProvider = NotifierProvider.autoDispose
+    .family<
+      UserScopedFuture<List<Settlement>>,
+      AsyncValue<List<Settlement>>,
+      String
+    >(
+      (groupId) => UserScopedFuture((ref, _) {
+        ref.watch(dataRevisionProvider.select((r) => r.settlements));
+        return ref.watch(settlementRepositoryProvider).pending(groupId);
+      }),
+    );
 
 /// The loaded part of a group's payment history.
 class SettlementHistory {
@@ -160,7 +169,7 @@ class SettlementHistory {
 ///
 /// A recorded payment stays pending until the payee confirms it; only
 /// confirmed payments count in balances.
-class SettlementsNotifier extends AsyncNotifier<SettlementHistory> {
+class SettlementsNotifier extends UserScopedNotifier<SettlementHistory> {
   SettlementsNotifier(this.groupId);
 
   final String groupId;
@@ -170,8 +179,11 @@ class SettlementsNotifier extends AsyncNotifier<SettlementHistory> {
   SettlementRepository get _repo => ref.read(settlementRepositoryProvider);
 
   @override
-  Future<SettlementHistory> build() async {
-    _requireUser(ref);
+  AsyncValue<SettlementHistory> whenSignedOut() =>
+      const AsyncError(AppFailure.sessionExpired(), StackTrace.empty);
+
+  @override
+  Future<SettlementHistory> fetch(String userId) async {
     ref.watch(dataRevisionProvider.select((r) => r.settlements));
     final rows = await ref
         .watch(settlementRepositoryProvider)
@@ -289,33 +301,37 @@ class SettlementsNotifier extends AsyncNotifier<SettlementHistory> {
   );
 }
 
-final settlementsProvider = AsyncNotifierProvider.autoDispose
-    .family<SettlementsNotifier, SettlementHistory, String>(
+final settlementsProvider = NotifierProvider.autoDispose
+    .family<SettlementsNotifier, AsyncValue<SettlementHistory>, String>(
       SettlementsNotifier.new,
     );
 
 /// Audit trail of one settlement, oldest first.
-final settlementEventsProvider = FutureProvider.autoDispose
-    .family<List<SettlementEvent>, String>((ref, settlementId) {
-      _requireUser(ref);
-      ref.watch(dataRevisionProvider.select((r) => r.settlements));
-      return ref.watch(settlementRepositoryProvider).events(settlementId);
-    });
+final settlementEventsProvider = NotifierProvider.autoDispose
+    .family<
+      UserScopedFuture<List<SettlementEvent>>,
+      AsyncValue<List<SettlementEvent>>,
+      String
+    >(
+      (settlementId) => UserScopedFuture((ref, _) {
+        ref.watch(dataRevisionProvider.select((r) => r.settlements));
+        return ref.watch(settlementRepositoryProvider).events(settlementId);
+      }),
+    );
 
 /// Pending email invitations of a group (admin only), with send and
 /// revoke.
-class PendingInvitationsNotifier extends AsyncNotifier<List<GroupInvitation>> {
-  PendingInvitationsNotifier(this.groupId);
+class PendingInvitationsNotifier
+    extends UserScopedFuture<List<GroupInvitation>> {
+  PendingInvitationsNotifier(this.groupId)
+    : super(
+        (ref, _) =>
+            ref.watch(invitationRepositoryProvider).listPending(groupId),
+      );
 
   final String groupId;
 
   InvitationRepository get _repo => ref.read(invitationRepositoryProvider);
-
-  @override
-  Future<List<GroupInvitation>> build() async {
-    _requireUser(ref);
-    return ref.watch(invitationRepositoryProvider).listPending(groupId);
-  }
 
   /// Creates an invitation and asks the server to email it. When the
   /// email could not be sent the result says so and carries a share link;
@@ -351,17 +367,24 @@ class PendingInvitationsNotifier extends AsyncNotifier<List<GroupInvitation>> {
   }
 }
 
-final pendingInvitationsProvider = AsyncNotifierProvider.autoDispose
-    .family<PendingInvitationsNotifier, List<GroupInvitation>, String>(
-      PendingInvitationsNotifier.new,
-    );
+final pendingInvitationsProvider = NotifierProvider.autoDispose
+    .family<
+      PendingInvitationsNotifier,
+      AsyncValue<List<GroupInvitation>>,
+      String
+    >(PendingInvitationsNotifier.new);
 
 /// Invitation details for the signed-in invitee.
-final invitationDetailsProvider = FutureProvider.autoDispose
-    .family<InvitationDetails, String>((ref, token) {
-      _requireUser(ref);
-      return ref.watch(invitationRepositoryProvider).details(token);
-    });
+final invitationDetailsProvider = NotifierProvider.autoDispose
+    .family<
+      UserScopedFuture<InvitationDetails>,
+      AsyncValue<InvitationDetails>,
+      String
+    >(
+      (token) => UserScopedFuture(
+        (ref, _) => ref.watch(invitationRepositoryProvider).details(token),
+      ),
+    );
 
 /// Keeps a realtime channel open for the active group and marks expenses,
 /// members and settlements as changed when the server reports a change.

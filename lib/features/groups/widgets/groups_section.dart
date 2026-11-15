@@ -63,7 +63,8 @@ class MyGroupsCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     final groupsAsync = ref.watch(groupsProvider);
-    final groups = groupsAsync.value?.groups ?? const <Group>[];
+    // Only the signed-in user's groups, never a previous user's.
+    final groups = ref.watch(currentGroupsProvider)?.groups ?? const <Group>[];
     final active = ref.watch(activeGroupProvider);
     final notifier = ref.read(groupsProvider.notifier);
 

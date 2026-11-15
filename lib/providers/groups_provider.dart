@@ -12,6 +12,7 @@ import '../models/profile.dart';
 import 'auth_provider.dart';
 import 'failure_reporter.dart';
 import 'profile_provider.dart';
+import 'user_scoped.dart';
 
 /// The user's groups and the active scope.
 class GroupsState {
@@ -84,7 +85,10 @@ class GroupCreateResult {
 /// Groups of the signed-in user plus the active scope (personal or one
 /// group). The scope is stored on the server with `set_active_group`, and
 /// each switch writes exactly once.
-class GroupsNotifier extends AsyncNotifier<GroupsState> {
+///
+/// When the user changes the state starts over at loading with no value
+/// (see [UserScopedNotifier]); [GroupsState.userId] names the owner.
+class GroupsNotifier extends UserScopedNotifier<GroupsState> {
   GroupRepository get _repo => ref.read(groupRepositoryProvider);
 
   /// Number of the latest scope switch; only the latest one updates or
@@ -98,17 +102,24 @@ class GroupsNotifier extends AsyncNotifier<GroupsState> {
   String? _serverScope;
 
   @override
-  Future<GroupsState> build() async {
-    final userId = ref.watch(currentUserIdProvider);
-    if (userId == null) return const GroupsState();
-    final repo = ref.watch(groupRepositoryProvider);
+  AsyncValue<GroupsState> whenSignedOut() => const AsyncData(GroupsState());
 
+  @override
+  String? ownerOf(GroupsState value) => value.userId;
+
+  @override
+  Future<GroupsState> fetch(String userId) async {
+    final repo = ref.watch(groupRepositoryProvider);
+    // The saved scope is on the profile; reading it first makes sure it
+    // is the profile of [userId] that loads.
+    ref.read(profileProvider);
     final results = await Future.wait<Object?>([
       repo.fetchMyGroups(),
-      ref.read(profileProvider.future),
+      ref.read(profileProvider.notifier).loaded,
     ]);
     final groups = results[0]! as List<Group>;
-    final saved = (results[1] as UserProfile?)?.activeGroupId;
+    final profile = results[1] as UserProfile?;
+    final saved = profile?.id == userId ? profile?.activeGroupId : null;
     _serverScope = saved;
     return GroupsState(
       groups: groups,
@@ -383,9 +394,19 @@ class GroupsNotifier extends AsyncNotifier<GroupsState> {
   Future<void> membershipChanged() => refresh();
 }
 
-final groupsProvider = AsyncNotifierProvider<GroupsNotifier, GroupsState>(
-  GroupsNotifier.new,
-);
+final groupsProvider =
+    NotifierProvider<GroupsNotifier, AsyncValue<GroupsState>>(
+      GroupsNotifier.new,
+    );
+
+/// The signed-in user's groups, or null while they load, after a failure,
+/// or when the loaded groups are someone else's. Screens read this rather
+/// than [groupsProvider]'s value.
+final currentGroupsProvider = Provider<GroupsState?>((ref) {
+  final userId = ref.watch(currentUserIdProvider);
+  final value = ref.watch(groupsProvider).value;
+  return userId != null && value?.userId == userId ? value : null;
+});
 
 /// Whether the signed-in user's groups have loaded (or failed to load),
 /// so scope-dependent lists know whether to wait.

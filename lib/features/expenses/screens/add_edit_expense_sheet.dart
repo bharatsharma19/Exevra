@@ -206,8 +206,9 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
           : ref.read(activeGroupProvider);
     }
     final groups =
-        (listen ? ref.watch(groupsProvider) : ref.read(groupsProvider))
-            .value
+        (listen
+                ? ref.watch(currentGroupsProvider)
+                : ref.read(currentGroupsProvider))
             ?.groups ??
         const <Group>[];
     for (final g in groups) {

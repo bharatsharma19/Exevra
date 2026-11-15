@@ -35,7 +35,7 @@ class DashboardScreen extends ConsumerWidget {
 
   void _showGroupSwitcher(BuildContext context, WidgetRef ref) {
     AppHaptics.selection();
-    final groupsState = ref.read(groupsProvider).value;
+    final groupsState = ref.read(currentGroupsProvider);
     // Pending join requests cannot be opened until an admin approves.
     final userGroups = groupsState?.approvedGroups ?? const [];
     final currentGroupId = ref.read(activeGroupProvider)?.id;
