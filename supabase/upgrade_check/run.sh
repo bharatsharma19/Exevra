@@ -8,7 +8,8 @@
 #   5. compare the upgraded public schema with a fresh `supabase db reset`
 #   6. a legacy amount that cannot be stored exactly must stop the upgrade
 #      (legacy_amount_out_of_range) instead of being changed
-#   7. finish with a clean `supabase db reset`
+#   7. zero-decimal rounding and legacy date clean-ups are reported as NOTICEs
+#   8. finish with a clean `supabase db reset`
 #
 # Local stack only (CLI v3 targets the local database by default). Run from anywhere:
 #   supabase/upgrade_check/run.sh
@@ -80,6 +81,27 @@ if "$SB" migration up >"$WORK/range.log" 2>&1; then
 fi
 grep -q 'legacy_amount_out_of_range' "$WORK/range.log" || { cat "$WORK/range.log"; fail "unexpected upgrade error"; }
 grep -o '20000000-0000-0000-0000-0000000000a1' "$WORK/range.log" | head -1 | sed 's/^/reported row: /'
+
+step "Rounding and date clean-ups are reported in the upgrade log"
+"$SB" db reset --version "$BASELINE" --no-seed >/dev/null 2>&1
+psql_db <"$HERE/legacy_fixture.sql" >/dev/null
+{
+    echo 'begin;'
+    for f in supabase/migrations/*.sql; do
+        [ "$(basename "$f" | cut -d_ -f1)" = "$BASELINE" ] && continue
+        cat "$f"; echo
+    done
+    echo 'rollback;'
+} | docker exec -i -e PGOPTIONS='-c client_min_messages=notice' "$DB" psql -U postgres -X -q -v ON_ERROR_STOP=1 \
+    >/dev/null 2>"$WORK/notices.log"
+for expected in \
+    'legacy_zero_decimal_rounded: 2 expense(s)' \
+    'legacy_zero_decimal_rounded: 1 settlement(s)' \
+    'legacy_infinite_spent_at: 1 expense(s)' \
+    'legacy_spent_at_out_of_range: 1 expense(s)'; do
+    grep -qF "$expected" "$WORK/notices.log" || { cat "$WORK/notices.log"; fail "missing NOTICE: $expected"; }
+    echo "reported: $expected"
+done
 
 step "Clean reset"
 "$SB" db reset >/dev/null 2>&1

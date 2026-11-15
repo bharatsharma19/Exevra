@@ -12,6 +12,10 @@
 --   normalises the category case, fills a missing currency (group currency, else profile currency)
 --   and rejects a group expense whose currency differs from the group currency (22023
 --   currency_mismatch). group_id cannot change after insert.
+-- * spent_at must be finite, not before 2000-01-01 in any time zone (>= 2000-01-01T00:00:00+14) and at
+--   most one year after now() (22023 invalid_date). Checked on insert and whenever spent_at changes,
+--   so a legacy row outside the range stays editable while its date is left as it is. A CHECK
+--   (expenses_spent_at_finite) also keeps 'infinity' / '-infinity' out of the table for every writer.
 -- * When the payer's auth user is deleted, user_id becomes NULL ("Former member") on group expenses;
 --   personal expenses of that user are deleted.
 -- * RLS: personal rows are owner-only. Group rows are readable by approved members (viewers
@@ -22,7 +26,9 @@
 -- * Keyset-pagination indexes (group_id, spent_at DESC, id DESC) and (user_id, spent_at DESC, id DESC);
 --   redundant indexes dropped. expenses joins the supabase_realtime publication.
 -- Legacy rows: titles trimmed and cut to 120 characters, notes cut to 500, unknown categories mapped to
--- 'Other', non-https receipt URLs cleared; created_at and updated_at are kept.
+-- 'Other', non-https receipt URLs cleared, an infinite spent_at replaced by created_at (NOTICE
+-- legacy_infinite_spent_at with the count); finite dates outside the range are kept and counted in a
+-- NOTICE (legacy_spent_at_out_of_range); created_at and updated_at are kept.
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -107,6 +113,25 @@ UPDATE public.expenses
 SET receipt_url = NULL
 WHERE receipt_url IS NOT NULL AND NOT (receipt_url ~ '^https://' AND char_length(receipt_url) <= 2048);
 
+-- spent_at: an infinite date carries no information; use the creation time. Finite dates outside the
+-- range accepted for new writes are user history and are kept (they are only counted).
+DO $$
+DECLARE
+    v_rows integer;
+BEGIN
+    UPDATE public.expenses SET spent_at = created_at WHERE NOT isfinite(spent_at);
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    IF v_rows > 0 THEN
+        RAISE NOTICE 'legacy_infinite_spent_at: % expense(s) dated infinity now use created_at', v_rows;
+    END IF;
+    SELECT count(*) INTO v_rows FROM public.expenses
+    WHERE spent_at < '2000-01-01T00:00:00+14'::timestamptz OR spent_at > now() + interval '1 year';
+    IF v_rows > 0 THEN
+        RAISE NOTICE 'legacy_spent_at_out_of_range: % expense(s) kept with a date before 2000 or more than a year ahead', v_rows;
+    END IF;
+END;
+$$;
+
 -- Resume the updated_at trigger paused above.
 DO $$
 BEGIN
@@ -132,6 +157,10 @@ ALTER TABLE public.expenses ADD CONSTRAINT expenses_note_length
 ALTER TABLE public.expenses DROP CONSTRAINT IF EXISTS expenses_category_known;
 ALTER TABLE public.expenses ADD CONSTRAINT expenses_category_known
     CHECK (category = ANY (public.expense_categories()));
+
+ALTER TABLE public.expenses DROP CONSTRAINT IF EXISTS expenses_spent_at_finite;
+ALTER TABLE public.expenses ADD CONSTRAINT expenses_spent_at_finite
+    CHECK (spent_at > '-infinity'::timestamptz AND spent_at < 'infinity'::timestamptz);
 
 ALTER TABLE public.expenses DROP CONSTRAINT IF EXISTS expenses_receipt_url_https;
 ALTER TABLE public.expenses ADD CONSTRAINT expenses_receipt_url_https
@@ -179,6 +208,15 @@ BEGIN
         NEW.created_at := OLD.created_at;
         NEW.updated_at := pg_catalog.now();
         NEW.spent_at := COALESCE(NEW.spent_at, OLD.spent_at);
+    END IF;
+
+    -- A new or changed date must be finite, not before 2000-01-01 anywhere, at most a year ahead.
+    IF (TG_OP = 'INSERT' OR NEW.spent_at IS DISTINCT FROM OLD.spent_at)
+       AND (NOT pg_catalog.isfinite(NEW.spent_at)
+            OR NEW.spent_at < '2000-01-01T00:00:00+14'::timestamptz
+            OR NEW.spent_at > pg_catalog.now() + interval '1 year') THEN
+        RAISE EXCEPTION 'invalid_date' USING ERRCODE = '22023',
+            DETAIL = 'spent_at must be between 2000-01-01 and one year from now.';
     END IF;
 
     NEW.title := pg_catalog.regexp_replace(COALESCE(NEW.title, ''), '^\s+|\s+$', '', 'g');

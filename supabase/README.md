@@ -94,6 +94,18 @@ from conv
 where round(amount * case when currency in ('JPY', 'KRW') then 1 else 100 end) not between 1 and 100000000000;
 ```
 
+Two further clean-ups need no action but are worth knowing (each is reported as a `NOTICE` in the
+migration output, with a count):
+
+- Old amounts are `NUMERIC(12,2)`, so two-decimal currencies convert exactly. An amount with a
+  fractional part in a zero-decimal currency (JPY, KRW) is rounded half away from zero to whole units
+  (1000.50 JPY becomes 1001, 999.49 JPY becomes 999), `legacy_zero_decimal_rounded`. To correct them
+  by hand first, list them with the query above, replacing the `where` clause by
+  `where currency in ('JPY', 'KRW') and amount <> trunc(amount)`.
+- An expense dated `infinity` or `-infinity` gets its `created_at` as date
+  (`legacy_infinite_spent_at`). Other dates before 2000 or more than a year ahead are kept
+  (`legacy_spent_at_out_of_range` counts them); new and changed dates must lie in that range.
+
 ### 4. Record the baseline and push
 
 ```sh

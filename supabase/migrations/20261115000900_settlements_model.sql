@@ -17,7 +17,9 @@
 --
 -- Clients cannot write settlements directly (the old INSERT policy and RPC are removed); only
 -- confirmed settlements count towards balances.
--- Legacy rows: amounts converted with the group currency's exponent (never clamped: an amount outside
+-- Legacy rows: amounts converted with the group currency's exponent, as for expenses (exact for
+-- two-decimal currencies; a fractional amount in a zero-decimal currency is rounded half away from zero
+-- to whole units and counted in a NOTICE legacy_zero_decimal_rounded; never clamped: an amount outside
 -- 1 .. 100,000,000,000 minor units stops the migration with legacy_amount_out_of_range), status 'confirmed'
 -- (confirmed_at = the old settlement date), created_by = from_user, notes cut to 200; a recorded
 -- and a confirmed audit event are added for each.
@@ -90,6 +92,17 @@ BEGIN
                       DETAIL = 'public.settlements ids: ' || v_bad,
                       HINT = 'Each amount must convert to 1 .. 100000000000 minor units of its currency. '
                           || 'Correct or delete these rows, then apply the migrations again.';
+        END IF;
+
+        -- Zero-decimal currencies: fractional legacy amounts are rounded half away from zero.
+        EXECUTE $sql$
+            SELECT count(*)::text FROM public.settlements
+            WHERE amount_minor IS NULL
+              AND public.currency_minor_units(currency::text) = 0
+              AND amount <> trunc(amount)
+        $sql$ INTO v_bad;
+        IF v_bad <> '0' THEN
+            RAISE NOTICE 'legacy_zero_decimal_rounded: % settlement(s) in a zero-decimal currency had a fractional amount, rounded half away from zero to whole units', v_bad;
         END IF;
 
         EXECUTE $sql$

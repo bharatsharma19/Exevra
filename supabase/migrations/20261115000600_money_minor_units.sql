@@ -9,8 +9,12 @@
 --   supported currency.
 --
 -- Legacy rows: the currency of a group expense becomes the group currency, a personal expense gets
--- the owner's profile currency (or INR), and amount_minor = round(amount * 10^minor_units) (half away
--- from zero, e.g. 10.005 -> 1001). Values are never clamped: if any amount would convert to less than
+-- the owner's profile currency (or INR), and amount_minor = round(amount * 10^minor_units). Legacy
+-- amounts are NUMERIC(12,2), so for two-decimal currencies the conversion is exact (12.34 -> 1234).
+-- For zero-decimal currencies (JPY, KRW) a legacy amount with a fractional part cannot be stored
+-- exactly: it is rounded HALF AWAY FROM ZERO to whole units (1000.50 JPY -> 1001, 999.49 JPY -> 999),
+-- and the number of rounded rows is reported in a NOTICE (legacy_zero_decimal_rounded) so the upgrade
+-- log shows that it happened. Values are never clamped: if any amount would convert to less than
 -- one minor unit or more than 100,000,000,000 minor units, the migration stops with
 -- legacy_amount_out_of_range and lists the expense ids, so the owner can correct them deliberately
 -- (README: pre-flight query). created_at and updated_at of existing rows are kept. The NUMERIC column
@@ -103,6 +107,18 @@ BEGIN
                           || 'Correct or delete these rows, then apply the migrations again.';
         END IF;
 
+        -- Zero-decimal currencies: fractional legacy amounts are rounded half away from zero.
+        EXECUTE $sql$
+            SELECT count(*)::text FROM public.expenses
+            WHERE amount_minor IS NULL
+              AND public.currency_minor_units(currency::text) = 0
+              AND amount <> trunc(amount)
+        $sql$ INTO v_bad;
+        IF v_bad <> '0' THEN
+            RAISE NOTICE 'legacy_zero_decimal_rounded: % expense(s) in a zero-decimal currency had a fractional amount, rounded half away from zero to whole units', v_bad;
+        END IF;
+
+        -- numeric round() rounds half away from zero.
         EXECUTE $sql$
             UPDATE public.expenses
             SET amount_minor = round(amount * (10::numeric ^ public.currency_minor_units(currency::text)))::bigint

@@ -4,7 +4,7 @@
 begin;
 set local client_min_messages = warning;
 create extension if not exists pgtap with schema extensions;
-select plan(26);
+select plan(31);
 
 -- Timestamps of existing rows are kept: the conversion is not a user edit.
 select is((select count(*) from public.expenses where updated_at <> '2025-01-02 00:00:00+00'), 0::bigint,
@@ -26,6 +26,19 @@ select is((select amount_minor || ' ' || currency from public.expenses where id 
           '1234 JPY', 'a group expense in a zero-decimal currency converts exactly');
 select is((select amount_minor || ' ' || currency from public.settlements where id = '30000000-0000-0000-0000-000000000004'),
           '12 JPY', 'a settlement in a zero-decimal currency converts exactly');
+
+select is((select amount_minor || ' ' || currency from public.expenses where id = '20000000-0000-0000-0000-00000000000e'),
+          '1001 JPY', 'a fractional yen amount is rounded half away from zero (1000.50 -> 1001)');
+select is((select amount_minor || ' ' || currency from public.expenses where id = '20000000-0000-0000-0000-00000000000f'),
+          '999 JPY', 'a fractional yen amount below the half rounds down (999.49 -> 999)');
+select is((select amount_minor || ' ' || currency from public.settlements where id = '30000000-0000-0000-0000-000000000005'),
+          '8 JPY', 'a fractional yen settlement is rounded half away from zero (7.50 -> 8)');
+
+-- Dates: an infinite legacy date becomes the creation time; other legacy dates are kept as they are.
+select is((select spent_at from public.expenses where id = '20000000-0000-0000-0000-000000000010'),
+          '2025-01-01 00:00:00+00'::timestamptz, 'an infinite legacy spent_at is replaced by created_at');
+select ok((select spent_at > now() + interval '1 year' from public.expenses where id = '20000000-0000-0000-0000-000000000003'),
+          'a legacy date far in the future is kept (only new or changed dates are range-checked)');
 
 -- Over-long text is cut to the limit without leaving whitespace at the cut.
 select is((select title from public.expenses where id = '20000000-0000-0000-0000-00000000000d'), repeat('a', 119),

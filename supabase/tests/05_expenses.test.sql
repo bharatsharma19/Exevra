@@ -141,7 +141,7 @@ as $$ select e.id from tests.expenses as e where e.name = p_name $$;
 
 grant execute on all functions in schema tests to anon, authenticated;
 
-select plan(66);
+select plan(76);
 
 select tests.create_user('alice');
 select tests.create_user('bob');
@@ -235,6 +235,41 @@ select throws_ok($$ insert into public.expenses (user_id, title, amount_minor, c
 select throws_ok($$ insert into public.expenses (user_id, title, amount_minor, category)
                     values (tests.uid('bob'), 'For someone else', 1, 'Food') $$, '42501', null,
                  'an expense cannot be added in another user''s name');
+
+-- ---------------------------------------------------------------------------
+-- spent_at range: finite, not before 2000-01-01 in any time zone, at most a year ahead
+-- ---------------------------------------------------------------------------
+select throws_ok($$ insert into public.expenses (user_id, title, amount_minor, category, spent_at)
+                    values (auth.uid(), 't', 1, 'Food', 'infinity') $$, '22023', 'invalid_date', 'spent_at cannot be infinity');
+select throws_ok($$ insert into public.expenses (user_id, title, amount_minor, category, spent_at)
+                    values (auth.uid(), 't', 1, 'Food', '-infinity') $$, '22023', 'invalid_date', 'spent_at cannot be -infinity');
+select throws_ok($$ insert into public.expenses (user_id, title, amount_minor, category, spent_at)
+                    values (auth.uid(), 't', 1, 'Food', '1999-12-31T09:59:59Z') $$, '22023', 'invalid_date',
+                 'spent_at before 2000-01-01 is rejected');
+select lives_ok($$ insert into public.expenses (user_id, title, amount_minor, category, spent_at)
+                   values (auth.uid(), 'Millennium', 1, 'Food', '2000-01-01T00:00:00+14') $$,
+                'local midnight of 2000-01-01 is accepted in every time zone');
+select throws_ok($$ insert into public.expenses (user_id, title, amount_minor, category, spent_at)
+                    values (auth.uid(), 't', 1, 'Food', now() + interval '1 year 1 day') $$, '22023', 'invalid_date',
+                 'spent_at more than a year ahead is rejected');
+select lives_ok($$ insert into public.expenses (user_id, title, amount_minor, category, spent_at)
+                   values (auth.uid(), 'Planned', 1, 'Food', now() + interval '364 days') $$, 'a date within the next year is accepted');
+select throws_ok($$ update public.expenses set spent_at = 'infinity' where title = 'Planned' $$, '22023', 'invalid_date',
+                 'an update cannot move spent_at to infinity');
+select throws_ok($$ update public.expenses set spent_at = '1990-01-01T00:00:00Z' where title = 'Planned' $$, '22023', 'invalid_date',
+                 'an update cannot move spent_at before 2000');
+-- A legacy row outside the range stays editable as long as its date is not changed.
+reset role;
+alter table public.expenses disable trigger trigger_expenses_before_write;
+insert into public.expenses (id, user_id, title, amount_minor, currency, category, spent_at)
+values (gen_random_uuid(), tests.uid('alice'), 'Legacy 1995', 100, 'INR', 'Other', '1995-06-01T00:00:00Z');
+select throws_ok($$ insert into public.expenses (id, user_id, title, amount_minor, currency, category, spent_at)
+                    values (gen_random_uuid(), tests.uid('alice'), 'Unbounded', 100, 'INR', 'Other', 'infinity') $$,
+                 '23514', null, 'a CHECK keeps infinite dates out even when the trigger is bypassed');
+alter table public.expenses enable trigger trigger_expenses_before_write;
+select tests.authenticate_as('alice');
+select lives_ok($$ update public.expenses set title = 'Legacy 1995 edited', spent_at = spent_at where title = 'Legacy 1995' $$,
+                'a legacy expense dated before 2000 can still be edited when its date is unchanged');
 
 -- ---------------------------------------------------------------------------
 -- Group expenses and the group currency
