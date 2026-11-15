@@ -336,7 +336,11 @@ class FakeExpenseRepository implements ExpenseRepository {
   final List<Expense> rows = [];
   AppFailure? failWrites;
   AppFailure? failReads;
+
+  /// Deleting one of these ids fails with permission denied.
+  final Set<String> failDeleteIds = {};
   int fetchCalls = 0;
+  final List<String> deleted = [];
   int _ids = 0;
 
   /// When set, each fetch waits for the next completer in this queue and
@@ -362,12 +366,29 @@ class FakeExpenseRepository implements ExpenseRepository {
     if (heldFetches.isNotEmpty) return heldFetches.removeAt(0).future;
     final failure = failReads;
     if (failure != null) throw failure;
-    final items = rows.where((e) => _visible(userId, query, e)).toList()
-      ..sort((a, b) {
-        final t = b.spentAt.compareTo(a.spentAt);
-        return t != 0 ? t : b.id.compareTo(a.id);
-      });
-    return ExpensePage(items.take(limit).toList(), null);
+    final category = query.category;
+    final search = query.search?.toLowerCase();
+    var items =
+        rows.where((e) => _visible(userId, query, e)).where((e) {
+          if (category != null && e.category != category) return false;
+          if (search != null && !e.title.toLowerCase().contains(search)) {
+            return false;
+          }
+          return true;
+        }).toList()..sort((a, b) {
+          final t = b.spentAt.compareTo(a.spentAt);
+          return t != 0 ? t : b.id.compareTo(a.id);
+        });
+    if (after != null) {
+      // Keyset: rows strictly after the cursor in (spent_at, id) DESC.
+      items = items.where((e) {
+        final t = e.spentAt.compareTo(after.spentAt);
+        return t < 0 || (t == 0 && e.id.compareTo(after.id) < 0);
+      }).toList();
+    }
+    final page = items.take(limit).toList();
+    final more = items.length > limit;
+    return ExpensePage(page, more ? ExpenseCursor.after(page.last) : null);
   }
 
   @override
@@ -399,6 +420,10 @@ class FakeExpenseRepository implements ExpenseRepository {
     await Future<void>.delayed(Duration.zero);
     final failure = failWrites;
     if (failure != null) throw failure;
+    if (failDeleteIds.contains(expenseId)) {
+      throw const AppFailure.permissionDenied();
+    }
+    deleted.add(expenseId);
     rows.removeWhere((e) => e.id == expenseId);
   }
 

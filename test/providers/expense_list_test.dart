@@ -264,4 +264,104 @@ void main() {
       );
     });
   });
+
+  group('convert', () {
+    test('moves a personal expense into a group in one step', () async {
+      backend.groups.groupsByUser['u1'] = [groupOf('g1', adminId: 'u1')];
+      final notifier = await load();
+      final original = backend.expenses.rows.firstWhere((e) => e.id == 'e2');
+
+      final failure = await notifier.convert(
+        original,
+        ExpenseDraft.fromExpense(original, groupId: 'g1'),
+      );
+
+      expect(failure, isNull);
+      expect(backend.expenses.rows.where((e) => e.id == 'e2'), isEmpty);
+      final moved = backend.expenses.rows.where((e) => e.groupId == 'g1');
+      expect(moved, hasLength(1));
+      expect(moved.single.amount, original.amount);
+      // The personal list no longer shows it.
+      expect(ids(), ['e1']);
+    });
+
+    test('when the original cannot be removed the copy is undone', () async {
+      final notifier = await load();
+      final original = backend.expenses.rows.firstWhere((e) => e.id == 'e2');
+      backend.expenses.failDeleteIds.add('e2');
+
+      final failure = await notifier.convert(
+        original,
+        ExpenseDraft.fromExpense(original, groupId: 'g1'),
+      );
+
+      expect(failure, isA<PermissionDeniedFailure>());
+      expect(backend.expenses.rows.where((e) => e.groupId == 'g1'), isEmpty);
+      expect(backend.expenses.rows.where((e) => e.id == 'e2'), hasLength(1));
+      expect(ids(), ['e2', 'e1']);
+      expect(container.read(failureReporterProvider)?.failure, failure);
+    });
+
+    test('report: false returns the failure without reporting it', () async {
+      final notifier = await load();
+      backend.expenses.failWrites = const AppFailure.network();
+      final failure = await notifier.add(draft(), report: false);
+      expect(failure, const AppFailure.network());
+      expect(container.read(failureReporterProvider), isNull);
+      expect(ids(), ['e2', 'e1']);
+    });
+  });
+
+  group('paging', () {
+    test('loads further pages after the cursor without duplicates', () async {
+      backend.expenses.rows.clear();
+      for (var i = 0; i < 70; i++) {
+        backend.expenses.rows.add(
+          expenseOf(
+            'p${i.toString().padLeft(2, '0')}',
+            userId: 'u1',
+            spentAt: DateTime.utc(2026, 1, 1).add(Duration(hours: i)),
+          ),
+        );
+      }
+      final notifier = await load();
+      var state = container.read(expenseListProvider(personal)).value!;
+      expect(state.items, hasLength(ExpenseListNotifier.pageSize));
+      expect(state.hasMore, isTrue);
+
+      await notifier.loadMore();
+      await notifier.loadMore();
+      state = container.read(expenseListProvider(personal)).value!;
+      expect(state.items, hasLength(70));
+      expect(state.hasMore, isFalse);
+      expect(state.items.map((e) => e.id).toSet(), hasLength(70));
+      expect(state.items.first.id, 'p69');
+      expect(state.items.last.id, 'p00');
+    });
+
+    test('a failed page keeps the rows and offers retry', () async {
+      backend.expenses.rows.clear();
+      for (var i = 0; i < 40; i++) {
+        backend.expenses.rows.add(
+          expenseOf(
+            'q${i.toString().padLeft(2, '0')}',
+            userId: 'u1',
+            spentAt: DateTime.utc(2026, 1, 1).add(Duration(hours: i)),
+          ),
+        );
+      }
+      final notifier = await load();
+      backend.expenses.failReads = const AppFailure.offline();
+      await notifier.loadMore();
+      var state = container.read(expenseListProvider(personal)).value!;
+      expect(state.loadMoreFailure, const AppFailure.offline());
+      expect(state.items, hasLength(30));
+
+      backend.expenses.failReads = null;
+      await notifier.loadMore();
+      state = container.read(expenseListProvider(personal)).value!;
+      expect(state.loadMoreFailure, isNull);
+      expect(state.items, hasLength(40));
+    });
+  });
 }

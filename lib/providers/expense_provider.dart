@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/errors/app_failure.dart';
+import '../core/logging/app_logger.dart';
 import '../core/utils/haptics.dart';
 import '../data/repositories/expense_repository.dart';
 import '../models/expense.dart';
@@ -287,7 +288,10 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
   }
 
   /// Adds an expense. Returns the failure, or null when the server saved it.
-  Future<AppFailure?> add(ExpenseDraft draft) async {
+  ///
+  /// With [report] false the failure is only returned (for a form that
+  /// shows it inline); it is still rolled back.
+  Future<AppFailure?> add(ExpenseDraft draft, {bool report = true}) async {
     final invalid = draft.validate();
     if (invalid != null) return AppFailure.validation(key: invalid);
     final localId = '${Expense.localIdPrefix}${++_localIds}';
@@ -304,13 +308,13 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
       return null;
     } on AppFailure catch (failure) {
       _update((items) => items.where((e) => e.id != localId).toList());
-      return _fail(failure);
+      return _fail(failure, report: report);
     }
   }
 
   /// Saves [edited] (same id as a listed expense). Returns the failure, or
   /// null when the server saved it.
-  Future<AppFailure?> edit(Expense edited) async {
+  Future<AppFailure?> edit(Expense edited, {bool report = true}) async {
     if (edited.id.startsWith(Expense.localIdPrefix)) {
       return const AppFailure.business('expense_not_saved_yet');
     }
@@ -335,13 +339,13 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
         final rest = items.where((e) => e.id != edited.id).toList();
         return before == null ? rest : _insertSorted(rest, before);
       });
-      return _fail(failure);
+      return _fail(failure, report: report);
     }
   }
 
   /// Deletes [expense]. Returns the failure, or null when the server
   /// deleted it.
-  Future<AppFailure?> remove(Expense expense) async {
+  Future<AppFailure?> remove(Expense expense, {bool report = true}) async {
     if (expense.id.startsWith(Expense.localIdPrefix)) {
       return const AppFailure.business('expense_not_saved_yet');
     }
@@ -359,7 +363,81 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
           before,
         ),
       );
-      return _fail(failure);
+      return _fail(failure, report: report);
+    }
+  }
+
+  /// Moves [original] between personal and a group by creating [target]
+  /// (the same expense with the other `groupId`) and then deleting the
+  /// original; the server never changes `group_id` in place.
+  ///
+  /// When the original cannot be deleted, the new copy is deleted again so
+  /// the expense is never counted twice. Returns the failure, or null when
+  /// both writes succeeded.
+  Future<AppFailure?> convert(
+    Expense original,
+    ExpenseDraft target, {
+    bool report = true,
+  }) async {
+    if (original.id.startsWith(Expense.localIdPrefix)) {
+      return const AppFailure.business('expense_not_saved_yet');
+    }
+    if (original.groupId == target.groupId) {
+      return edit(
+        original.copyWith(
+          title: target.title.trim(),
+          amount: target.amount,
+          category: target.category,
+          spentAt: target.spentAt.toUtc(),
+          note: target.note,
+        ),
+        report: report,
+      );
+    }
+    final invalid = target.validate();
+    if (invalid != null) return AppFailure.validation(key: invalid);
+    final before = _find(original.id) ?? original;
+    final localId = '${Expense.localIdPrefix}${++_localIds}';
+    final optimistic = target.toOptimistic(
+      localId: localId,
+      userId: key.userId,
+    );
+    _update(
+      (items) => _insertSorted(
+        items.where((e) => e.id != original.id).toList(),
+        optimistic,
+      ),
+    );
+    Expense? created;
+    try {
+      created = await _repo.create(key.userId, target);
+      await _repo.delete(original.id);
+      final saved = created;
+      _update(
+        (items) =>
+            _insertSorted(items.where((e) => e.id != localId).toList(), saved),
+      );
+      _changed();
+      AppHaptics.success();
+      return null;
+    } on AppFailure catch (failure) {
+      final copy = created;
+      if (copy != null) {
+        try {
+          await _repo.delete(copy.id);
+        } on AppFailure catch (undoFailure) {
+          // Both rows exist now; a reload shows them so nothing is hidden.
+          AppLogger.warn('Could not remove the converted copy', undoFailure);
+          _changed();
+        }
+      }
+      _update((items) {
+        final rest = items
+            .where((e) => e.id != localId && e.id != original.id)
+            .toList();
+        return _insertSorted(rest, before);
+      });
+      return _fail(failure, report: report);
     }
   }
 
@@ -370,9 +448,11 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
     return null;
   }
 
-  AppFailure _fail(AppFailure failure) {
+  AppFailure _fail(AppFailure failure, {bool report = true}) {
     AppHaptics.error();
-    if (ref.mounted) ref.read(failureReporterProvider.notifier).report(failure);
+    if (report && ref.mounted) {
+      ref.read(failureReporterProvider.notifier).report(failure);
+    }
     return failure;
   }
 

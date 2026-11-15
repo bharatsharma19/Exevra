@@ -166,6 +166,19 @@ class ExpenseDraft {
     this.note,
   });
 
+  /// The fields of [expense] as a new expense (to re-create a deleted one
+  /// or to copy it into another scope). The server assigns a new id.
+  factory ExpenseDraft.fromExpense(Expense expense, {Object? groupId = unset}) {
+    return ExpenseDraft(
+      title: expense.title,
+      amount: expense.amount,
+      category: expense.category,
+      spentAt: expense.spentAt,
+      groupId: pick<String?>(groupId, expense.groupId),
+      note: expense.note,
+    );
+  }
+
   final String title;
   final Money amount;
   final String category;
