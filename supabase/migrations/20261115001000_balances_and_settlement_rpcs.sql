@@ -139,7 +139,6 @@ DECLARE
     v_debt_amt bigint[];
     v_i integer;
     v_j integer;
-    v_k integer;
     v_x bigint;
 BEGIN
     IF auth.uid() IS NULL THEN
