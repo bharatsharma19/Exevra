@@ -111,4 +111,117 @@ class AppLocalizationsEn extends AppLocalizations {
   String amountNegative(String amount) {
     return 'Minus $amount';
   }
+
+  @override
+  String get linkOpenFailed =>
+      'Couldn\'t open the link. Please try again later.';
+
+  @override
+  String get opensInBrowser => 'Opens in your browser';
+
+  @override
+  String get aboutTitle => 'About';
+
+  @override
+  String aboutVersion(String version, String build) {
+    return 'Version $version ($build)';
+  }
+
+  @override
+  String get aboutCredit => 'Designed & developed by Bharat Sharma';
+
+  @override
+  String get aboutLegalese => '© 2026 Bharat Sharma';
+
+  @override
+  String get aboutSupportSection => 'Help & legal';
+
+  @override
+  String get aboutPrivacyPolicy => 'Privacy Policy';
+
+  @override
+  String get aboutTermsOfUse => 'Terms of Use';
+
+  @override
+  String get aboutHelpSupport => 'Help & Support';
+
+  @override
+  String get aboutLicenses => 'Open-source licences';
+
+  @override
+  String get aboutAccountSection => 'Account';
+
+  @override
+  String get aboutDeleteAccountInfo => 'Account deletion info';
+
+  @override
+  String get aboutDeleteAccountInfoSubtitle =>
+      'How to delete your account and data, also without the app';
+
+  @override
+  String get aboutDeleteAccount => 'Delete account';
+
+  @override
+  String get supportEmailSubject => 'Exevra support';
+
+  @override
+  String supportEmailBody(String version) {
+    return 'App version: $version';
+  }
+
+  @override
+  String supportEmailOpenFailed(String email) {
+    return 'Couldn\'t open an email app. Write to us at $email.';
+  }
+
+  @override
+  String get onboardingSkip => 'Skip';
+
+  @override
+  String get onboardingSkipTooltip => 'Skip the introduction';
+
+  @override
+  String get onboardingNext => 'Next';
+
+  @override
+  String get onboardingGetStarted => 'Get started';
+
+  @override
+  String onboardingPageIndicator(int current, int total) {
+    return 'Page $current of $total';
+  }
+
+  @override
+  String get onboardingTrackTitle => 'Track every expense';
+
+  @override
+  String get onboardingTrackBody =>
+      'Log personal and shared spending in your own currency and see where your money goes.';
+
+  @override
+  String get onboardingSplitTitle => 'Split and settle up';
+
+  @override
+  String get onboardingSplitBody =>
+      'Share costs with a group and see who owes whom. When you settle up, the payment counts once the person who receives it confirms it.';
+
+  @override
+  String get onboardingAssistantTitle => 'Ask about your spending';
+
+  @override
+  String get onboardingAssistantBody =>
+      'Ask the assistant questions about your spending. It\'s optional and respects your privacy: it only sees your spending totals if you allow it, and you can turn it off in Settings.';
+
+  @override
+  String get firstExpenseNudgeTitle => 'Add your first expense';
+
+  @override
+  String get firstExpenseNudgeMessage =>
+      'Record a purchase to start seeing where your money goes.';
+
+  @override
+  String get firstExpenseNudgeAction => 'Add expense';
+
+  @override
+  String get firstExpenseNudgeDismiss => 'Dismiss tip';
 }

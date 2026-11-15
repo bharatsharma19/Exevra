@@ -51,5 +51,68 @@
   "@amountNegative": {
     "description": "Screen reader label for money going out or owed by the user.",
     "placeholders": {"amount": {"type": "String", "example": "₹1,250.00"}}
-  }
+  },
+  "linkOpenFailed": "Couldn't open the link. Please try again later.",
+  "@linkOpenFailed": {"description": "Error shown when a web page cannot be opened."},
+  "opensInBrowser": "Opens in your browser",
+  "@opensInBrowser": {"description": "Screen reader hint for a row that opens a web page."},
+  "aboutTitle": "About",
+  "@aboutTitle": {"description": "Title of the About screen."},
+  "aboutVersion": "Version {version} ({build})",
+  "@aboutVersion": {
+    "description": "App version and build number.",
+    "placeholders": {"version": {"type": "String", "example": "1.0.0"}, "build": {"type": "String", "example": "1"}}
+  },
+  "aboutCredit": "Designed & developed by Bharat Sharma",
+  "@aboutCredit": {"description": "Credit line on the About screen. Not translated."},
+  "aboutLegalese": "© 2026 Bharat Sharma",
+  "@aboutLegalese": {"description": "Copyright line on the open-source licences page."},
+  "aboutSupportSection": "Help & legal",
+  "@aboutSupportSection": {"description": "Section title on the About screen."},
+  "aboutPrivacyPolicy": "Privacy Policy",
+  "aboutTermsOfUse": "Terms of Use",
+  "aboutHelpSupport": "Help & Support",
+  "aboutLicenses": "Open-source licences",
+  "@aboutLicenses": {"description": "Row that opens the list of third-party licences."},
+  "aboutAccountSection": "Account",
+  "@aboutAccountSection": {"description": "Section title on the About screen."},
+  "aboutDeleteAccountInfo": "Account deletion info",
+  "@aboutDeleteAccountInfo": {"description": "Row that opens the web page about deleting an account."},
+  "aboutDeleteAccountInfoSubtitle": "How to delete your account and data, also without the app",
+  "aboutDeleteAccount": "Delete account",
+  "@aboutDeleteAccount": {"description": "Destructive button that starts account deletion."},
+  "supportEmailSubject": "Exevra support",
+  "@supportEmailSubject": {"description": "Subject of the support email."},
+  "supportEmailBody": "App version: {version}",
+  "@supportEmailBody": {
+    "description": "Body of the support email.",
+    "placeholders": {"version": {"type": "String", "example": "1.0.0 (1)"}}
+  },
+  "supportEmailOpenFailed": "Couldn't open an email app. Write to us at {email}.",
+  "@supportEmailOpenFailed": {
+    "description": "Error shown when no email app can be opened.",
+    "placeholders": {"email": {"type": "String", "example": "support@exevra.app"}}
+  },
+  "onboardingSkip": "Skip",
+  "@onboardingSkip": {"description": "Button that leaves the introduction."},
+  "onboardingSkipTooltip": "Skip the introduction",
+  "onboardingNext": "Next",
+  "onboardingGetStarted": "Get started",
+  "@onboardingGetStarted": {"description": "Button on the last introduction page."},
+  "onboardingPageIndicator": "Page {current} of {total}",
+  "@onboardingPageIndicator": {
+    "description": "Screen reader label of the introduction page indicator.",
+    "placeholders": {"current": {"type": "int"}, "total": {"type": "int"}}
+  },
+  "onboardingTrackTitle": "Track every expense",
+  "onboardingTrackBody": "Log personal and shared spending in your own currency and see where your money goes.",
+  "onboardingSplitTitle": "Split and settle up",
+  "onboardingSplitBody": "Share costs with a group and see who owes whom. When you settle up, the payment counts once the person who receives it confirms it.",
+  "onboardingAssistantTitle": "Ask about your spending",
+  "onboardingAssistantBody": "Ask the assistant questions about your spending. It's optional and respects your privacy: it only sees your spending totals if you allow it, and you can turn it off in Settings.",
+  "firstExpenseNudgeTitle": "Add your first expense",
+  "firstExpenseNudgeMessage": "Record a purchase to start seeing where your money goes.",
+  "firstExpenseNudgeAction": "Add expense",
+  "firstExpenseNudgeDismiss": "Dismiss tip",
+  "@firstExpenseNudgeDismiss": {"description": "Tooltip of the button that hides the first-expense tip for good."}
 }

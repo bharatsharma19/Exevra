@@ -291,6 +291,204 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Minus {amount}'**
   String amountNegative(String amount);
+
+  /// Error shown when a web page cannot be opened.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t open the link. Please try again later.'**
+  String get linkOpenFailed;
+
+  /// Screen reader hint for a row that opens a web page.
+  ///
+  /// In en, this message translates to:
+  /// **'Opens in your browser'**
+  String get opensInBrowser;
+
+  /// Title of the About screen.
+  ///
+  /// In en, this message translates to:
+  /// **'About'**
+  String get aboutTitle;
+
+  /// App version and build number.
+  ///
+  /// In en, this message translates to:
+  /// **'Version {version} ({build})'**
+  String aboutVersion(String version, String build);
+
+  /// Credit line on the About screen. Not translated.
+  ///
+  /// In en, this message translates to:
+  /// **'Designed & developed by Bharat Sharma'**
+  String get aboutCredit;
+
+  /// Copyright line on the open-source licences page.
+  ///
+  /// In en, this message translates to:
+  /// **'© 2026 Bharat Sharma'**
+  String get aboutLegalese;
+
+  /// Section title on the About screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Help & legal'**
+  String get aboutSupportSection;
+
+  /// No description provided for @aboutPrivacyPolicy.
+  ///
+  /// In en, this message translates to:
+  /// **'Privacy Policy'**
+  String get aboutPrivacyPolicy;
+
+  /// No description provided for @aboutTermsOfUse.
+  ///
+  /// In en, this message translates to:
+  /// **'Terms of Use'**
+  String get aboutTermsOfUse;
+
+  /// No description provided for @aboutHelpSupport.
+  ///
+  /// In en, this message translates to:
+  /// **'Help & Support'**
+  String get aboutHelpSupport;
+
+  /// Row that opens the list of third-party licences.
+  ///
+  /// In en, this message translates to:
+  /// **'Open-source licences'**
+  String get aboutLicenses;
+
+  /// Section title on the About screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Account'**
+  String get aboutAccountSection;
+
+  /// Row that opens the web page about deleting an account.
+  ///
+  /// In en, this message translates to:
+  /// **'Account deletion info'**
+  String get aboutDeleteAccountInfo;
+
+  /// No description provided for @aboutDeleteAccountInfoSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'How to delete your account and data, also without the app'**
+  String get aboutDeleteAccountInfoSubtitle;
+
+  /// Destructive button that starts account deletion.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete account'**
+  String get aboutDeleteAccount;
+
+  /// Subject of the support email.
+  ///
+  /// In en, this message translates to:
+  /// **'Exevra support'**
+  String get supportEmailSubject;
+
+  /// Body of the support email.
+  ///
+  /// In en, this message translates to:
+  /// **'App version: {version}'**
+  String supportEmailBody(String version);
+
+  /// Error shown when no email app can be opened.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t open an email app. Write to us at {email}.'**
+  String supportEmailOpenFailed(String email);
+
+  /// Button that leaves the introduction.
+  ///
+  /// In en, this message translates to:
+  /// **'Skip'**
+  String get onboardingSkip;
+
+  /// No description provided for @onboardingSkipTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Skip the introduction'**
+  String get onboardingSkipTooltip;
+
+  /// No description provided for @onboardingNext.
+  ///
+  /// In en, this message translates to:
+  /// **'Next'**
+  String get onboardingNext;
+
+  /// Button on the last introduction page.
+  ///
+  /// In en, this message translates to:
+  /// **'Get started'**
+  String get onboardingGetStarted;
+
+  /// Screen reader label of the introduction page indicator.
+  ///
+  /// In en, this message translates to:
+  /// **'Page {current} of {total}'**
+  String onboardingPageIndicator(int current, int total);
+
+  /// No description provided for @onboardingTrackTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Track every expense'**
+  String get onboardingTrackTitle;
+
+  /// No description provided for @onboardingTrackBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Log personal and shared spending in your own currency and see where your money goes.'**
+  String get onboardingTrackBody;
+
+  /// No description provided for @onboardingSplitTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Split and settle up'**
+  String get onboardingSplitTitle;
+
+  /// No description provided for @onboardingSplitBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Share costs with a group and see who owes whom. When you settle up, the payment counts once the person who receives it confirms it.'**
+  String get onboardingSplitBody;
+
+  /// No description provided for @onboardingAssistantTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask about your spending'**
+  String get onboardingAssistantTitle;
+
+  /// No description provided for @onboardingAssistantBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask the assistant questions about your spending. It\'s optional and respects your privacy: it only sees your spending totals if you allow it, and you can turn it off in Settings.'**
+  String get onboardingAssistantBody;
+
+  /// No description provided for @firstExpenseNudgeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Add your first expense'**
+  String get firstExpenseNudgeTitle;
+
+  /// No description provided for @firstExpenseNudgeMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Record a purchase to start seeing where your money goes.'**
+  String get firstExpenseNudgeMessage;
+
+  /// No description provided for @firstExpenseNudgeAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Add expense'**
+  String get firstExpenseNudgeAction;
+
+  /// Tooltip of the button that hides the first-expense tip for good.
+  ///
+  /// In en, this message translates to:
+  /// **'Dismiss tip'**
+  String get firstExpenseNudgeDismiss;
 }
 
 class _AppLocalizationsDelegate
