@@ -1,15 +1,23 @@
 import 'dart:async';
 
 import 'package:expense_manager/core/errors/app_failure.dart';
+import 'package:expense_manager/core/platform/connectivity.dart';
 import 'package:expense_manager/core/platform/device_time_zone.dart';
 import 'package:expense_manager/core/storage/preferences.dart';
 import 'package:expense_manager/data/repositories/expense_repository.dart';
 import 'package:expense_manager/data/repositories/group_repository.dart';
+import 'package:expense_manager/data/repositories/insights_repository.dart';
+import 'package:expense_manager/data/repositories/invitation_repository.dart';
+import 'package:expense_manager/data/repositories/settlement_repository.dart';
 import 'package:expense_manager/data/repositories/profile_repository.dart';
+import 'package:expense_manager/models/balance.dart';
 import 'package:expense_manager/models/expense.dart';
 import 'package:expense_manager/models/group.dart';
+import 'package:expense_manager/models/insights.dart';
+import 'package:expense_manager/models/invitation.dart';
 import 'package:expense_manager/models/money.dart';
 import 'package:expense_manager/models/profile.dart';
+import 'package:expense_manager/models/settlement.dart';
 import 'package:expense_manager/providers/auth_provider.dart';
 import 'package:expense_manager/services/auth_service.dart';
 import 'package:expense_manager/core/router/deep_links.dart';
@@ -431,17 +439,248 @@ class FakeExpenseRepository implements ExpenseRepository {
   Stream<GroupChangeKind> watchGroup(String groupId) => const Stream.empty();
 }
 
+/// Server-computed insights per group (null key = personal scope).
+class FakeInsightsRepository implements InsightsRepository {
+  final Map<String?, ExpenseInsights> byGroup = {};
+  AppFailure? failure;
+  int calls = 0;
+
+  @override
+  Future<ExpenseInsights> fetch({
+    required InsightScope scope,
+    required InsightTimeframe timeframe,
+    required String timeZone,
+    required String preferredCurrency,
+    String? groupId,
+  }) async {
+    calls++;
+    final f = failure;
+    if (f != null) throw f;
+    return byGroup[groupId] ??
+        ExpenseInsights.empty(
+          scope: scope,
+          timeframe: timeframe,
+          currency: preferredCurrency,
+        );
+  }
+}
+
+GroupBalance balanceOf(String? userId, int netMinor, {String name = ''}) =>
+    GroupBalance(
+      userId: userId,
+      displayName: name.isEmpty ? 'User $userId' : name,
+      paid: Money(netMinor > 0 ? netMinor : 0, 'INR'),
+      owed: Money(netMinor < 0 ? -netMinor : 0, 'INR'),
+      settledOut: Money.zero('INR'),
+      settledIn: Money.zero('INR'),
+      net: Money(netMinor, 'INR'),
+    );
+
+/// Balances and suggestions per group, set by the test.
+class FakeBalanceRepository implements BalanceRepository {
+  final Map<String, List<GroupBalance>> balancesByGroup = {};
+  final Map<String, List<SettleSuggestion>> suggestionsByGroup = {};
+
+  @override
+  Future<List<GroupBalance>> balances(String groupId) async =>
+      balancesByGroup[groupId] ?? const [];
+
+  @override
+  Future<List<SettleSuggestion>> suggestions(String groupId) async =>
+      suggestionsByGroup[groupId] ?? const [];
+}
+
+/// Settlements with the server's rules: the caller records as payer
+/// (pending, at most [maxAmountMinor]), only the payee confirms, payer,
+/// payee or [adminId] voids.
+class FakeSettlementRepository implements SettlementRepository {
+  FakeSettlementRepository(this.currentUser);
+
+  final String? Function() currentUser;
+  final List<Settlement> rows = [];
+  final List<String> calls = [];
+
+  /// Largest amount the caller may record (their remaining debt).
+  int? maxAmountMinor;
+  String? adminId;
+  int _ids = 0;
+
+  @override
+  Future<List<Settlement>> list(String groupId, {int limit = 50}) async =>
+      rows.where((s) => s.groupId == groupId).toList()
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+  @override
+  Future<List<SettlementEvent>> events(String settlementId) async => const [];
+
+  @override
+  Future<Settlement> record({
+    required String groupId,
+    required String toUser,
+    required Money amount,
+    String? note,
+  }) async {
+    calls.add('record:$toUser:${amount.amountMinor}');
+    final max = maxAmountMinor;
+    if (max != null && amount.amountMinor > max) {
+      throw const AppFailure.business('settlement_exceeds_debt');
+    }
+    final saved = Settlement(
+      id: 's${++_ids}',
+      groupId: groupId,
+      fromUser: currentUser(),
+      toUser: toUser,
+      amount: amount,
+      status: SettlementStatus.pending,
+      note: note,
+      createdBy: currentUser(),
+      createdAt: DateTime.utc(2026, 11, 10).add(Duration(minutes: _ids)),
+    );
+    rows.add(saved);
+    return saved;
+  }
+
+  Settlement _find(String id) => rows.firstWhere(
+    (s) => s.id == id,
+    orElse: () => throw const AppFailure.notFound(key: 'settlement_not_found'),
+  );
+
+  void _replace(Settlement updated) {
+    final i = rows.indexWhere((s) => s.id == updated.id);
+    rows[i] = updated;
+  }
+
+  @override
+  Future<Settlement> confirm(String settlementId) async {
+    calls.add('confirm:$settlementId');
+    final s = _find(settlementId);
+    if (s.toUser != currentUser()) {
+      throw const AppFailure.permissionDenied(key: 'not_settlement_payee');
+    }
+    if (!s.isPending) {
+      throw const AppFailure.business('settlement_not_pending');
+    }
+    final updated = s.copyWith(
+      status: SettlementStatus.confirmed,
+      confirmedAt: DateTime.utc(2026, 11, 11),
+    );
+    _replace(updated);
+    return updated;
+  }
+
+  @override
+  Future<Settlement> voidSettlement(
+    String settlementId, {
+    String? reason,
+  }) async {
+    calls.add('void:$settlementId:${reason ?? ''}');
+    final s = _find(settlementId);
+    final me = currentUser();
+    if (me != s.fromUser && me != s.toUser && me != adminId) {
+      throw const AppFailure.permissionDenied(key: 'not_settlement_party');
+    }
+    if (s.isVoided) {
+      throw const AppFailure.business('settlement_already_voided');
+    }
+    final updated = s.copyWith(
+      status: SettlementStatus.voided,
+      voidedAt: DateTime.utc(2026, 11, 12),
+      voidedBy: me,
+      voidReason: reason,
+    );
+    _replace(updated);
+    return updated;
+  }
+}
+
+/// Email invitations; [nextSend] decides whether the email "went out".
+class FakeInvitationRepository implements InvitationRepository {
+  final List<GroupInvitation> pending = [];
+  final List<String> sentTo = [];
+  final List<String> revoked = [];
+  SentInvitation nextSend = const SentInvitation(
+    invitationId: 'inv-1',
+    sent: true,
+  );
+  AppFailure? failSend;
+
+  @override
+  Future<SentInvitation> send({
+    required String groupId,
+    required String email,
+    GroupRole role = GroupRole.member,
+  }) async {
+    final f = failSend;
+    if (f != null) throw f;
+    sentTo.add(email);
+    pending.add(
+      GroupInvitation(
+        id: nextSend.invitationId,
+        groupId: groupId,
+        inviterId: 'admin',
+        email: email,
+        role: role,
+        status: InvitationStatus.pending,
+        expiresAt: DateTime.now().toUtc().add(const Duration(days: 7)),
+        createdAt: DateTime.now().toUtc(),
+      ),
+    );
+    return nextSend;
+  }
+
+  @override
+  Future<List<GroupInvitation>> listPending(String groupId) async =>
+      pending.where((i) => i.groupId == groupId).toList();
+
+  @override
+  Future<void> revoke(String invitationId) async {
+    revoked.add(invitationId);
+    pending.removeWhere((i) => i.id == invitationId);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError(invocation.memberName.toString());
+}
+
+/// Network state controlled by the test.
+class FakeConnectivitySource implements ConnectivitySource {
+  FakeConnectivitySource({this.online = true});
+
+  bool online;
+  final StreamController<bool> controller = StreamController<bool>.broadcast();
+
+  void set(bool value) {
+    online = value;
+    controller.add(value);
+  }
+
+  @override
+  Future<bool> isOnline() async => online;
+
+  @override
+  Stream<bool> get changes => controller.stream;
+}
+
 /// Everything a signed-in session needs, backed by fakes.
 class TestBackend {
   TestBackend({String? signedInAs})
     : auth = FakeAuthService(signedInAs: signedInAs) {
     groups = FakeGroupRepository(() => auth.currentUser?.id);
+    settlements = FakeSettlementRepository(() => auth.currentUser?.id);
   }
 
   final FakeAuthService auth;
   final FakeProfileRepository profiles = FakeProfileRepository();
   late final FakeGroupRepository groups;
   final FakeExpenseRepository expenses = FakeExpenseRepository();
+  final FakeInsightsRepository insights = FakeInsightsRepository();
+  final FakeBalanceRepository balances = FakeBalanceRepository();
+  late final FakeSettlementRepository settlements;
+  final FakeConnectivitySource connectivity = FakeConnectivitySource();
+
+  /// Set before [container] to fake email invitations.
+  FakeInvitationRepository? invitations;
 
   /// Incoming links (set before [container] to simulate a cold start).
   FakeLinkSource links = FakeLinkSource();
@@ -460,6 +699,12 @@ class TestBackend {
         profileRepositoryProvider.overrideWithValue(profiles),
         groupRepositoryProvider.overrideWithValue(groups),
         expenseRepositoryProvider.overrideWithValue(expenses),
+        insightsRepositoryProvider.overrideWithValue(insights),
+        balanceRepositoryProvider.overrideWithValue(balances),
+        settlementRepositoryProvider.overrideWithValue(settlements),
+        connectivitySourceProvider.overrideWithValue(connectivity),
+        if (invitations case final invitations?)
+          invitationRepositoryProvider.overrideWithValue(invitations),
         deviceTimeZoneProvider.overrideWith((ref) async => 'Asia/Kolkata'),
         linkSourceProvider.overrideWithValue(links),
         ...extraOverrides,

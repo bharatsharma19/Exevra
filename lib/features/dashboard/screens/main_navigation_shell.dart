@@ -4,7 +4,9 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/utils/haptics.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/errors/app_failure.dart';
 import '../../../core/errors/failure_messages.dart';
+import '../../../core/platform/connectivity.dart';
 import '../../../providers/chat_provider.dart';
 import '../../../providers/failure_reporter.dart';
 import '../../../providers/group_detail_providers.dart';
@@ -46,9 +48,15 @@ class MainNavigationShell extends ConsumerWidget {
     // here exactly once, as friendly copy.
     ref.listen<ReportedFailure?>(failureReporterProvider, (prev, next) {
       if (next != null && next.sequence != prev?.sequence) {
-        _showError(context, friendlyMessage(next.failure));
+        _showError(
+          context,
+          friendlyMessage(
+            offlineAware(next.failure, offline: ref.read(isOfflineProvider)),
+          ),
+        );
       }
     });
+    final offline = ref.watch(isOfflineProvider);
 
     ref.listen<ChatState>(chatProvider, (prev, next) {
       if (next.errorMessage != null &&
@@ -60,7 +68,18 @@ class MainNavigationShell extends ConsumerWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      body: navigationShell,
+      body: Column(
+        children: [
+          if (offline) const OfflineBanner(),
+          Expanded(
+            child: MediaQuery.removePadding(
+              context: context,
+              removeTop: offline,
+              child: navigationShell,
+            ),
+          ),
+        ],
+      ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           border: Border(
@@ -119,6 +138,59 @@ class MainNavigationShell extends ConsumerWidget {
               label: 'Profile',
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A transport failure while the device is offline is explained as
+/// "you're offline" rather than as a server problem.
+AppFailure offlineAware(AppFailure failure, {required bool offline}) {
+  if (!offline) return failure;
+  return switch (failure) {
+    NetworkFailure() || TimeoutFailure() => const AppFailure.offline(),
+    _ => failure,
+  };
+}
+
+/// Shown above every tab while the device has no connection.
+class OfflineBanner extends StatelessWidget {
+  const OfflineBanner({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      liveRegion: true,
+      child: Material(
+        key: const Key('offline-banner'),
+        color: scheme.inverseSurface,
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.cloud_off_rounded,
+                  size: 18,
+                  color: scheme.onInverseSurface,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    "You're offline. Changes can't be saved until you "
+                    'reconnect.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: scheme.onInverseSurface,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

@@ -117,6 +117,20 @@ final scopeExpenseKeyProvider = Provider<ExpenseListKey?>((ref) {
   return ExpenseListKey(userId, ExpenseQuery(scope: scope));
 });
 
+/// The dashboard's list: every expense of the active (readable) group, or
+/// the user's personal expenses in personal mode. It uses the same scope
+/// rule as the dashboard totals (`activeInsightsKeyProvider`), so the
+/// recent rows and the figures above them describe the same thing.
+final dashboardExpenseKeyProvider = Provider<ExpenseListKey?>((ref) {
+  final userId = ref.watch(currentUserIdProvider);
+  if (userId == null || !ref.watch(groupsReadyProvider)) return null;
+  final group = ref.watch(activeGroupProvider);
+  final scope = group != null && group.canRead
+      ? ExpenseScope.group(group.id)
+      : const ExpenseScope.personal();
+  return ExpenseListKey(userId, ExpenseQuery(scope: scope));
+});
+
 /// The expenses screen's list with its filters, or null while signed out
 /// or while groups load.
 final filteredExpenseKeyProvider = Provider<ExpenseListKey?>((ref) {
