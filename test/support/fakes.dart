@@ -793,6 +793,18 @@ class FakeSettlementRepository implements SettlementRepository {
   /// When non-empty, each `list` call waits for the next one, then reads.
   final List<Completer<void>> heldLists = [];
 
+  /// When set, record, confirm and void wait for it before running.
+  Completer<void>? holdWrites;
+
+  /// Thrown by record, confirm and void while set.
+  AppFailure? failWrites;
+
+  Future<void> _beforeWrite() async {
+    await holdWrites?.future;
+    final f = failWrites;
+    if (f != null) throw f;
+  }
+
   static int _newestFirst(Settlement a, Settlement b) {
     final t = b.createdAt.compareTo(a.createdAt);
     return t != 0 ? t : b.id.compareTo(a.id);
@@ -836,6 +848,7 @@ class FakeSettlementRepository implements SettlementRepository {
     String? note,
   }) async {
     calls.add('record:$toUser:${amount.amountMinor}');
+    await _beforeWrite();
     final max = maxAmountMinor;
     if (max != null && amount.amountMinor > max) {
       throw const AppFailure.business('settlement_exceeds_debt');
@@ -868,6 +881,7 @@ class FakeSettlementRepository implements SettlementRepository {
   @override
   Future<Settlement> confirm(String settlementId) async {
     calls.add('confirm:$settlementId');
+    await _beforeWrite();
     final s = _find(settlementId);
     if (s.toUser != currentUser()) {
       throw const AppFailure.permissionDenied(key: 'not_settlement_payee');
@@ -889,6 +903,7 @@ class FakeSettlementRepository implements SettlementRepository {
     String? reason,
   }) async {
     calls.add('void:$settlementId:${reason ?? ''}');
+    await _beforeWrite();
     final s = _find(settlementId);
     final me = currentUser();
     if (me != s.fromUser && me != s.toUser && me != adminId) {

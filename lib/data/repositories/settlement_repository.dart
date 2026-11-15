@@ -8,6 +8,7 @@ import '../../models/json_reader.dart';
 import '../../models/money.dart';
 import '../../models/settlement.dart';
 import '../supabase_client_provider.dart';
+import 'expense_repository.dart';
 
 /// Settlements between members. Writes only through RPCs; the payer
 /// records (pending), the payee confirms, either party or the admin voids.
@@ -55,9 +56,16 @@ final balanceRepositoryProvider = Provider<BalanceRepository>(
 );
 
 class SupabaseSettlementRepository implements SettlementRepository {
-  SupabaseSettlementRepository(this._client);
+  SupabaseSettlementRepository(
+    this._client, {
+    this.writeTimeout = SupabaseExpenseRepository.writeTimeout,
+  });
 
   final SupabaseClient _client;
+
+  /// Upper bound for one write (as for expenses), so a stalled request
+  /// ends as a timeout instead of leaving the dialog waiting.
+  final Duration writeTimeout;
 
   @override
   Future<List<Settlement>> list(
@@ -130,15 +138,17 @@ class SupabaseSettlementRepository implements SettlementRepository {
       if (trimmed != null && trimmed.length > 200) {
         throw const AppFailure.validation(field: 'note', key: 'invalid_note');
       }
-      final data = await _client.rpc<Object?>(
-        'record_settlement',
-        params: {
-          'p_group_id': groupId,
-          'p_to_user': toUser,
-          'p_amount_minor': amount.amountMinor,
-          'p_note': trimmed == null || trimmed.isEmpty ? null : trimmed,
-        },
-      );
+      final data = await _client
+          .rpc<Object?>(
+            'record_settlement',
+            params: {
+              'p_group_id': groupId,
+              'p_to_user': toUser,
+              'p_amount_minor': amount.amountMinor,
+              'p_note': trimmed == null || trimmed.isEmpty ? null : trimmed,
+            },
+          )
+          .timeout(writeTimeout);
       return Settlement.fromJson(singleResult(data));
     });
   }
@@ -146,10 +156,12 @@ class SupabaseSettlementRepository implements SettlementRepository {
   @override
   Future<Settlement> confirm(String settlementId) {
     return ErrorMapper.guard(() async {
-      final data = await _client.rpc<Object?>(
-        'confirm_settlement',
-        params: {'p_settlement_id': settlementId},
-      );
+      final data = await _client
+          .rpc<Object?>(
+            'confirm_settlement',
+            params: {'p_settlement_id': settlementId},
+          )
+          .timeout(writeTimeout);
       return Settlement.fromJson(singleResult(data));
     });
   }
@@ -164,13 +176,15 @@ class SupabaseSettlementRepository implements SettlementRepository {
           key: 'invalid_reason',
         );
       }
-      final data = await _client.rpc<Object?>(
-        'void_settlement',
-        params: {
-          'p_settlement_id': settlementId,
-          'p_reason': trimmed == null || trimmed.isEmpty ? null : trimmed,
-        },
-      );
+      final data = await _client
+          .rpc<Object?>(
+            'void_settlement',
+            params: {
+              'p_settlement_id': settlementId,
+              'p_reason': trimmed == null || trimmed.isEmpty ? null : trimmed,
+            },
+          )
+          .timeout(writeTimeout);
       return Settlement.fromJson(singleResult(data));
     });
   }

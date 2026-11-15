@@ -286,10 +286,26 @@ class SettlementsNotifier extends UserScopedNotifier<SettlementHistory> {
     return byTime != 0 ? byTime : b.id.compareTo(a.id);
   }
 
+  /// Writes on their way: `record` for a new payment, else the payment's
+  /// id. The same write is not sent twice while the first is on its way.
+  final Set<String> _inFlight = {};
+
+  /// Runs one write. Like expense writes it is bounded by a timeout in the
+  /// repository; a write that failed on the way may still have happened,
+  /// so everything reloads and the failure says the result is unknown
+  /// instead of inviting a retry that could record a payment twice.
   Future<AppFailure?> _write(
+    String target,
     Future<Settlement> Function() action, {
     bool report = true,
   }) async {
+    if (!_inFlight.add(target)) {
+      return _report(
+        ref,
+        const AppFailure.business('settlement_in_progress'),
+        report: report,
+      );
+    }
     try {
       final saved = await action();
       if (!ref.mounted) return null;
@@ -299,13 +315,27 @@ class SettlementsNotifier extends UserScopedNotifier<SettlementHistory> {
           items: [saved, ...current.items.where((s) => s.id != saved.id)]
             ..sort(_newestFirst),
           hasMore: current.hasMore,
+          isLoadingMore: current.isLoadingMore,
+          loadMoreFailure: current.loadMoreFailure,
         ),
       );
       ref.read(dataRevisionProvider.notifier).bump(DataKind.settlements);
       AppHaptics.success();
       return null;
     } on AppFailure catch (failure) {
-      return _report(ref, failure, report: report);
+      if (!failure.outcomeUnknown) {
+        return _report(ref, failure, report: report);
+      }
+      if (ref.mounted) {
+        ref.read(dataRevisionProvider.notifier).bump(DataKind.settlements);
+      }
+      return _report(
+        ref,
+        const AppFailure.network(key: 'settlement_unconfirmed'),
+        report: report,
+      );
+    } finally {
+      _inFlight.remove(target);
     }
   }
 
@@ -316,6 +346,7 @@ class SettlementsNotifier extends UserScopedNotifier<SettlementHistory> {
     String? note,
     bool report = true,
   }) => _write(
+    'record',
     () => _repo.record(
       groupId: groupId,
       toUser: toUser,
@@ -327,7 +358,7 @@ class SettlementsNotifier extends UserScopedNotifier<SettlementHistory> {
 
   /// The payee confirms they received the payment.
   Future<AppFailure?> confirm(String settlementId) =>
-      _write(() => _repo.confirm(settlementId));
+      _write(settlementId, () => _repo.confirm(settlementId));
 
   /// Payer, payee or admin cancels a payment.
   Future<AppFailure?> voidPayment(
@@ -335,6 +366,7 @@ class SettlementsNotifier extends UserScopedNotifier<SettlementHistory> {
     String? reason,
     bool report = true,
   }) => _write(
+    settlementId,
     () => _repo.voidSettlement(settlementId, reason: reason),
     report: report,
   );

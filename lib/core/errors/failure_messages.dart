@@ -128,6 +128,11 @@ const Map<String, String> _byKey = {
       'Only the person receiving the payment can confirm it.',
   'not_settlement_party':
       'Only the payer, the receiver or the group admin can void this payment.',
+  'settlement_unconfirmed':
+      "We couldn't confirm this payment change was saved. Check the payments "
+      'before trying again.',
+  'settlement_in_progress':
+      'This payment is still being saved. Wait a moment, then try again.',
   // Limits and services
   'rate_limited': 'Too many attempts. Please wait a moment and try again.',
   'quota_exceeded': "You've reached today's limit. Please try again tomorrow.",

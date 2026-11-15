@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:expense_manager/core/errors/app_failure.dart';
 import 'package:expense_manager/core/errors/failure_messages.dart';
 import 'package:expense_manager/features/groups/widgets/settlements_card.dart';
 import 'package:expense_manager/models/balance.dart';
@@ -213,6 +214,79 @@ void main() {
         all.take(history.items.length).map((s) => s.id),
       );
       expect(history.items, hasLength(64));
+    });
+  });
+
+  group('writes', () {
+    late TestBackend backend;
+    late ProviderContainer container;
+    late SettlementsNotifier notifier;
+
+    setUp(() async {
+      backend = TestBackend(signedInAs: 'u1');
+      backend.profiles.profiles['u1'] = profileOf('u1', activeGroupId: 'g1');
+      backend.groups.groupsByUser['u1'] = [groupOf('g1', adminId: 'u9')];
+      backend.settlements.rows.add(_settlement('to-me', from: 'u2', to: 'u1'));
+      container = await backend.container();
+      addTearDown(container.dispose);
+      container.listen(settlementsProvider('g1'), (_, _) {});
+      notifier = container.read(settlementsProvider('g1').notifier);
+      await notifier.loaded;
+    });
+
+    test('a write that fails in transit reloads and says so', () async {
+      final before = backend.settlements.listCalls;
+      backend.settlements.failWrites = const AppFailure.timeout();
+
+      final failure = await notifier.record(
+        toUser: 'u2',
+        amount: Money(500, 'INR'),
+        report: false,
+      );
+      await settle();
+
+      expect(failure, const AppFailure.network(key: 'settlement_unconfirmed'));
+      expect(friendlyMessage(failure!), contains('payment'));
+      expect(backend.settlements.listCalls, greaterThan(before));
+    });
+
+    test('a refused write keeps its own friendly reason', () async {
+      backend.settlements.failWrites = const AppFailure.business(
+        'settlement_not_pending',
+      );
+      final failure = await notifier.confirm('to-me');
+      expect(failure, const AppFailure.business('settlement_not_pending'));
+      expect(friendlyMessage(failure!), 'This payment is no longer pending.');
+    });
+
+    test('the same write is not sent twice while on its way', () async {
+      final release = Completer<void>();
+      backend.settlements.holdWrites = release;
+
+      final first = notifier.confirm('to-me');
+      final second = await notifier.confirm('to-me');
+      expect(second, const AppFailure.business('settlement_in_progress'));
+      expect(friendlyMessage(second!), contains('still being saved'));
+      final recording = notifier.record(
+        toUser: 'u2',
+        amount: Money(500, 'INR'),
+      );
+      expect(
+        await notifier.record(toUser: 'u2', amount: Money(500, 'INR')),
+        const AppFailure.business('settlement_in_progress'),
+      );
+
+      release.complete();
+      expect(await first, isNull);
+      expect(await recording, isNull);
+      expect(
+        backend.settlements.calls.where((c) => c == 'confirm:to-me'),
+        hasLength(1),
+      );
+      expect(
+        backend.settlements.calls.where((c) => c.startsWith('record:')),
+        hasLength(1),
+      );
     });
   });
 

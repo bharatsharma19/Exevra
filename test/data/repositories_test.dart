@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:expense_manager/core/errors/app_failure.dart';
@@ -399,6 +400,27 @@ void main() {
         'p_amount_minor': 5000,
         'p_note': null,
       });
+    });
+
+    test('a stalled write ends as a timeout', () async {
+      final repo = SupabaseSettlementRepository(
+        SupabaseClient(
+          'https://unit.test',
+          'sb_publishable_test',
+          authOptions: const AuthClientOptions(autoRefreshToken: false),
+          httpClient: MockClient((_) => Completer<http.Response>().future),
+        ),
+        writeTimeout: const Duration(milliseconds: 20),
+      );
+      await expectLater(
+        repo.record(groupId: 'g1', toUser: 'u2', amount: Money(500, 'INR')),
+        throwsA(isA<TimeoutFailure>()),
+      );
+      await expectLater(repo.confirm('s1'), throwsA(isA<TimeoutFailure>()));
+      await expectLater(
+        repo.voidSettlement('s1'),
+        throwsA(isA<TimeoutFailure>()),
+      );
     });
 
     test('zero is rejected before any request', () async {
