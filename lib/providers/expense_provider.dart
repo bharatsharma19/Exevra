@@ -392,10 +392,7 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
   }
 
   /// Whether [failure] leaves open if the request reached the server.
-  static bool _inTransit(AppFailure failure) =>
-      failure is NetworkFailure ||
-      failure is TimeoutFailure ||
-      failure is OfflineFailure;
+  static bool _inTransit(AppFailure failure) => failure.outcomeUnknown;
 
   /// Saves [edited] (same id as a listed expense). Returns the failure, or
   /// null when the server saved it.

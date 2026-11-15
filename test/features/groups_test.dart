@@ -1,3 +1,4 @@
+import 'package:expense_manager/core/errors/app_failure.dart';
 import 'package:expense_manager/core/errors/failure_messages.dart';
 import 'package:expense_manager/features/groups/widgets/groups_section.dart';
 import 'package:expense_manager/models/group.dart';
@@ -82,6 +83,47 @@ void main() {
       expect(container.read(activeGroupProvider)?.name, 'Flatmates');
       expect(backend.groups.activeGroupWrites, ['new-1']);
       expect(find.textContaining('"Flatmates" created'), findsOneWidget);
+    });
+
+    testWidgets('a created group that cannot be opened closes the form', (
+      tester,
+    ) async {
+      final (backend, _) = await _pump(tester);
+      backend.groups.failSetActive = const AppFailure.network();
+
+      await tester.tap(find.byTooltip('Create group'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('group-name')), 'Trip');
+      await tester.tap(find.text('Create'));
+      await tester.pumpAndSettle();
+
+      // No form left to press Create on again.
+      expect(find.text('Create a group'), findsNothing);
+      expect(find.textContaining('"Trip" was created'), findsOneWidget);
+      expect(backend.groups.calls, ['create:Trip:INR']);
+    });
+
+    testWidgets('an unconfirmed create says to check before retrying', (
+      tester,
+    ) async {
+      final (backend, _) = await _pump(tester);
+      backend.groups
+        ..failCreate = const AppFailure.timeout()
+        ..createBeforeFailing = true;
+
+      await tester.tap(find.byTooltip('Create group'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('group-name')), 'Trip');
+      await tester.tap(find.text('Create'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Create a group'), findsNothing);
+      expect(
+        find.text(friendlyMessageForKey('group_unconfirmed')),
+        findsOneWidget,
+      );
+      expect(find.text('Group Trip'), findsNothing);
+      expect(find.text('Trip'), findsWidgets);
     });
 
     testWidgets('a blank name is rejected inline', (tester) async {

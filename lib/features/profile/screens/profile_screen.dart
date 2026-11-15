@@ -214,33 +214,35 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   /// failure nothing changes and the reason is shown.
   Future<void> _deleteAccount() async {
     final navigator = Navigator.of(context, rootNavigator: true);
-    unawaited(
-      showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => const PopScope(
-          canPop: false,
-          child: AlertDialog(
-            content: Row(
-              children: [
-                SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                SizedBox(width: 16),
-                Expanded(child: Text('Deleting your account...')),
-              ],
-            ),
+    // Kept so only this dialog is closed: once the session ends, the
+    // redirect to sign-in may already have removed it with the page below,
+    // and a blind pop would remove the sign-in page instead.
+    final progress = DialogRoute<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              SizedBox(width: 16),
+              Expanded(child: Text('Deleting your account...')),
+            ],
           ),
         ),
       ),
     );
+    unawaited(navigator.push(progress));
     final messenger = ScaffoldMessenger.of(context);
     final failure = await ref
         .read(authControllerProvider.notifier)
         .deleteAccount();
-    if (navigator.mounted) navigator.pop();
+    if (navigator.mounted && progress.isActive) navigator.removeRoute(progress);
     messenger.showSnackBar(
       SnackBar(
         content: Text(

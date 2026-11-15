@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/errors/app_failure.dart';
+import '../core/logging/app_logger.dart';
 import '../core/utils/haptics.dart';
 import '../data/repositories/group_repository.dart';
 import '../data/repositories/invitation_repository.dart';
@@ -46,6 +47,38 @@ class GroupsState {
       userId: userId,
     );
   }
+}
+
+/// What became of a group creation.
+enum GroupCreateStatus {
+  /// Created and now the active group.
+  opened,
+
+  /// Created on the server, but the group list or the active scope could
+  /// not be updated afterwards. Creating again would make a second group.
+  createdNotOpened,
+
+  /// The request failed on the way, so the group may or may not exist.
+  /// The list was reloaded; the user checks it before trying again.
+  unconfirmed,
+
+  /// The server refused it; nothing was created.
+  failed,
+}
+
+/// Result of [GroupsNotifier.createGroup].
+class GroupCreateResult {
+  const GroupCreateResult(this.status, {this.failure});
+
+  final GroupCreateStatus status;
+
+  /// What went wrong, for every status but [GroupCreateStatus.opened].
+  final AppFailure? failure;
+
+  /// Whether the group exists on the server for certain.
+  bool get created =>
+      status == GroupCreateStatus.opened ||
+      status == GroupCreateStatus.createdNotOpened;
 }
 
 /// Groups of the signed-in user plus the active scope (personal or one
@@ -116,7 +149,8 @@ class GroupsNotifier extends AsyncNotifier<GroupsState> {
   }
 
   /// Re-reads the group list, keeping the active scope when still valid.
-  Future<AppFailure?> refresh() async {
+  /// With [report] false a failure is only returned.
+  Future<AppFailure?> refresh({bool report = true}) async {
     final userId = ref.read(currentUserIdProvider);
     try {
       final groups = await _repo.fetchMyGroups();
@@ -132,15 +166,16 @@ class GroupsNotifier extends AsyncNotifier<GroupsState> {
       return null;
     } on AppFailure catch (failure) {
       if (!_isFor(userId)) return null;
-      _report(failure);
+      _report(failure, report: report);
       return failure;
     }
   }
 
   /// Switches to [groupId] (null = personal). Writes the profile once per
   /// switch. Writes are sent in order, and when the latest switch fails
-  /// the scope the server holds is shown again.
-  Future<AppFailure?> switchScope(String? groupId) async {
+  /// the scope the server holds is shown again. With [report] false a
+  /// failure is only returned.
+  Future<AppFailure?> switchScope(String? groupId, {bool report = true}) async {
     final current = state.value;
     final userId = current?.userId;
     if (current == null || userId == null) return null;
@@ -166,30 +201,52 @@ class GroupsNotifier extends AsyncNotifier<GroupsState> {
       final restored = _resolve(now.groups, _serverScope);
       state = AsyncData(now.copyWith(activeGroupId: restored));
       ref.read(profileProvider.notifier).setActiveGroupLocally(restored);
-      _report(failure);
+      _report(failure, report: report);
       return failure;
     }
   }
 
-  /// Creates a group and makes it active. Returns the failure or null.
-  /// With [report] false a failure to create is only returned (for a form
-  /// that shows it inline).
-  Future<AppFailure?> createGroup(
+  /// Creates a group and makes it active. With [report] false failures
+  /// are only returned (for a form that shows them itself).
+  ///
+  /// Once the server returned the new id the group exists, so a failure
+  /// to reload or open it is never reported as a failure to create (a
+  /// retry would make a second group). A request that failed on the way
+  /// may also have created it: the list is reloaded and the result says
+  /// so instead of inviting a retry.
+  Future<GroupCreateResult> createGroup(
     String name, {
     required String currency,
     bool report = true,
   }) async {
+    final String id;
     try {
-      final id = await _repo.createGroup(name: name, currency: currency);
-      final refreshed = await refresh();
-      if (refreshed != null) return refreshed;
-      final switched = await switchScope(id);
-      if (switched == null) AppHaptics.success();
-      return switched;
+      id = await _repo.createGroup(name: name, currency: currency);
     } on AppFailure catch (failure) {
+      if (failure.outcomeUnknown) {
+        await refresh(report: false);
+        const unconfirmed = AppFailure.network(key: 'group_unconfirmed');
+        _report(unconfirmed, report: report);
+        return const GroupCreateResult(
+          GroupCreateStatus.unconfirmed,
+          failure: unconfirmed,
+        );
+      }
       _report(failure, report: report);
-      return failure;
+      return GroupCreateResult(GroupCreateStatus.failed, failure: failure);
     }
+    // Opening needs the group in the list; without it the scope would
+    // point at a group this device cannot show.
+    final problem =
+        await refresh(report: report) ?? await switchScope(id, report: report);
+    if (problem != null) {
+      return GroupCreateResult(
+        GroupCreateStatus.createdNotOpened,
+        failure: problem,
+      );
+    }
+    AppHaptics.success();
+    return const GroupCreateResult(GroupCreateStatus.opened);
   }
 
   /// Sends a join request with an invite code. The group shows as
@@ -249,21 +306,56 @@ class GroupsNotifier extends AsyncNotifier<GroupsState> {
 
   /// Leaves [groupId]. The server picks the next active group.
   Future<AppFailure?> leaveGroup(String groupId) =>
-      _removeGroup(() => _repo.leaveGroup(groupId));
+      _removeGroup(groupId, () => _repo.leaveGroup(groupId));
 
   /// Deletes [groupId] and all its data (admin only).
   Future<AppFailure?> deleteGroup(String groupId) =>
-      _removeGroup(() => _repo.deleteGroup(groupId));
+      _removeGroup(groupId, () => _repo.deleteGroup(groupId));
 
-  Future<AppFailure?> _removeGroup(Future<Object?> Function() action) async {
+  /// Runs [action] and returns its failure, or null once the server did
+  /// it. Reloading afterwards is separate: when only the reload fails the
+  /// group is dropped locally, and the removal still counts as done.
+  Future<AppFailure?> _removeGroup(
+    String groupId,
+    Future<Object?> Function() action,
+  ) async {
+    final userId = ref.read(currentUserIdProvider);
     try {
       await action();
-      await _reloadFromServer();
-      AppHaptics.medium();
-      return null;
     } on AppFailure catch (failure) {
+      if (!_isFor(userId)) return null;
       _report(failure);
       return failure;
+    }
+    AppHaptics.medium();
+    try {
+      await _reloadFromServer();
+    } on AppFailure catch (failure) {
+      AppLogger.warn(
+        'Groups did not reload after a membership change',
+        failure,
+      );
+      _dropLocally(groupId, userId);
+    }
+    return null;
+  }
+
+  /// Removes [groupId] from the loaded state; personal mode when it was
+  /// the active group.
+  void _dropLocally(String groupId, String? userId) {
+    if (!_isFor(userId)) return;
+    final current = state.value;
+    if (current == null) return;
+    if (_serverScope == groupId) _serverScope = null;
+    final wasActive = current.activeGroupId == groupId;
+    state = AsyncData(
+      current.copyWith(
+        groups: current.groups.where((g) => g.id != groupId).toList(),
+        activeGroupId: wasActive ? null : current.activeGroupId,
+      ),
+    );
+    if (wasActive) {
+      ref.read(profileProvider.notifier).setActiveGroupLocally(null);
     }
   }
 

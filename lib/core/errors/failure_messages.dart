@@ -79,6 +79,9 @@ const Map<String, String> _byKey = {
   'membership_rpc_only': "You don't have permission to do that.",
   'invalid_code': "That invite code isn't valid. Check it and try again.",
   'group_not_ready': 'Your groups are still loading. Try again in a moment.',
+  'group_unconfirmed':
+      "We couldn't confirm the group was created. Check your groups before "
+      'trying again.',
   'code_expired':
       'That invite code has expired. Ask the group admin for a new one.',
   // Input

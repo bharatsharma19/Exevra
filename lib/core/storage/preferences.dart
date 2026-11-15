@@ -13,8 +13,10 @@ final sharedPreferencesProvider = Provider<SharedPreferences>(
 /// Keys and clean-up for preferences.
 ///
 /// * Device-wide keys (the theme) survive sign-out.
-/// * Per-user keys are namespaced `u.<uid>.<name>` and are all removed
-///   when that user signs out or deletes the account.
+/// * Per-user keys are namespaced `u.<uid>.<name>` and are removed when
+///   that user signs out or deletes the account. Only the App Lock flag
+///   survives a sign-out (it holds no personal data), so signing in again
+///   cannot skip the lock.
 abstract final class UserPrefs {
   static const String _prefix = 'u.';
 
@@ -35,11 +37,20 @@ abstract final class UserPrefs {
     AppConstants.keySecureToken,
   ];
 
-  /// Removes every key of [userId] and the legacy global user keys.
-  static Future<void> clearUser(SharedPreferences prefs, String userId) async {
+  /// Removes every key of [userId] and the legacy global user keys. With
+  /// [keepAppLock] the App Lock flag stays, so the next sign-in of the
+  /// same account on this device starts locked.
+  static Future<void> clearUser(
+    SharedPreferences prefs,
+    String userId, {
+    required bool keepAppLock,
+  }) async {
     final ownPrefix = '$_prefix$userId.';
+    final lockKey = key(userId, appLock);
     final keys = [
-      ...prefs.getKeys().where((k) => k.startsWith(ownPrefix)),
+      ...prefs.getKeys().where(
+        (k) => k.startsWith(ownPrefix) && !(keepAppLock && k == lockKey),
+      ),
       ...legacyUserKeys.where(prefs.containsKey),
     ];
     for (final key in keys) {

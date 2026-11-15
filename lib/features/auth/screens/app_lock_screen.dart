@@ -108,11 +108,33 @@ class _AppLockScreenState extends ConsumerState<AppLockScreen> {
                       label: const Text('Unlock'),
                     ),
                   ),
+                if (lock.canTurnOffWithoutDevice) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'You just signed in to your account, so you can turn App '
+                    'Lock off on this device and turn it on again in Profile '
+                    'once the device has a screen lock.',
+                    style: text.bodySmall,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: () => unawaited(
+                        ref
+                            .read(appLockProvider.notifier)
+                            .turnOffWithoutDevice(),
+                      ),
+                      child: const Text('Turn off App Lock'),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 if (_confirmSignOut) ...[
                   Text(
-                    'Sign out on this device? You can sign in again with '
-                    'your email and password.',
+                    'Sign out on this device? App Lock stays on for this '
+                    'account when you sign in again.',
                     style: text.bodySmall,
                     textAlign: TextAlign.center,
                   ),
@@ -137,7 +159,7 @@ class _AppLockScreenState extends ConsumerState<AppLockScreen> {
                 ] else
                   SizedBox(
                     width: double.infinity,
-                    child: unavailable
+                    child: unavailable && !lock.canTurnOffWithoutDevice
                         ? FilledButton(
                             onPressed: () =>
                                 setState(() => _confirmSignOut = true),

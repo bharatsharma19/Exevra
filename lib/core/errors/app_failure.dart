@@ -46,6 +46,14 @@ sealed class AppFailure implements Exception {
   /// Short type name for logs and tests (never shown to users).
   String get type;
 
+  /// Whether the request may still have reached the server (it failed on
+  /// the way or while waiting for the answer), so a write may have
+  /// happened even though no result came back.
+  bool get outcomeUnknown =>
+      this is NetworkFailure ||
+      this is TimeoutFailure ||
+      this is OfflineFailure;
+
   @override
   bool operator ==(Object other) =>
       other is AppFailure &&

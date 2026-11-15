@@ -47,6 +47,7 @@ class AppAuthState {
     this.pendingEmail,
     this.isLoading = false,
     this.resendAvailableAt,
+    this.signedInHere = false,
   });
 
   final AuthPhase phase;
@@ -63,6 +64,11 @@ class AppAuthState {
   /// When the confirmation email may be sent again.
   final DateTime? resendAvailableAt;
 
+  /// The user signed in to the account in this app run (a sign-in, a
+  /// confirmed sign-up or a password reset), rather than the stored
+  /// session being restored at start-up.
+  final bool signedInHere;
+
   bool get isSignedIn => phase == AuthPhase.signedIn && user != null;
 
   /// The address shown on the verification screen.
@@ -74,6 +80,7 @@ class AppAuthState {
     String? Function()? pendingEmail,
     bool? isLoading,
     DateTime? Function()? resendAvailableAt,
+    bool? signedInHere,
   }) => AppAuthState(
     phase: phase ?? this.phase,
     user: user == null ? this.user : user(),
@@ -82,6 +89,7 @@ class AppAuthState {
     resendAvailableAt: resendAvailableAt == null
         ? this.resendAvailableAt
         : resendAvailableAt(),
+    signedInHere: signedInHere ?? this.signedInHere,
   );
 }
 
@@ -111,6 +119,7 @@ class AuthController extends Notifier<AppAuthState> {
   AuthService get _service => ref.read(authServiceProvider);
 
   supabase.User? _user;
+  bool _signedInHere = false;
   String? _pendingEmail;
   String? _recoveryUserId;
   bool _initialised = false;
@@ -119,6 +128,10 @@ class AuthController extends Notifier<AppAuthState> {
   /// The access token of a recovery this app already completed; a late
   /// `passwordRecovery` event for it must not reopen the recovery.
   final Set<String> _completedRecoveryTokens = {};
+
+  /// Accounts deleted in this app run; their App Lock flag goes with the
+  /// rest of their device data.
+  final Set<String> _deletedAccounts = {};
 
   /// Password typed at sign-up or sign-in, kept in memory only, so
   /// "I've verified" can sign in without asking again.
@@ -143,7 +156,9 @@ class AuthController extends Notifier<AppAuthState> {
     // If the initial event never arrives, fall back to the restored
     // session instead of showing the splash screen forever.
     _initTimer = Timer(initialSessionTimeout, () {
-      if (!_initialised) _settle(service.currentSession?.user);
+      if (!_initialised) {
+        _settle(service.currentSession?.user, restored: true);
+      }
     });
     ref.onDispose(() {
       _initTimer?.cancel();
@@ -171,7 +186,7 @@ class AuthController extends Notifier<AppAuthState> {
     final user = data.session?.user;
     switch (data.event) {
       case supabase.AuthChangeEvent.initialSession:
-        _settle(user);
+        _settle(user, restored: true);
       case supabase.AuthChangeEvent.signedIn:
         _settle(user);
       case supabase.AuthChangeEvent.passwordRecovery:
@@ -203,10 +218,13 @@ class AuthController extends Notifier<AppAuthState> {
     }
   }
 
-  /// Recomputes the phase for [user] and publishes it.
-  void _settle(supabase.User? user) {
+  /// Recomputes the phase for [user] and publishes it. [restored] marks
+  /// the session restored at start-up; any other new user signed in here.
+  void _settle(supabase.User? user, {bool restored = false}) {
     _initialised = true;
     _initTimer?.cancel();
+    final sameUser = user != null && user.id == _user?.id;
+    _signedInHere = user != null && (sameUser ? _signedInHere : !restored);
     _user = user;
     if (user != null) {
       if (_isConfirmed(user)) {
@@ -223,6 +241,7 @@ class AuthController extends Notifier<AppAuthState> {
       phase: _phaseFor(user),
       user: () => user,
       pendingEmail: () => _pendingEmail,
+      signedInHere: _signedInHere,
     );
   }
 
@@ -263,8 +282,15 @@ class AuthController extends Notifier<AppAuthState> {
 
   Future<void> _clearUserData(String userId) async {
     AppHaptics.isEnabled = true;
+    // A plain sign-out keeps the App Lock flag, so signing straight back
+    // in (one tap with Google) cannot skip the lock.
+    final deleted = _deletedAccounts.remove(userId);
     try {
-      await UserPrefs.clearUser(ref.read(sharedPreferencesProvider), userId);
+      await UserPrefs.clearUser(
+        ref.read(sharedPreferencesProvider),
+        userId,
+        keepAppLock: !deleted,
+      );
     } on Object catch (e) {
       AppLogger.warn('Could not clear user preferences', e.runtimeType);
     }
@@ -511,6 +537,8 @@ class AuthController extends Notifier<AppAuthState> {
     } finally {
       if (ref.mounted) state = state._copy(isLoading: false);
     }
+    final deleted = state.user?.id;
+    if (deleted != null) _deletedAccounts.add(deleted);
     await signOut();
     return null;
   }

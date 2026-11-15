@@ -25,6 +25,7 @@ class AppLockState {
     this.isAuthenticating = false,
     this.messageKey,
     this.coverVisible = false,
+    this.signedInHere = false,
   });
 
   /// App Lock is on for the signed-in user.
@@ -43,7 +44,18 @@ class AppLockState {
   /// covered so it does not show in the preview.
   final bool coverVisible;
 
+  /// The user signed in to the account in this app run (not a restored
+  /// session), which proves they own it.
+  final bool signedInHere;
+
   bool get showLockScreen => enabled && locked;
+
+  /// The lock screen may turn App Lock off: the device can no longer
+  /// authenticate anyone, and the user just proved the account is theirs.
+  bool get canTurnOffWithoutDevice =>
+      showLockScreen &&
+      signedInHere &&
+      availability == LockAvailability.unavailable;
 
   AppLockState copyWith({
     bool? enabled,
@@ -59,6 +71,7 @@ class AppLockState {
     isAuthenticating: isAuthenticating ?? this.isAuthenticating,
     messageKey: messageKey == null ? this.messageKey : messageKey(),
     coverVisible: coverVisible ?? this.coverVisible,
+    signedInHere: signedInHere,
   );
 }
 
@@ -75,8 +88,11 @@ final appLockClockProvider = Provider<DateTime Function()>(
 /// App Lock for the signed-in user.
 ///
 /// * Only active while a user is signed in; nothing prompts while signed
-///   out. The flag is per user (`u.<uid>.app_lock`) and is removed with the
-///   user's other preferences on sign-out or deletion.
+///   out. The flag is per user (`u.<uid>.app_lock`). It survives a
+///   sign-out, so the next sign-in of that account starts locked, and is
+///   removed when the account is deleted.
+/// * A device that lost its screen lock cannot unlock; right after a
+///   sign-in to the account the lock screen may turn App Lock off.
 /// * When on, the app starts locked and locks again after
 ///   [relockAfter] in the background.
 /// * Turning it on or off needs a successful authentication.
@@ -109,7 +125,11 @@ class AppLockController extends Notifier<AppLockState> {
         false;
     unawaited(SecureWindow.setSecure(enabled));
     unawaited(Future(refreshAvailability));
-    return AppLockState(enabled: enabled, locked: enabled);
+    return AppLockState(
+      enabled: enabled,
+      locked: enabled,
+      signedInHere: ref.read(authControllerProvider).signedInHere,
+    );
   }
 
   /// Re-checks whether the device can authenticate.
@@ -231,6 +251,30 @@ class AppLockController extends Notifier<AppLockState> {
     await SecureWindow.setSecure(enabled);
     AppHaptics.selection();
     return null;
+  }
+
+  /// Turns App Lock off from the lock screen when the device cannot
+  /// authenticate anymore (its screen lock was removed) and the user has
+  /// just signed in to the account. Returns true when it was turned off.
+  Future<bool> turnOffWithoutDevice() async {
+    final userId = _userId;
+    if (userId == null || !state.canTurnOffWithoutDevice) return false;
+    if (await refreshAvailability() != LockAvailability.unavailable) {
+      return false;
+    }
+    if (!ref.mounted || _userId != userId) return false;
+    try {
+      await ref
+          .read(sharedPreferencesProvider)
+          .setBool(UserPrefs.key(userId, UserPrefs.appLock), false);
+    } on Object catch (e) {
+      AppLogger.warn('App Lock setting was not saved', e.runtimeType);
+      return false;
+    }
+    if (!ref.mounted || _userId != userId) return false;
+    state = state.copyWith(enabled: false, locked: false);
+    await SecureWindow.setSecure(false);
+    return true;
   }
 
   /// Follows the app life cycle: covers the content when inactive, notes

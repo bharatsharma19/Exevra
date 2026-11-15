@@ -88,11 +88,12 @@ Future<void> main() async {
   );
 }
 
-/// Whether [uri] is the auth email callback that supabase_flutter should
-/// exchange for a session.
-bool isAuthCallback(Uri uri) =>
-    DeepLinks.parse(uri, appLinkHost: AppConfig.environment.appLinkHost)
-        is AuthCallbackLink;
+/// Whether [uri] is the PKCE auth callback that supabase_flutter should
+/// exchange for a session (never a link that carries tokens).
+bool isAuthCallback(Uri uri) => DeepLinks.isSessionCallback(
+  uri,
+  appLinkHost: AppConfig.environment.appLinkHost,
+);
 
 class ExevraApp extends ConsumerStatefulWidget {
   const ExevraApp({super.key});

@@ -197,5 +197,41 @@ void main() {
       expect(AppLocale.currencyFor('ja-JP'), 'JPY');
       expect(AppLocale.currencyFor(null), 'INR');
     });
+
+    test('the region decides even where intl has no regional data', () {
+      expect(AppLocale.currencyFor('ar-AE'), 'AED');
+      expect(AppLocale.currencyFor('en-AE'), 'AED');
+      expect(AppLocale.currencyFor('ar-SA'), 'SAR');
+      expect(AppLocale.currencyFor('en-SA'), 'SAR');
+      expect(AppLocale.currencyFor('en-PH'), 'PHP');
+      expect(AppLocale.currencyFor('fil_PH'), 'PHP');
+      expect(AppLocale.currencyFor('en-HK'), 'HKD');
+      expect(AppLocale.currencyFor('zh-Hant-HK'), 'HKD');
+      expect(AppLocale.currencyFor('en-IE'), 'EUR');
+      expect(AppLocale.currencyFor('ko-KR'), 'KRW');
+      // A region with an unsupported currency falls back to INR.
+      expect(AppLocale.currencyFor('es-AR'), 'INR');
+      expect(AppLocale.currencyFor('es-419'), 'INR');
+      // Without a region the language's data answers.
+      expect(AppLocale.currencyFor('ja'), 'JPY');
+      expect(AppLocale.currencyFor(''), 'INR');
+    });
+
+    test('every supported currency has a region and no region repeats', () {
+      final regions = <String>[];
+      for (final entry in AppLocale.regionsByCurrency.entries) {
+        expect(CurrencyInfo.isSupported(entry.key), isTrue, reason: entry.key);
+        regions.addAll(entry.value.split(' '));
+      }
+      expect(
+        AppLocale.regionsByCurrency.keys.toSet(),
+        CurrencyInfo.all.map((c) => c.code).toSet(),
+      );
+      expect(regions.toSet(), hasLength(regions.length));
+      for (final region in regions) {
+        expect(AppLocale.regionOf('en-$region'), region);
+        expect(region, matches(RegExp(r'^[A-Z]{2}$')));
+      }
+    });
   });
 }

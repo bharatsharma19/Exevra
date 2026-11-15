@@ -73,6 +73,43 @@ abstract final class DeepLinks {
     };
     return isValidToken(token) ? InviteLink(token!) : null;
   }
+
+  /// Parameters that carry a session. A callback with any of them is an
+  /// implicit-flow link, which this app never asks for: accepting one
+  /// would let any web page sign the device into another account.
+  static const Set<String> _sessionParameters = {
+    'access_token',
+    'refresh_token',
+    'provider_token',
+    'provider_refresh_token',
+  };
+
+  /// Whether supabase_flutter may exchange [uri] for a session: only the
+  /// PKCE auth callback, which carries a one-time `code` (or an error)
+  /// that works only with the verifier this device stored when it started
+  /// the flow.
+  ///
+  /// The query and the fragment are read together, the way gotrue reads
+  /// them, so tokens hidden in either reject the link.
+  static bool isSessionCallback(Uri uri, {required String appLinkHost}) {
+    if (parse(uri, appLinkHost: appLinkHost) is! AuthCallbackLink) {
+      return false;
+    }
+    final Map<String, String> parameters;
+    try {
+      final text = uri.toString();
+      parameters = Uri.parse(
+        uri.hasQuery ? text.replaceAll('#', '&') : text.replaceAll('#', '?'),
+      ).queryParameters;
+    } on FormatException {
+      return false;
+    }
+    if (parameters.keys.any(_sessionParameters.contains)) return false;
+    return parameters.containsKey('code') ||
+        parameters.containsKey('error') ||
+        parameters.containsKey('error_code') ||
+        parameters.containsKey('error_description');
+  }
 }
 
 /// Where incoming links come from (app_links; a fake in tests).

@@ -367,6 +367,7 @@ void main() {
       final c = await start(
         signedInAs: 'A',
         prefs: {
+          UserPrefs.key('A', UserPrefs.haptics): false,
           UserPrefs.key('A', UserPrefs.appLock): true,
           'app_theme_mode': ThemePreference.dark.name,
         },
@@ -374,7 +375,9 @@ void main() {
       await controllerOf(c).signOut();
       await settle();
       final prefs = c.read(sharedPreferencesProvider);
-      expect(prefs.getBool(UserPrefs.key('A', UserPrefs.appLock)), isNull);
+      expect(prefs.getBool(UserPrefs.key('A', UserPrefs.haptics)), isNull);
+      // App Lock stays on for the account's next sign-in on this device.
+      expect(prefs.getBool(UserPrefs.key('A', UserPrefs.appLock)), isTrue);
       expect(prefs.getString('app_theme_mode'), 'dark');
       expect(backend.auth.signOutCalls, 1);
     });

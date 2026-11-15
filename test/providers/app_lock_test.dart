@@ -272,8 +272,9 @@ void main() {
     expect(c.read(appLockProvider).showLockScreen, isTrue);
   });
 
-  test('signing out resets the lock and the per-user flag', () async {
+  test('signing out keeps the flag, so signing back in is locked', () async {
     final c = await start(signedInAs: 'A', lockOn: true);
+    expect(c.read(appLockProvider).showLockScreen, isTrue);
     await c.read(authControllerProvider.notifier).signOut();
     await settle();
     expect(c.read(appLockProvider).showLockScreen, isFalse);
@@ -282,14 +283,69 @@ void main() {
       c
           .read(sharedPreferencesProvider)
           .getBool(UserPrefs.key('A', UserPrefs.appLock)),
-      isNull,
+      isTrue,
     );
     expect(secureCalls.last, isFalse);
 
-    // The next user starts without App Lock.
+    // Another user starts without App Lock.
     backend.auth.signInAs('B');
     await settle();
     expect(c.read(appLockProvider).enabled, isFalse);
+    await c.read(authControllerProvider.notifier).signOut();
+    await settle();
+
+    // The same account straight back in with one tap is still locked.
+    backend.auth.googleUserId = 'A';
+    await c.read(authControllerProvider.notifier).signInWithGoogle();
+    await settle();
+    expect(c.read(currentUserIdProvider), 'A');
+    expect(c.read(appLockProvider).showLockScreen, isTrue);
+    expect(c.read(appLockProvider).canTurnOffWithoutDevice, isFalse);
+    expect(secureCalls.last, isTrue);
+  });
+
+  group('a device that lost its screen lock', () {
+    test('a restored session cannot turn the lock off', () async {
+      localAuth.supported = false;
+      final c = await start(signedInAs: 'A', lockOn: true);
+      expect(c.read(appLockProvider).showLockScreen, isTrue);
+      expect(c.read(appLockProvider).canTurnOffWithoutDevice, isFalse);
+      expect(await lockOf(c).turnOffWithoutDevice(), isFalse);
+      expect(c.read(appLockProvider).showLockScreen, isTrue);
+    });
+
+    test('a fresh sign-in may turn it off instead of being trapped', () async {
+      localAuth.supported = false;
+      final c = await start(signedInAs: 'A', lockOn: true);
+      await c.read(authControllerProvider.notifier).signOut();
+      await settle();
+      backend.auth.signInAs('A');
+      await settle();
+      expect(c.read(appLockProvider).showLockScreen, isTrue);
+      expect(c.read(appLockProvider).canTurnOffWithoutDevice, isTrue);
+
+      expect(await lockOf(c).turnOffWithoutDevice(), isTrue);
+      expect(c.read(appLockProvider).showLockScreen, isFalse);
+      expect(c.read(appLockProvider).enabled, isFalse);
+      expect(
+        c
+            .read(sharedPreferencesProvider)
+            .getBool(UserPrefs.key('A', UserPrefs.appLock)),
+        isFalse,
+      );
+      expect(secureCalls.last, isFalse);
+    });
+
+    test('a fresh sign-in on a secure device still has to unlock', () async {
+      final c = await start(signedInAs: 'A', lockOn: true);
+      await c.read(authControllerProvider.notifier).signOut();
+      await settle();
+      backend.auth.signInAs('A');
+      await settle();
+      expect(c.read(appLockProvider).canTurnOffWithoutDevice, isFalse);
+      expect(await lockOf(c).turnOffWithoutDevice(), isFalse);
+      expect(c.read(appLockProvider).showLockScreen, isTrue);
+    });
   });
 
   group('lock gate', () {
@@ -333,9 +389,30 @@ void main() {
       await pumpGate(tester, supported: false);
       expect(find.text('Unlock'), findsNothing);
       expect(find.textContaining('Set up a screen lock'), findsOneWidget);
+      expect(find.text('Turn off App Lock'), findsNothing);
       await tester.tap(find.text('Sign out'));
       await tester.pump();
       expect(find.textContaining('Sign out on this device?'), findsOneWidget);
+    });
+
+    testWidgets('after a fresh sign-in an insecure device can turn it off', (
+      tester,
+    ) async {
+      final c = await pumpGate(tester, supported: false);
+      await tester.runAsync(() async {
+        await c.read(authControllerProvider.notifier).signOut();
+        await settle();
+        backend.auth.signInAs('A');
+        await settle();
+      });
+      await tester.pump();
+      expect(find.byType(AppLockScreen), findsOneWidget);
+
+      await tester.tap(find.text('Turn off App Lock'));
+      await tester.runAsync(settle);
+      await tester.pump();
+      expect(find.byType(AppLockScreen), findsNothing);
+      expect(find.text('Secret balance'), findsOneWidget);
     });
   });
 }

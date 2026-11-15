@@ -67,6 +67,56 @@ void main() {
     );
   });
 
+  group('session callbacks', () {
+    bool accepts(String link) =>
+        DeepLinks.isSessionCallback(Uri.parse(link), appLinkHost: host);
+
+    test('a PKCE code or an error is exchanged', () {
+      expect(accepts('com.exevra.app://auth-callback?code=abc'), isTrue);
+      expect(accepts('com.exevra.app://auth-callback/?code=abc'), isTrue);
+      expect(
+        accepts(
+          'com.exevra.app://auth-callback?error=access_denied'
+          '&error_code=otp_expired&error_description=Link+expired',
+        ),
+        isTrue,
+      );
+      expect(
+        accepts('com.exevra.app://auth-callback#error=access_denied'),
+        isTrue,
+      );
+    });
+
+    test('links that carry tokens are never exchanged', () {
+      for (final link in [
+        'com.exevra.app://auth-callback#access_token=a&refresh_token=r'
+            '&expires_in=3600&token_type=bearer',
+        'com.exevra.app://auth-callback#access_token=a&refresh_token=r'
+            '&expires_in=3600&token_type=bearer&type=recovery',
+        'com.exevra.app://auth-callback?access_token=a&refresh_token=r'
+            '&expires_in=3600&token_type=bearer',
+        'com.exevra.app://auth-callback?code=abc#access_token=a'
+            '&refresh_token=r',
+        'com.exevra.app://auth-callback?code=abc&refresh_token=r',
+        'com.exevra.app://auth-callback#provider_token=p&code=abc',
+      ]) {
+        expect(accepts(link), isFalse, reason: link);
+      }
+    });
+
+    test('anything but the auth callback is left alone', () {
+      for (final link in [
+        'com.exevra.app://auth-callback',
+        'com.exevra.app://other?code=abc',
+        'exevra://invite/$token?code=abc',
+        'https://exevra.app/invite/$token?code=abc',
+        'https://evil.example/auth-callback?code=abc',
+      ]) {
+        expect(accepts(link), isFalse, reason: link);
+      }
+    });
+  });
+
   test('the listener passes each link once', () async {
     final source = _Source(Uri.parse('exevra://invite/$token'));
     final seen = <DeepLink>[];

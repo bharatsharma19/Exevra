@@ -244,9 +244,13 @@ class FakeAuthService implements AuthService {
     calls.add('fullName:$fullName');
   }
 
+  /// When set, the server part of [signOut] waits for it.
+  Completer<void>? holdSignOut;
+
   @override
   Future<void> signOut() async {
     signOutCalls++;
+    await holdSignOut?.future;
     _user = null;
     emit(supabase.AuthChangeEvent.signedOut);
   }
@@ -332,9 +336,19 @@ class FakeGroupRepository implements GroupRepository {
   /// When non-empty, each `set_active_group` call waits for the next one.
   final List<Completer<void>> heldSetActive = [];
 
+  /// Thrown by every `get_user_groups` call while set.
+  AppFailure? failFetch;
+
+  /// Thrown by `create_group`. With [createBeforeFailing] the group is
+  /// created first (the answer was lost on the way back).
+  AppFailure? failCreate;
+  bool createBeforeFailing = false;
+
   @override
   Future<List<Group>> fetchMyGroups() async {
     if (heldFetches.isNotEmpty) return heldFetches.removeAt(0).future;
+    final failure = failFetch;
+    if (failure != null) throw failure;
     return groupsByUser[currentUser()] ?? const [];
   }
 
@@ -379,6 +393,8 @@ class FakeGroupRepository implements GroupRepository {
     required String currency,
   }) async {
     calls.add('create:$name:$currency');
+    final failure = failCreate;
+    if (failure != null && !createBeforeFailing) throw failure;
     final user = currentUser()!;
     final id = 'new-${++_ids}';
     (groupsByUser[user] ??= []).insert(
@@ -393,6 +409,7 @@ class FakeGroupRepository implements GroupRepository {
         status: MemberStatus.approved,
       ),
     );
+    if (failure != null) throw failure;
     return id;
   }
 

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/errors/app_failure.dart';
 import '../../../core/errors/failure_messages.dart';
 import '../../../core/platform/share_service.dart';
 import '../../../core/utils/haptics.dart';
@@ -141,24 +142,31 @@ Future<void> showCreateGroupDialog(BuildContext context, WidgetRef ref) {
             nameError = null;
             error = null;
           });
-          final failure = await ref
+          final result = await ref
               .read(groupsProvider.notifier)
               .createGroup(name, currency: currency, report: false);
           if (!ctx.mounted) return;
-          if (failure != null) {
+          if (result.status == GroupCreateStatus.failed) {
             setState(() {
               busy = false;
-              error = friendlyMessage(failure);
+              error = friendlyMessage(
+                result.failure ?? const AppFailure.unknown(),
+              );
             });
             return;
           }
+          // Created, or maybe created: never offer the same form again.
           Navigator.of(ctx).pop();
-          if (context.mounted) {
-            showMessage(
-              context,
+          if (!context.mounted) return;
+          showMessage(context, switch (result.status) {
+            GroupCreateStatus.opened =>
               '"$name" created. It is now your active group.',
-            );
-          }
+            GroupCreateStatus.createdNotOpened =>
+              '"$name" was created, but we couldn\'t open it yet. Refresh '
+                  'your groups to see it.',
+            GroupCreateStatus.unconfirmed || GroupCreateStatus.failed =>
+              friendlyMessageForKey('group_unconfirmed'),
+          });
         }
 
         return AlertDialog(
