@@ -37,7 +37,7 @@ void main() {
       backend.profiles.profiles['A'] = profileOf(
         'A',
         activeGroupId: 'gA',
-      ).copyWith(themeMode: ThemePreference.dark);
+      ).copyWith(themeMode: ThemePreference.dark, aiConsent: true);
       backend.profiles.profiles['B'] = profileOf('B');
       backend.groups.groupsByUser['A'] = [groupOf('gA', adminId: 'A')];
       backend.groups.groupsByUser['B'] = [groupOf('gB', adminId: 'B')];
