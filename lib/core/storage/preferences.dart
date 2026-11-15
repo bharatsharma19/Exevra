@@ -23,6 +23,9 @@ abstract final class UserPrefs {
 
   static const String haptics = 'haptics';
 
+  /// App Lock on/off for this user.
+  static const String appLock = 'app_lock';
+
   /// Old global keys that held one user's data on the device.
   static const List<String> legacyUserKeys = [
     AppConstants.keyCurrency,

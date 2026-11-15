@@ -125,5 +125,26 @@ const Map<String, String> _byKey = {
   'unavailable':
       'This service is temporarily unavailable. Please try again later.',
   'google_unavailable': "Google sign-in isn't available in this version.",
+  'google_failed': "Google sign-in didn't work. Please try again.",
+  'apple_failed': "Sign in with Apple didn't work. Please try again.",
+  'terms_required': 'Please accept the Terms of Service and Privacy Policy.',
+  'password_mismatch': "The passwords don't match.",
+  // App Lock (local_auth)
+  'lock_cancelled': 'App Lock was not changed.',
+  'lock_failed': "We couldn't confirm it's you. Please try again.",
+  'lock_no_credentials':
+      'Set up a screen lock (PIN, pattern, password or biometrics) in your '
+      'device settings to use App Lock.',
+  'lock_temporary_lockout': 'Too many attempts. Wait a moment, then try again.',
+  'lock_biometric_lockout':
+      'Biometrics are locked after too many attempts. Unlock with your '
+      'device PIN, pattern or password.',
+  'lock_hardware_busy':
+      'The fingerprint or face sensor is busy. Try again, or use your '
+      'device PIN.',
+  'lock_in_progress': 'Finish the current unlock request first.',
+  'lock_ui_unavailable':
+      "The unlock prompt couldn't be shown. Please try again.",
+  'lock_signed_out': 'Sign in to change App Lock.',
   'signup_disabled': "New sign-ups aren't available right now.",
 };

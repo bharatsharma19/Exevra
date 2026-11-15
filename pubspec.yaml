@@ -48,6 +48,7 @@ dependencies:
   package_info_plus: ^10.2.2
   url_launcher: ^6.3.3
   app_links: ^7.2.2
+  crypto: ^3.0.8
   connectivity_plus: ^7.3.2
   flutter_native_splash: ^2.4.8
   flutter_timezone: 5.1.1

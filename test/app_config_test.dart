@@ -186,8 +186,10 @@ void main() {
       );
       expect(
         config.inviteLink('tok_123').toString(),
-        'https://exevra.app/invite?token=tok_123',
+        'https://exevra.app/invite/tok_123',
       );
+      expect(config.termsUrl.toString(), 'https://exevra.app/terms');
+      expect(config.privacyUrl.toString(), 'https://exevra.app/privacy');
     });
 
     test('Google sign-in is unavailable without a web client id', () {

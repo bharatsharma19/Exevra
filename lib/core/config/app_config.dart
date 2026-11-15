@@ -52,13 +52,24 @@ class AppConfig {
 
   bool get isGoogleSignInConfigured => googleWebClientId.trim().isNotEmpty;
 
+  /// Where Supabase sends the user back after an email link (sign-up
+  /// confirmation, password recovery). Registered on both platforms and in
+  /// the Supabase redirect allow-list; supabase_flutter handles it.
+  static const String authCallbackUrl = 'com.exevra.app://auth-callback';
+
+  /// Custom-scheme fallback for invite links (`exevra://invite/<token>`).
+  static const String inviteScheme = 'exevra';
+
   /// Builds the public link for a group invitation token.
-  Uri inviteLink(String token) => Uri(
-    scheme: 'https',
-    host: appLinkHost,
-    path: '/invite',
-    queryParameters: {'token': token},
-  );
+  Uri inviteLink(String token) =>
+      Uri(scheme: 'https', host: appLinkHost, pathSegments: ['invite', token]);
+
+  /// The published Terms of Service.
+  Uri get termsUrl => Uri(scheme: 'https', host: appLinkHost, path: '/terms');
+
+  /// The published Privacy Policy.
+  Uri get privacyUrl =>
+      Uri(scheme: 'https', host: appLinkHost, path: '/privacy');
 
   /// Markers that show a value was copied from an example and never filled.
   static const List<String> placeholderMarkers = [
