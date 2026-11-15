@@ -320,71 +320,49 @@ void main() {
 
   group('ExpenseInsights', () {
     Map<String, Object?> rpc() => {
-      'currency': 'INR',
-      'totals': [
-        {'currency': 'INR', 'total_minor': 30000, 'count': 3},
-        {'currency': 'USD', 'total_minor': 1000, 'count': 1},
-      ],
-      'categories': [
+      'scope': 'personal',
+      'timeframe': 'month',
+      'bucket': 'day',
+      'primary_currency': 'INR',
+      'currencies': [
         {
-          'category': 'Food',
           'currency': 'INR',
-          'total_minor': 10000,
-          'count': 1,
-        },
-        {
-          'category': 'Housing',
-          'currency': 'INR',
-          'total_minor': 20000,
-          'count': 2,
-        },
-        {
-          'category': 'Food',
-          'currency': 'USD',
-          'total_minor': 1000,
-          'count': 1,
-        },
-      ],
-      'buckets': [
-        {
-          'bucket': '2026-11-02',
-          'currency': 'INR',
-          'total_minor': 0,
-          'count': 0,
-        },
-        {
-          'bucket': '2026-11-01',
-          'currency': 'INR',
+          'minor_units': 2,
           'total_minor': 30000,
-          'count': 3,
+          'expense_count': 3,
+          'average_daily_minor': 1000,
+          'categories': [
+            {'category': 'Food', 'total_minor': 10000, 'count': 1},
+            {'category': 'Housing', 'total_minor': 20000, 'count': 2},
+          ],
+          'series': [
+            {'bucket': '2026-11-02', 'total_minor': 0, 'count': 0},
+            {'bucket': '2026-11-01', 'total_minor': 30000, 'count': 3},
+          ],
+          'highest': {
+            'id': 'e1',
+            'title': 'Rent',
+            'category': 'Housing',
+            'amount_minor': 20000,
+            'spent_at': '2026-11-01T04:00:00Z',
+            'group_id': null,
+          },
+        },
+        {
+          'currency': 'USD',
+          'minor_units': 2,
+          'total_minor': 1000,
+          'expense_count': 1,
+          'categories': [
+            {'category': 'Food', 'total_minor': 1000, 'count': 1},
+          ],
+          'series': <Object?>[],
+          'highest': null,
         },
       ],
-      'highest': {
-        'id': 'e1',
-        'title': 'Rent',
-        'category': 'Housing',
-        'amount_minor': 20000,
-        'currency': 'INR',
-        'spent_at': '2026-11-01T04:00:00Z',
-      },
     };
 
-    test('keeps one currency and lists the others separately', () {
-      final i = ExpenseInsights.fromJson(
-        rpc(),
-        scope: InsightScope.personal,
-        timeframe: InsightTimeframe.month,
-        preferredCurrency: 'INR',
-      );
-      expect(i.total, Money(30000, 'INR'));
-      expect(i.categories.first.category, 'Housing');
-      expect(i.categories.first.share, closeTo(2 / 3, 1e-9));
-      expect(i.buckets.first.date, DateTime.utc(2026, 11, 1));
-      expect(i.otherCurrencyTotals, [Money(1000, 'USD')]);
-      expect(i.highest?.title, 'Rent');
-    });
-
-    test('falls back to the largest currency', () {
+    test('keeps the primary currency and lists the others separately', () {
       final i = ExpenseInsights.fromJson(
         rpc(),
         scope: InsightScope.personal,
@@ -392,11 +370,52 @@ void main() {
         preferredCurrency: 'EUR',
       );
       expect(i.currency, 'INR');
+      expect(i.total, Money(30000, 'INR'));
+      expect(i.count, 3);
+      expect(i.averageDaily, Money(1000, 'INR'));
+      expect(i.categories.first.category, 'Housing');
+      expect(i.categories.first.total, Money(20000, 'INR'));
+      expect(i.categories.first.share, closeTo(2 / 3, 1e-9));
+      expect(i.buckets.first.date, DateTime.utc(2026, 11, 1));
+      expect(i.otherCurrencyTotals, [Money(1000, 'USD')]);
+      expect(i.highest?.title, 'Rent');
+      expect(i.highest?.amount, Money(20000, 'INR'));
+    });
+
+    test('reads month buckets of a year', () {
+      final data = rpc();
+      final blocks = data['currencies']! as List<Object?>;
+      (blocks.first! as Map<String, Object?>)['series'] = [
+        {'bucket': '2026-10', 'total_minor': 500, 'count': 1},
+      ];
+      final i = ExpenseInsights.fromJson(
+        data,
+        scope: InsightScope.personal,
+        timeframe: InsightTimeframe.year,
+        preferredCurrency: 'INR',
+      );
+      expect(i.buckets.single.date, DateTime.utc(2026, 10));
+    });
+
+    test('rejects a malformed block', () {
+      expect(
+        () => ExpenseInsights.fromJson(
+          {
+            'currencies': [
+              {'currency': 'INR', 'total_minor': 'lots'},
+            ],
+          },
+          scope: InsightScope.personal,
+          timeframe: InsightTimeframe.month,
+          preferredCurrency: 'INR',
+        ),
+        throwsFormatException,
+      );
     });
 
     test('empty result', () {
       final i = ExpenseInsights.fromJson(
-        {'currency': 'INR'},
+        {'primary_currency': 'INR', 'currencies': <Object?>[]},
         scope: InsightScope.group,
         timeframe: InsightTimeframe.week,
         preferredCurrency: 'INR',

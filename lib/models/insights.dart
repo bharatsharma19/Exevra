@@ -21,6 +21,7 @@ class ExpenseInsights {
     required this.count,
     required this.categories,
     required this.buckets,
+    this.serverAverageDaily,
     this.highest,
     this.otherCurrencyTotals = const [],
   });
@@ -46,25 +47,34 @@ class ExpenseInsights {
   final String currency;
   final Money total;
   final int count;
+
+  /// By total, largest first.
   final List<CategoryTotal> categories;
 
-  /// Days for week/month (zero-filled), months for year.
+  /// Days for week/month (zero-filled), months for year; oldest first.
   final List<TrendBucket> buckets;
   final InsightExpense? highest;
   final List<Money> otherCurrencyTotals;
 
+  /// Average per local day as computed by the server, when sent.
+  final Money? serverAverageDaily;
+
   bool get isEmpty => count == 0 && total.isZero;
 
-  /// Average per bucket with spending window length (integer minor units).
-  Money get averagePerBucket => buckets.isEmpty
-      ? Money.zero(currency)
-      : Money(total.amountMinor ~/ buckets.length, currency);
+  /// Average spend per local day of the window (server value when given).
+  Money get averageDaily =>
+      serverAverageDaily ??
+      (buckets.isEmpty
+          ? Money.zero(currency)
+          : Money(total.amountMinor ~/ buckets.length, currency));
 
   CategoryTotal? get topCategory =>
       categories.isEmpty ? null : categories.first;
 
-  /// Parses the RPC result, keeping [preferredCurrency] as the primary
-  /// currency when it has data (else the currency with the largest total).
+  /// Parses the RPC result. The server sends one block per currency with
+  /// the primary currency (group currency, or the profile currency for
+  /// personal scope) first; [preferredCurrency] is used only when the
+  /// result has no blocks at all.
   factory ExpenseInsights.fromJson(
     Object? data, {
     required InsightScope scope,
@@ -72,75 +82,113 @@ class ExpenseInsights {
     required String preferredCurrency,
   }) {
     final r = JsonReader.of(data, 'ExpenseInsights');
-    final totals = r.objects('totals', _CurrencyTotal.fromJson);
-    final present = {for (final t in totals) t.total.currency: t};
+    final blocks = r.objects('currencies', _CurrencyBlock.fromJson);
+    final primaryCode =
+        r.optString('primary_currency')?.trim().toUpperCase() ??
+        (blocks.isEmpty ? preferredCurrency : blocks.first.currency);
 
-    String primary;
-    if (present.containsKey(preferredCurrency) || present.isEmpty) {
-      primary = present.isEmpty
-          ? (r.optString('currency') ?? preferredCurrency)
-          : preferredCurrency;
-    } else {
-      final sorted = [...totals]
-        ..sort((a, b) => b.total.amountMinor.compareTo(a.total.amountMinor));
-      primary = sorted.first.total.currency;
+    _CurrencyBlock? primary;
+    for (final b in blocks) {
+      if (b.currency == primaryCode) {
+        primary = b;
+        break;
+      }
+    }
+    if (primary == null) {
+      return ExpenseInsights(
+        scope: scope,
+        timeframe: timeframe,
+        currency: primaryCode,
+        total: Money.zero(primaryCode),
+        count: 0,
+        categories: const [],
+        buckets: const [],
+        otherCurrencyTotals: [
+          for (final b in blocks)
+            if (!b.total.isZero) b.total,
+        ],
+      );
     }
 
-    final primaryTotal = present[primary];
-    final categories =
-        r
-            .objects('categories', CategoryTotal.fromJson)
-            .where((c) => c.total.currency == primary)
-            .toList()
-          ..sort((a, b) => b.total.amountMinor.compareTo(a.total.amountMinor));
-    final total = primaryTotal?.total ?? Money.zero(primary);
-    final withShare = [
-      for (final c in categories)
-        c.withShare(
-          total.amountMinor == 0 ? 0 : c.total.amountMinor / total.amountMinor,
-        ),
-    ];
-
-    final buckets =
-        r
-            .objects('buckets', TrendBucket.fromJson)
-            .where((b) => b.total.currency == primary)
-            .toList()
-          ..sort((a, b) => a.date.compareTo(b.date));
-
-    final highestJson = r.optObject('highest');
-    final highest = highestJson == null
-        ? null
-        : InsightExpense.fromJson(highestJson);
+    final total = primary.total;
+    final categories = [...primary.categories]
+      ..sort((a, b) => b.total.amountMinor.compareTo(a.total.amountMinor));
+    final buckets = [...primary.buckets]
+      ..sort((a, b) => a.date.compareTo(b.date));
 
     return ExpenseInsights(
       scope: scope,
       timeframe: timeframe,
-      currency: primary,
+      currency: primaryCode,
       total: total,
-      count: primaryTotal?.count ?? 0,
-      categories: withShare,
+      count: primary.count,
+      categories: [
+        for (final c in categories)
+          c.withShare(
+            total.amountMinor == 0
+                ? 0
+                : c.total.amountMinor / total.amountMinor,
+          ),
+      ],
       buckets: buckets,
-      highest: highest != null && highest.amount.currency == primary
-          ? highest
-          : null,
+      serverAverageDaily: primary.averageDaily,
+      highest: primary.highest,
       otherCurrencyTotals: [
-        for (final t in totals)
-          if (t.total.currency != primary) t.total,
+        for (final b in blocks)
+          if (b.currency != primaryCode && !b.total.isZero) b.total,
       ],
     );
   }
 }
 
-class _CurrencyTotal {
-  const _CurrencyTotal(this.total, this.count);
+/// One currency's block of the insights result.
+class _CurrencyBlock {
+  const _CurrencyBlock({
+    required this.currency,
+    required this.total,
+    required this.count,
+    required this.categories,
+    required this.buckets,
+    this.averageDaily,
+    this.highest,
+  });
 
+  final String currency;
   final Money total;
   final int count;
+  final List<CategoryTotal> categories;
+  final List<TrendBucket> buckets;
+  final Money? averageDaily;
+  final InsightExpense? highest;
 
-  static _CurrencyTotal fromJson(Object? data) {
-    final r = JsonReader.of(data, 'InsightTotal');
-    return _CurrencyTotal(r.money('total_minor'), r.optInteger('count') ?? 0);
+  static _CurrencyBlock fromJson(Object? data) {
+    final r = JsonReader.of(data, 'InsightCurrency');
+    final total = r.money('total_minor');
+    final code = total.currency;
+    // Rows inside a block carry no currency of their own.
+    Map<String, dynamic> withCode(Object? item, String model) => {
+      ...JsonReader.of(item, model).json,
+      'currency': code,
+    };
+    final average = r.optInteger('average_daily_minor');
+    final highest = r.optObject('highest');
+    return _CurrencyBlock(
+      currency: code,
+      total: total,
+      count: r.optInteger('expense_count') ?? 0,
+      categories: r.objects(
+        'categories',
+        (item) => CategoryTotal.fromJson(withCode(item, 'CategoryTotal')),
+      ),
+      buckets: r.objects(
+        'series',
+        (item) => TrendBucket.fromJson(withCode(item, 'TrendBucket')),
+      ),
+      averageDaily: average == null ? null : Money(average, code),
+      highest: highest == null
+          ? null
+          : InsightExpense.fromJson(withCode(highest, 'InsightExpense')),
+    );
   }
 }
 
@@ -192,8 +240,13 @@ class TrendBucket {
 
   static TrendBucket fromJson(Object? data) {
     final r = JsonReader.of(data, 'TrendBucket');
+    // Day buckets are `yyyy-MM-dd`, month buckets `yyyy-MM`.
+    final raw = r.string('bucket');
+    final month = RegExp(r'^(\d{4})-(\d{2})$').firstMatch(raw);
     return TrendBucket(
-      date: r.date('bucket'),
+      date: month != null
+          ? DateTime.utc(int.parse(month[1]!), int.parse(month[2]!))
+          : r.date('bucket'),
       total: r.money('total_minor'),
       count: r.optInteger('count') ?? 0,
     );
@@ -208,9 +261,13 @@ class InsightExpense {
     required this.amount,
     required this.spentAt,
     this.id,
+    this.groupId,
   });
 
   final String? id;
+
+  /// Null for a personal expense.
+  final String? groupId;
   final String title;
   final String category;
   final Money amount;
@@ -224,6 +281,7 @@ class InsightExpense {
       category: r.string('category'),
       amount: r.money('amount_minor'),
       spentAt: r.instant('spent_at'),
+      groupId: r.optString('group_id'),
     );
   }
 }
