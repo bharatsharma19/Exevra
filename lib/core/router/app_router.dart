@@ -25,11 +25,14 @@ import 'deep_links.dart';
 
 export 'app_routes.dart';
 
+/// How long a page takes to come in.
+const Duration pageTransitionDuration = Duration(milliseconds: 280);
+
 CustomTransitionPage<T> _page<T>(GoRouterState state, Widget child) {
   return CustomTransitionPage<T>(
     key: state.pageKey,
     child: child,
-    transitionDuration: const Duration(milliseconds: 280),
+    transitionDuration: pageTransitionDuration,
     reverseTransitionDuration: const Duration(milliseconds: 220),
     transitionsBuilder: (context, animation, secondaryAnimation, child) {
       final curved = CurvedAnimation(

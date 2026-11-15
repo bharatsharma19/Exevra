@@ -1,11 +1,15 @@
+import 'dart:async';
+
 import 'package:expense_manager/core/errors/app_failure.dart';
 import 'package:expense_manager/core/router/app_router.dart';
+import 'package:expense_manager/core/ui/root_messenger.dart';
 import 'package:expense_manager/data/repositories/invitation_repository.dart';
 import 'package:expense_manager/features/auth/screens/login_screen.dart';
 import 'package:expense_manager/features/profile/screens/invite_screen.dart';
 import 'package:expense_manager/main.dart';
 import 'package:expense_manager/models/group.dart';
 import 'package:expense_manager/models/invitation.dart';
+import 'package:expense_manager/providers/auth_provider.dart';
 import 'package:expense_manager/providers/chat_provider.dart';
 import 'package:expense_manager/providers/pending_invite_provider.dart';
 import 'package:flutter/material.dart';
@@ -147,6 +151,35 @@ void main() {
 
     expect(c.read(chatProvider).messages.last.text, isNotEmpty);
     expect(find.byType(SnackBar), findsNothing);
+  });
+
+  testWidgets('a snack bar shown while signing out is gone on login', (
+    tester,
+  ) async {
+    final c = await pumpApp(tester, signedInAs: 'A');
+    expect(location(c), '/dashboard');
+
+    unawaited(c.read(authControllerProvider.notifier).signOut());
+    bool onLogin() => Uri.parse(location(c)).path == '/login';
+    for (var i = 0; i < 5 && !onLogin(); i++) {
+      await tester.pump();
+    }
+    expect(onLogin(), isTrue);
+
+    // A screen of the ended session shows one while the login page comes
+    // in (the shell is still on screen).
+    rootScaffoldMessengerKey.currentState!.showSnackBar(
+      const SnackBar(content: Text('late message')),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('late message'), findsOneWidget);
+
+    // Once the login page is in, it is gone.
+    await tester.pump(pageTransitionDuration);
+    await tester.pump();
+    expect(find.text('late message'), findsNothing);
+    expect(find.byType(LoginScreen), findsOneWidget);
   });
 
   testWidgets('a legacy ?token= invite location is rewritten', (tester) async {

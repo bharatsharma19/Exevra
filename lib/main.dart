@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -115,7 +118,35 @@ class _ExevraAppState extends ConsumerState<ExevraApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _router?.routerDelegate.removeListener(_onRouteChanged);
+    _loginShown?.cancel();
     super.dispose();
+  }
+
+  GoRouter? _router;
+  String? _path;
+  Timer? _loginShown;
+
+  void _watchRoutes(GoRouter router) {
+    if (identical(router, _router)) return;
+    _router?.routerDelegate.removeListener(_onRouteChanged);
+    _router = router;
+    router.routerDelegate.addListener(_onRouteChanged);
+  }
+
+  /// Signing out clears the snack bars right away (see [build]), but the
+  /// main shell stays on screen while the login page comes in, and a
+  /// screen of the ended session could still show one meanwhile. They are
+  /// cleared again when the login route is entered and once its transition
+  /// has finished.
+  void _onRouteChanged() {
+    final path = _router?.routerDelegate.currentConfiguration.uri.path;
+    final entered = path == AppRoutes.login && _path != AppRoutes.login;
+    _path = path;
+    if (!entered) return;
+    clearRootMessages();
+    _loginShown?.cancel();
+    _loginShown = Timer(pageTransitionDuration, clearRootMessages);
   }
 
   @override
@@ -139,6 +170,7 @@ class _ExevraAppState extends ConsumerState<ExevraApp>
   @override
   Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
+    _watchRoutes(router);
     // Opens invitation links for as long as the app runs.
     ref.watch(deepLinkHandlerProvider);
 
