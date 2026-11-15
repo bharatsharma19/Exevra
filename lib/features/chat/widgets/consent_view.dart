@@ -11,10 +11,16 @@ import 'safe_markdown.dart';
 /// Explains what the assistant sends and to whom, and asks for consent.
 /// Saving goes through `profileProvider.setAiConsent`; the server is the
 /// source of truth.
+///
+/// Used in the chat tab and, full screen, by `AiConsentScreen` when the
+/// assistant is turned on in Settings.
 class ChatConsentView extends ConsumerStatefulWidget {
-  const ChatConsentView({super.key, required this.onNotNow});
+  const ChatConsentView({super.key, required this.onNotNow, this.onAllowed});
 
   final VoidCallback onNotNow;
+
+  /// Called once consent was saved on the server.
+  final VoidCallback? onAllowed;
 
   static Uri get privacyPolicy =>
       Uri.https(AppConfig.environment.appLinkHost, '/privacy');
@@ -41,6 +47,7 @@ class _ChatConsentViewState extends ConsumerState<ChatConsentView> {
       _saving = false;
       _error = failure == null ? null : friendlyMessage(failure);
     });
+    if (failure == null) widget.onAllowed?.call();
   }
 
   Future<void> _openPrivacy() async {
@@ -111,8 +118,9 @@ class _ChatConsentViewState extends ConsumerState<ChatConsentView> {
               'Your spending totals by category and month, your 15 most '
                   'recent expenses (title, category, amount and date; for '
                   'group expenses only your share), the names of your groups, '
-                  'your currency and time zone, and the messages you write, '
-                  'including earlier messages in this chat.',
+                  "your currency, time zone, language and today's date, and "
+                  'the messages you write, including earlier messages in '
+                  'this chat.',
             ),
             section(
               Icons.cloud_outlined,

@@ -28,6 +28,8 @@ void main() {
     api = FakeAiChatApi();
     container = await chatContainer(backend, api, prefs: prefs);
     addTearDown(container.dispose);
+    // Questions are only sent once the profile (with its consent) loaded.
+    await container.read(profileProvider.notifier).loaded;
     container.listen(chatProvider, (_, _) {});
   }
 
@@ -402,6 +404,21 @@ void main() {
     await settle();
     expect(chat().messages, isEmpty);
     expect(container.read(sharedPreferencesProvider).containsKey(key), isFalse);
+  });
+
+  test('sends nothing without AI consent', () async {
+    backend.profiles.profiles['A'] = profileOf('A').copyWith(aiConsent: false);
+    container.dispose();
+    container = await chatContainer(backend, api);
+    addTearDown(container.dispose);
+    await container.read(profileProvider.notifier).loaded;
+    container.listen(chatProvider, (_, _) {});
+
+    await notifier().sendMessage('How much on food?');
+    await settle();
+
+    expect(api.calls, isEmpty);
+    expect(chat().messages, isEmpty);
   });
 
   test('ignores blank, oversize and concurrent sends', () async {

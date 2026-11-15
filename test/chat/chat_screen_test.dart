@@ -174,6 +174,10 @@ void main() {
           ),
           findsOneWidget,
         );
+        expect(
+          find.textContaining("time zone, language and today's date"),
+          findsOneWidget,
+        );
         expect(find.text('Not now'), findsOneWidget);
 
         await tester.ensureVisible(find.text('Read the privacy policy'));

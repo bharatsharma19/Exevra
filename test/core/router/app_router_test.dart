@@ -55,10 +55,13 @@ void main() {
     String? signedInAs,
     Uri? initialLink,
     bool onboardingDone = true,
+    bool aiConsent = false,
   }) async {
     backend = TestBackend(signedInAs: signedInAs);
     if (signedInAs != null) {
-      backend.profiles.profiles[signedInAs] = profileOf(signedInAs);
+      backend.profiles.profiles[signedInAs] = profileOf(
+        signedInAs,
+      ).copyWith(aiConsent: aiConsent);
     }
     links = FakeLinkSource(initial: initialLink);
     backend.links = links;
@@ -229,7 +232,7 @@ void main() {
   testWidgets('a failed assistant reply is shown once, in the chat', (
     tester,
   ) async {
-    final c = await pumpApp(tester, signedInAs: 'A');
+    final c = await pumpApp(tester, signedInAs: 'A', aiConsent: true);
     expect(location(c), '/dashboard');
 
     await c.read(chatProvider.notifier).sendMessage('hello');

@@ -97,14 +97,22 @@ class ChatNotifier extends Notifier<ChatState> {
     return ChatState(messages: _load(uid));
   }
 
+  /// Whether the signed-in user allowed the assistant (the loaded profile
+  /// says so). Nothing is sent otherwise, whatever the screen shows.
+  bool get _consented => ref.read(userProfileProvider)?.aiConsent ?? false;
+
   /// Sends [text] as a new question. Ignored while an answer is streaming,
-  /// when blank or longer than the server allows.
+  /// when blank or longer than the server allows, and without AI consent.
   Future<void> sendMessage(String text) async {
     final question = text.trim();
     if (question.isEmpty ||
         question.length > AiChatRequest.maxUserMessageLength ||
         state.isStreaming ||
         _uid == null) {
+      return;
+    }
+    if (!_consented) {
+      AppLogger.debug('Assistant message not sent: no AI consent');
       return;
     }
     final prior = state.messages;
@@ -130,7 +138,7 @@ class ChatNotifier extends Notifier<ChatState> {
   /// Sends the last question again, replacing the failed or partial answer.
   Future<void> retry() async {
     final messages = state.messages;
-    if (messages.length < 2 || state.isStreaming) return;
+    if (messages.length < 2 || state.isStreaming || !_consented) return;
     final last = messages.last;
     final question = messages[messages.length - 2];
     if (!last.canRetry || !question.isUser) return;
