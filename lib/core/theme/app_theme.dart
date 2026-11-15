@@ -40,6 +40,11 @@ class AppTheme {
   /// Space between a filled control and its focus ring.
   static const double focusRingGap = 2;
 
+  // Opacities of the ink state layers, as in Material's button defaults.
+  static const double _hoverOpacity = 0.08;
+  static const double _focusOpacity = 0.1;
+  static const double _pressOpacity = 0.1;
+
   /// Keyboard focus ring for filled and borderless controls (filled,
   /// elevated, destructive, text and icon buttons, the FAB).
   ///
@@ -144,6 +149,26 @@ class AppTheme {
     final toggleOverlay = WidgetStateProperty.resolveWith<Color?>(
       (states) => focused(states) ? p.focusRing : null,
     );
+    // State layer of accent-filled controls. Material's default is the
+    // foreground colour, which pulls the fill toward the label: white text on
+    // the light accent fell to 4.4:1 when focused and 3.7:1 when pressed (the
+    // highlight and splash stack). onAccentContainer moves the fill away from
+    // the label in both themes (darker under white text, lighter under the
+    // dark text of the dark theme).
+    final accentOverlay = p.onAccentContainer;
+    // Accent text of text and outlined buttons. Any state layer behind it
+    // takes the light accent under 4.5:1 (4.5 on the page, 4.9 on
+    // surfaceVariant at rest), so while hovered, focused or pressed the label
+    // deepens to onAccentContainer.
+    final accentText = WidgetStateProperty.resolveWith<Color?>(
+      (states) => states.contains(WidgetState.disabled)
+          ? p.textTertiary
+          : states.contains(WidgetState.hovered) ||
+                states.contains(WidgetState.focused) ||
+                states.contains(WidgetState.pressed)
+          ? p.onAccentContainer
+          : p.accent,
+    );
 
     OutlineInputBorder inputBorder(Color color, [double width = 1]) =>
         OutlineInputBorder(
@@ -163,6 +188,14 @@ class AppTheme {
       disabledColor: p.textTertiary,
       hintColor: p.textTertiary,
       focusColor: p.focusRing.withValues(alpha: 0.24),
+      // Ink state layers of InkWell-based controls (list tiles, chips, the
+      // FAB's press). Material's defaults are grey washes that pull light
+      // surfaces toward their text (and lift dark ones toward theirs); a
+      // faint textPrimary layer keeps every text role at 4.5:1 even with the
+      // pressed highlight and splash stacked (see state_contrast_test).
+      hoverColor: p.textPrimary.withValues(alpha: _hoverOpacity),
+      highlightColor: p.textPrimary.withValues(alpha: _pressOpacity),
+      splashColor: p.textPrimary.withValues(alpha: _pressOpacity),
       materialTapTargetSize: MaterialTapTargetSize.padded,
       visualDensity: VisualDensity.standard,
       iconTheme: IconThemeData(color: p.textSecondary, size: AppSizes.icon),
@@ -288,9 +321,14 @@ class AppTheme {
                       : p.outline,
                 ),
         ),
-        labelStyle: WidgetStateTextStyle.resolveWith(
-          (states) => text.labelLarge!.copyWith(
-            color: states.contains(WidgetState.disabled)
+        // Chips resolve only the colour of their label style, never a
+        // WidgetStateTextStyle itself: one would reach the label with no
+        // colour and no size, and the engine paints such text white (1.1:1
+        // on the light chip fill). So the style is plain and its colour is
+        // the state-dependent part.
+        labelStyle: text.labelLarge!.copyWith(
+          color: WidgetStateColor.resolveWith(
+            (states) => states.contains(WidgetState.disabled)
                 ? p.textTertiary
                 : states.contains(WidgetState.selected)
                 ? p.onAccentContainer
@@ -306,6 +344,10 @@ class AppTheme {
       floatingActionButtonTheme: FloatingActionButtonThemeData(
         backgroundColor: p.accent,
         foregroundColor: p.textOnAccent,
+        // Same accent state layer as filled buttons (see accentOverlay).
+        focusColor: p.onAccentContainer.withValues(alpha: _focusOpacity),
+        hoverColor: p.onAccentContainer.withValues(alpha: _hoverOpacity),
+        splashColor: p.onAccentContainer.withValues(alpha: _pressOpacity),
         elevation: AppElevation.low,
         focusElevation: AppElevation.medium,
         hoverElevation: AppElevation.medium,
@@ -383,6 +425,7 @@ class AppTheme {
         style: ElevatedButton.styleFrom(
           backgroundColor: p.accent,
           foregroundColor: p.textOnAccent,
+          overlayColor: accentOverlay,
           disabledBackgroundColor: p.surfaceVariant,
           disabledForegroundColor: p.textTertiary,
           elevation: 0,
@@ -396,6 +439,7 @@ class AppTheme {
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
+          overlayColor: accentOverlay,
           disabledBackgroundColor: p.surfaceVariant,
           disabledForegroundColor: p.textTertiary,
           minimumSize: minButton,
@@ -408,6 +452,7 @@ class AppTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style:
             ButtonStyle(
+              foregroundColor: accentText,
               side: WidgetStateBorderSide.resolveWith(
                 (states) => focused(states)
                     ? focusBorder
@@ -419,6 +464,8 @@ class AppTheme {
                       ),
               ),
             ).merge(
+              // Its foregroundColor only seeds the accent state layer; the
+              // label colour is accentText above.
               OutlinedButton.styleFrom(
                 foregroundColor: p.accent,
                 disabledForegroundColor: p.textTertiary,
@@ -439,15 +486,19 @@ class AppTheme {
           shape: buttonShape,
           textStyle: text.labelLarge,
           tapTargetSize: MaterialTapTargetSize.padded,
-        ).copyWith(side: focusSide),
+        ).copyWith(side: focusSide, foregroundColor: accentText),
       ),
       iconButtonTheme: IconButtonThemeData(
         // A selected (toggled) icon button gets a filled accent container with
         // an accent outline, so the state shows even without a selectedIcon.
+        // Otherwise the foreground is left to the variant: the theme style
+        // applies to IconButton.filled, .filledTonal and .outlined too, and a
+        // fixed textSecondary would put the send button's icon on the accent
+        // fill at 1.4:1. The scheme's variant defaults (onSurfaceVariant =
+        // textSecondary for the standard button, onPrimary on the fill) all
+        // meet 3:1.
         style:
             IconButton.styleFrom(
-              foregroundColor: p.textSecondary,
-              disabledForegroundColor: p.textTertiary,
               minimumSize: minButton,
               tapTargetSize: MaterialTapTargetSize.padded,
             ).copyWith(
@@ -456,7 +507,7 @@ class AppTheme {
                     ? p.textTertiary
                     : states.contains(WidgetState.selected)
                     ? p.onAccentContainer
-                    : p.textSecondary,
+                    : null,
               ),
               backgroundColor: WidgetStateProperty.resolveWith(
                 (states) => !states.contains(WidgetState.selected)
