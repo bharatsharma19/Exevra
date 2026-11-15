@@ -744,7 +744,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               "the other members' balances remain correct; they will show as "
               '"Former member". If you are a group admin, the longest-standing '
               'member becomes admin; groups with no other members are '
-              'deleted.\n\n'
+              'deleted. Payments still waiting for confirmation are '
+              'cancelled.\n\n'
               "This can't be undone.",
             ),
           ),
