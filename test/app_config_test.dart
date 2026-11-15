@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:expense_manager/core/config/app_config.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 String _segment(Map<String, Object?> json) =>
@@ -198,6 +199,54 @@ void main() {
         supabaseAnonKey: publishableKey,
       );
       expect(config.isGoogleSignInConfigured, isFalse);
+      for (final platform in TargetPlatform.values) {
+        expect(config.googleSignInAvailableOn(platform), isFalse);
+      }
+    });
+
+    test('Android needs the web client id only', () {
+      const config = AppConfig(
+        supabaseUrl: validUrl,
+        supabaseAnonKey: publishableKey,
+        googleWebClientId: 'web.apps.googleusercontent.com',
+      );
+      expect(config.googleSignInAvailableOn(TargetPlatform.android), isTrue);
+      // The test platform is Android.
+      expect(config.isGoogleSignInConfigured, isTrue);
+    });
+
+    test('iOS also needs the iOS client id', () {
+      const webOnly = AppConfig(
+        supabaseUrl: validUrl,
+        supabaseAnonKey: publishableKey,
+        googleWebClientId: 'web.apps.googleusercontent.com',
+      );
+      expect(webOnly.googleSignInAvailableOn(TargetPlatform.iOS), isFalse);
+      const iosOnly = AppConfig(
+        supabaseUrl: validUrl,
+        supabaseAnonKey: publishableKey,
+        googleIosClientId: 'ios.apps.googleusercontent.com',
+      );
+      expect(iosOnly.googleSignInAvailableOn(TargetPlatform.iOS), isFalse);
+      expect(iosOnly.googleSignInAvailableOn(TargetPlatform.android), isFalse);
+      const both = AppConfig(
+        supabaseUrl: validUrl,
+        supabaseAnonKey: publishableKey,
+        googleWebClientId: 'web.apps.googleusercontent.com',
+        googleIosClientId: 'ios.apps.googleusercontent.com',
+      );
+      expect(both.googleSignInAvailableOn(TargetPlatform.iOS), isTrue);
+    });
+
+    test('the iOS check follows the device platform', () {
+      const webOnly = AppConfig(
+        supabaseUrl: validUrl,
+        supabaseAnonKey: publishableKey,
+        googleWebClientId: 'web.apps.googleusercontent.com',
+      );
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      expect(webOnly.isGoogleSignInConfigured, isFalse);
     });
   });
 }

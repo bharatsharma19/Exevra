@@ -56,7 +56,23 @@ class AppConfig {
 
   bool get isValid => problems.isEmpty;
 
-  bool get isGoogleSignInConfigured => googleWebClientId.trim().isNotEmpty;
+  /// Whether Google sign-in can work in this build on this device (see
+  /// [googleSignInAvailableOn]). The sign-in button is hidden otherwise.
+  bool get isGoogleSignInConfigured =>
+      googleSignInAvailableOn(kIsWeb ? null : defaultTargetPlatform);
+
+  /// Whether Google sign-in has the client ids it needs on [platform]
+  /// (null = web): the web client id everywhere (Supabase checks the ID
+  /// token against it), and on iOS also the iOS client id the native SDK
+  /// signs in with. Without them the button would only fail.
+  bool googleSignInAvailableOn(TargetPlatform? platform) {
+    if (googleWebClientId.trim().isEmpty) return false;
+    return switch (platform) {
+      TargetPlatform.iOS ||
+      TargetPlatform.macOS => googleIosClientId.trim().isNotEmpty,
+      _ => true,
+    };
+  }
 
   /// Where Supabase sends the user back after an email link (sign-up
   /// confirmation, password recovery). Registered on both platforms and in
