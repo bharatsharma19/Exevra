@@ -322,7 +322,7 @@ abstract class AppLocalizations {
   /// **'Designed & developed by Bharat Sharma'**
   String get aboutCredit;
 
-  /// Copyright line on the open-source licences page.
+  /// Copyright line on the open-source licenses page.
   ///
   /// In en, this message translates to:
   /// **'© 2026 Bharat Sharma'**
@@ -337,25 +337,25 @@ abstract class AppLocalizations {
   /// No description provided for @aboutPrivacyPolicy.
   ///
   /// In en, this message translates to:
-  /// **'Privacy Policy'**
+  /// **'Privacy policy'**
   String get aboutPrivacyPolicy;
 
   /// No description provided for @aboutTermsOfUse.
   ///
   /// In en, this message translates to:
-  /// **'Terms of Use'**
+  /// **'Terms of use'**
   String get aboutTermsOfUse;
 
   /// No description provided for @aboutHelpSupport.
   ///
   /// In en, this message translates to:
-  /// **'Help & Support'**
+  /// **'Help & support'**
   String get aboutHelpSupport;
 
-  /// Row that opens the list of third-party licences.
+  /// Row that opens the list of third-party licenses. US spelling, to match the title of the system licenses page it opens.
   ///
   /// In en, this message translates to:
-  /// **'Open-source licences'**
+  /// **'Open-source licenses'**
   String get aboutLicenses;
 
   /// Section title on the About screen.
@@ -429,6 +429,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Page {current} of {total}'**
   String onboardingPageIndicator(int current, int total);
+
+  /// Screen reader label of the introduction page indicator, announced when the page changes. {title} is the title of the page.
+  ///
+  /// In en, this message translates to:
+  /// **'Page {current} of {total}: {title}'**
+  String onboardingPageAnnouncement(int current, int total, String title);
 
   /// No description provided for @onboardingTrackTitle.
   ///

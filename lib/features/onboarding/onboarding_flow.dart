@@ -177,7 +177,11 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    OnboardingPageIndicator(current: _page, count: _pageCount),
+                    OnboardingPageIndicator(
+                      current: _page,
+                      count: _pageCount,
+                      title: pages[_page].title,
+                    ),
                     const SizedBox(height: AppSpacing.xl),
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 420),
@@ -202,7 +206,8 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
 }
 
 /// Dots showing the current introduction page, read by screen readers as
-/// "Page 1 of 3" and announced when the page changes.
+/// "Page 1 of 3: Track every expense" and announced when the page changes,
+/// so screen reader users hear the new page without leaving the Next button.
 ///
 /// The current dot is wider as well as accent-coloured, so the position does
 /// not rely on colour alone.
@@ -211,6 +216,7 @@ class OnboardingPageIndicator extends StatelessWidget {
   const OnboardingPageIndicator({
     required this.current,
     required this.count,
+    this.title,
     super.key,
   });
 
@@ -219,6 +225,9 @@ class OnboardingPageIndicator extends StatelessWidget {
 
   /// Number of pages.
   final int count;
+
+  /// Title of the current page, included in the announcement.
+  final String? title;
 
   static const double _dot = 8;
 
@@ -229,7 +238,9 @@ class OnboardingPageIndicator extends StatelessWidget {
     return Semantics(
       container: true,
       liveRegion: true,
-      label: context.l10n.onboardingPageIndicator(current + 1, count),
+      label: title == null
+          ? context.l10n.onboardingPageIndicator(current + 1, count)
+          : context.l10n.onboardingPageAnnouncement(current + 1, count, title!),
       child: ExcludeSemantics(
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -267,60 +278,92 @@ class _PageContent {
   final String body;
 }
 
-class _OnboardingPage extends StatelessWidget {
+class _OnboardingPage extends StatefulWidget {
   const _OnboardingPage({required this.content});
 
   final _PageContent content;
 
   @override
+  State<_OnboardingPage> createState() => _OnboardingPageState();
+}
+
+class _OnboardingPageState extends State<_OnboardingPage> {
+  /// Text scale from which the scrollbar always shows, so readers can see
+  /// that more text follows below the fold.
+  static const double _largeTextScale = 1.5;
+
+  /// Below this size the art is left out to give the text the room.
+  static const double _minArt = 72;
+
+  final ScrollController _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final content = widget.content;
     final palette = context.palette;
     final textTheme = Theme.of(context).textTheme;
+    final textScale = MediaQuery.textScalerOf(context).scale(1);
     return LayoutBuilder(
       builder: (context, constraints) {
-        // The art shrinks on short screens and at large text sizes, so the
-        // text keeps most of the room; the page scrolls if it still does not
-        // fit.
-        final art = math.min(
-          200.0,
-          math.min(constraints.maxWidth * 0.6, constraints.maxHeight * 0.4),
-        );
-        return SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: constraints.maxHeight),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 420),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _Illustration(
-                      size: art,
-                      icon: content.icon,
-                      satellites: content.satellites,
-                    ),
-                    const SizedBox(height: AppSpacing.xl),
-                    Semantics(
-                      header: true,
-                      child: Text(
-                        content.title,
-                        textAlign: TextAlign.center,
-                        style: textTheme.headlineSmall?.copyWith(
-                          color: palette.textPrimary,
+        // The art shrinks on short screens and with the text size, so the
+        // text keeps most of the room, and it is left out once it would be
+        // too small to read. The page scrolls if it still does not fit.
+        final art =
+            math.min(
+              200.0,
+              math.min(constraints.maxWidth * 0.6, constraints.maxHeight * 0.4),
+            ) /
+            math.max(1.0, textScale);
+        final showArt = art >= _minArt;
+        return Scrollbar(
+          controller: _scroll,
+          thumbVisibility: textScale >= _largeTextScale,
+          child: SingleChildScrollView(
+            controller: _scroll,
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (showArt) ...[
+                        _Illustration(
+                          size: art,
+                          icon: content.icon,
+                          satellites: content.satellites,
+                        ),
+                        const SizedBox(height: AppSpacing.xl),
+                      ],
+                      Semantics(
+                        header: true,
+                        child: Text(
+                          content.title,
+                          textAlign: TextAlign.center,
+                          style: textTheme.headlineSmall?.copyWith(
+                            color: palette.textPrimary,
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    Text(
-                      content.body,
-                      textAlign: TextAlign.center,
-                      style: textTheme.bodyLarge?.copyWith(
-                        color: palette.textSecondary,
+                      const SizedBox(height: AppSpacing.md),
+                      Text(
+                        content.body,
+                        textAlign: TextAlign.center,
+                        style: textTheme.bodyLarge?.copyWith(
+                          color: palette.textSecondary,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: AppSpacing.lg),
-                  ],
+                      const SizedBox(height: AppSpacing.lg),
+                    ],
+                  ),
                 ),
               ),
             ),

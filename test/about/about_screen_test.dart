@@ -5,6 +5,7 @@ import 'package:expense_manager/core/widgets/widgets.dart';
 import 'package:expense_manager/features/about/about_screen.dart';
 import 'package:expense_manager/l10n/l10n.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
@@ -64,10 +65,10 @@ void main() {
         findsOneWidget,
       );
       for (final row in [
-        'Privacy Policy',
-        'Terms of Use',
-        'Help & Support',
-        'Open-source licences',
+        'Privacy policy',
+        'Terms of use',
+        'Help & support',
+        'Open-source licenses',
         'Account deletion info',
       ]) {
         expect(find.text(row), findsOneWidget, reason: row);
@@ -108,8 +109,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Privacy Policy'));
-    await tester.tap(find.text('Terms of Use'));
+    await tester.tap(find.text('Privacy policy'));
+    await tester.tap(find.text('Terms of use'));
     await tester.scrollUntilVisible(find.text('Account deletion info'), 100);
     await tester.tap(find.text('Account deletion info'));
     await tester.pump();
@@ -121,7 +122,7 @@ void main() {
     expect(find.byType(SnackBar), findsNothing);
   });
 
-  testWidgets('Help & Support emails support with the app version', (
+  testWidgets('Help & support emails support with the app version', (
     tester,
   ) async {
     Uri? opened;
@@ -137,7 +138,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Help & Support'));
+    await tester.tap(find.text('Help & support'));
     await tester.pump();
     expect(opened!.scheme, 'mailto');
     expect(opened!.path, 'support@exevra.app');
@@ -150,7 +151,7 @@ void main() {
       _app(AboutScreen(links: _links, launcher: (_) async => false)),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Help & Support'));
+    await tester.tap(find.text('Help & support'));
     await tester.pump();
     expect(
       find.text(
@@ -158,7 +159,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    await tester.tap(find.text('Privacy Policy'));
+    await tester.tap(find.text('Privacy policy'));
     await tester.pump();
     expect(
       find.text("Couldn't open the link. Please try again later."),
@@ -190,7 +191,7 @@ void main() {
   ) async {
     await tester.pumpWidget(_app(const AboutScreen(links: _links)));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Open-source licences'));
+    await tester.tap(find.text('Open-source licenses'));
     // The licence page loads asynchronously and shows a spinner, so it never
     // settles; pump a few frames instead.
     for (var i = 0; i < 10; i++) {
@@ -211,7 +212,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       find.bySemanticsLabel(
-        RegExp('Privacy Policy.*Opens in your browser', dotAll: true),
+        RegExp('Privacy policy.*Opens in your browser', dotAll: true),
       ),
       findsOneWidget,
     );
@@ -237,5 +238,43 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
     });
+
+    for (final textScale in [1.3, 1.5, 2.0]) {
+      testWidgets('no text is cut off at 320dp and ${textScale}x ($mode)', (
+        tester,
+      ) async {
+        // Tall enough that the whole list is built at once. The test font
+        // is about twice as wide as Roboto, so this is a stricter check than
+        // a real device.
+        tester.view.physicalSize = const Size(320, 3000);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await tester.pumpWidget(
+          _app(
+            AboutScreen(links: _links, onDeleteAccount: () {}),
+            mode: mode,
+            textScale: textScale,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Delete account'), findsOneWidget);
+        final paragraphs = tester
+            .renderObjectList<RenderParagraph>(
+              find.descendant(
+                of: find.byType(AboutScreen),
+                matching: find.byType(RichText),
+              ),
+            )
+            .toList();
+        expect(paragraphs, isNotEmpty);
+        for (final paragraph in paragraphs) {
+          expect(
+            paragraph.didExceedMaxLines,
+            isFalse,
+            reason: paragraph.text.toPlainText(),
+          );
+        }
+      });
+    }
   }
 }

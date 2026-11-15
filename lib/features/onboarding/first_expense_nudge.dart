@@ -70,8 +70,11 @@ class FirstExpenseNudge extends ConsumerWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // container keeps the heading flag on the title
+                        // alone instead of merging it into the card node.
                         Semantics(
                           header: true,
+                          container: true,
                           child: Text(
                             l10n.firstExpenseNudgeTitle,
                             style: textTheme.titleMedium?.copyWith(

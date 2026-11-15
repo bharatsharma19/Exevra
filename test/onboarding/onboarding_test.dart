@@ -30,6 +30,9 @@ Widget _app(
   ),
 );
 
+bool _isIllustration(Widget widget) =>
+    widget.runtimeType.toString() == '_Illustration';
+
 Future<bool?> _flag(String key) async =>
     (await SharedPreferences.getInstance()).getBool(key);
 
@@ -114,18 +117,27 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.bySemanticsLabel('Page 1 of 3'), findsOneWidget);
+      expect(
+        find.bySemanticsLabel('Page 1 of 3: Track every expense'),
+        findsOneWidget,
+      );
       await tester.tap(find.text('Next'));
       await tester.pumpAndSettle();
       expect(find.text('Split and settle up'), findsOneWidget);
-      expect(find.bySemanticsLabel('Page 2 of 3'), findsOneWidget);
+      expect(
+        find.bySemanticsLabel('Page 2 of 3: Split and settle up'),
+        findsOneWidget,
+      );
       expect(find.text('Skip'), findsOneWidget);
 
       await tester.tap(find.text('Next'));
       await tester.pumpAndSettle();
       expect(find.text('Ask about your spending'), findsOneWidget);
       expect(find.textContaining('optional'), findsOneWidget);
-      expect(find.bySemanticsLabel('Page 3 of 3'), findsOneWidget);
+      expect(
+        find.bySemanticsLabel('Page 3 of 3: Ask about your spending'),
+        findsOneWidget,
+      );
       expect(find.text('Skip'), findsOneWidget);
       expect(find.text('Next'), findsNothing);
       expect(finished, 0);
@@ -230,7 +242,65 @@ void main() {
         }
         expect(find.text('Get started'), findsOneWidget);
       });
+
+      for (final height in [480.0, 568.0]) {
+        testWidgets(
+          'at 320x$height and 200% text the art gives way to the text and '
+          'the page shows a scrollbar ($mode)',
+          (tester) async {
+            tester.view.physicalSize = Size(320, height);
+            tester.view.devicePixelRatio = 1;
+            addTearDown(tester.view.reset);
+            await tester.pumpWidget(
+              _app(OnboardingFlow(onFinished: () {}), mode: mode, textScale: 2),
+            );
+            await tester.pumpAndSettle();
+            for (var i = 0; i < 3; i++) {
+              final viewport = tester.getRect(find.byType(PageView));
+              final art = find.byWidgetPredicate(_isIllustration);
+              // At 1x the art takes up to 40% of the page; at 2x it shrinks
+              // to half that, or is left out once it gets too small.
+              if (height < 500) {
+                expect(art, findsNothing, reason: 'page ${i + 1}');
+              } else if (art.evaluate().isNotEmpty) {
+                expect(
+                  tester.getSize(art).height,
+                  lessThanOrEqualTo(viewport.height * 0.2),
+                  reason: 'page ${i + 1}',
+                );
+              }
+              final bar = tester.widget<Scrollbar>(
+                find.descendant(
+                  of: find.byType(PageView),
+                  matching: find.byType(Scrollbar),
+                ),
+              );
+              expect(bar.thumbVisibility, isTrue);
+              if (i < 2) {
+                await tester.tap(find.text('Next'));
+                await tester.pumpAndSettle();
+              }
+            }
+            expect(tester.takeException(), isNull);
+          },
+        );
+      }
     }
+
+    testWidgets('the scrollbar only shows on its own at large text', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_app(OnboardingFlow(onFinished: () {})));
+      await tester.pumpAndSettle();
+      final bar = tester.widget<Scrollbar>(
+        find.descendant(
+          of: find.byType(PageView),
+          matching: find.byType(Scrollbar),
+        ),
+      );
+      expect(bar.thumbVisibility, isFalse);
+      expect(find.byWidgetPredicate(_isIllustration), findsOneWidget);
+    });
   });
 
   group('FirstExpenseNudge', () {
@@ -261,6 +331,21 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Add your first expense'), findsNothing);
       expect(await _flag('first_expense_nudge_dismissed_v1'), isTrue);
+    });
+
+    testWidgets('only the title is a heading', (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(nudge(() {}));
+      await tester.pumpAndSettle();
+      final title = tester.getSemantics(find.text('Add your first expense'));
+      expect(title.label, 'Add your first expense');
+      expect(title.flagsCollection.isHeader, isTrue);
+      final message = tester.getSemantics(
+        find.text('Record a purchase to start seeing where your money goes.'),
+      );
+      expect(message.flagsCollection.isHeader, isFalse);
+      expect(message.label, isNot(contains('Add your first expense')));
+      handle.dispose();
     });
 
     testWidgets('stays hidden once dismissed', (tester) async {

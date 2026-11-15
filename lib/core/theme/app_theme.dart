@@ -116,13 +116,21 @@ class AppTheme {
     const minButton = Size(AppSizes.minTapTarget, AppSizes.minTapTarget);
 
     // Keyboard and D-pad focus (WCAG 2.4.7): Material's focus overlay is a
-    // faint tint, so every interactive component gets a solid indicator in
+    // faint tint, so the themed components get a solid indicator in
     // AppPalette.focusRing (at least 3:1 against the page, see
     // contrast_test). Filled controls get a ring with a gap ([focusRingSide]),
-    // outlined controls a thicker border ([focusBorderSide]), and toggles
+    // outlined controls a thicker border ([focusBorderSide]), toggles
     // (switch, checkbox, radio) a solid halo with their marks redrawn in
-    // textOnAccent on top of it. Material only reports the focused state
-    // while the keyboard drives focus, so touch users never see it.
+    // textOnAccent on top of it, segments an underline, and snackbar actions
+    // an inverted fill. Material only reports the focused state while the
+    // keyboard drives focus, so touch users never see it.
+    //
+    // Not covered by the theme: InkWell-based widgets (ListTile, InkWell,
+    // the rows of Flutter's licence page) only get the [ThemeData.focusColor]
+    // tint, which cannot reach 3:1 against the page without pushing
+    // textSecondary on it under 4.5:1. Kit widgets built on them (AppListTile,
+    // AppCard, AppNavigationDestination) add a FocusOutline; screens should
+    // use those instead of the raw widgets.
     final focusRing = focusRingSide(p);
     final focusBorder = focusBorderSide(p);
     bool focused(Set<WidgetState> states) =>
@@ -237,7 +245,21 @@ class AppTheme {
         behavior: SnackBarBehavior.floating,
         backgroundColor: p.inverseSurface,
         contentTextStyle: text.bodyMedium!.copyWith(color: p.onInverseSurface),
-        actionTextColor: p.inverseAccent,
+        // SnackBar gives its action its own TextButtonTheme, so the text
+        // button focus ring never reaches it (and focusRing is under 3:1 on
+        // inverseSurface anyway). A focused action inverts instead: an
+        // onInverseSurface fill with inverseSurface text. Actions with their
+        // own textColor (AppSnackbar) keep it on the fill.
+        actionTextColor: WidgetStateColor.resolveWith(
+          (states) => states.contains(WidgetState.disabled)
+              ? p.onInverseSurface
+              : focused(states)
+              ? p.inverseSurface
+              : p.inverseAccent,
+        ),
+        actionBackgroundColor: WidgetStateColor.resolveWith(
+          (states) => focused(states) ? p.onInverseSurface : Colors.transparent,
+        ),
         disabledActionTextColor: p.onInverseSurface,
         closeIconColor: p.onInverseSurface,
         elevation: AppElevation.medium,
@@ -456,25 +478,37 @@ class AppTheme {
       segmentedButtonTheme: SegmentedButtonThemeData(
         style: ButtonStyle(
           minimumSize: const WidgetStatePropertyAll(minButton),
-          // The segments share one outer border, so a focused segment is
-          // filled with the focus colour instead of getting its own ring.
+          // Segments cannot draw their own ring (SegmentedButton forces a
+          // plain shape on them), and a solid focus fill would look more
+          // selected than the selected segment. So a focused segment keeps
+          // its fill and colours, its label gets a thick focusRing underline,
+          // and the group border turns into the focus colour.
           backgroundColor: WidgetStateProperty.resolveWith(
-            (states) => focused(states)
-                ? p.focusRing
-                : states.contains(WidgetState.selected)
+            (states) => states.contains(WidgetState.selected)
                 ? p.accentContainer
                 : p.surface,
           ),
           foregroundColor: WidgetStateProperty.resolveWith(
             (states) => states.contains(WidgetState.disabled)
                 ? p.textTertiary
-                : focused(states)
-                ? p.textOnAccent
                 : states.contains(WidgetState.selected)
                 ? p.onAccentContainer
                 : p.textPrimary,
           ),
-          side: WidgetStatePropertyAll(BorderSide(color: p.outline)),
+          textStyle: WidgetStateProperty.resolveWith(
+            (states) => focused(states)
+                ? text.labelLarge!.copyWith(
+                    decoration: TextDecoration.underline,
+                    decorationColor: p.focusRing,
+                    decorationThickness: 3,
+                  )
+                : text.labelLarge,
+          ),
+          side: WidgetStateProperty.resolveWith(
+            (states) => focused(states)
+                ? BorderSide(color: p.focusRing, width: focusRingWidth)
+                : BorderSide(color: p.outline),
+          ),
         ),
       ),
       switchTheme: SwitchThemeData(

@@ -420,21 +420,19 @@ void main() {
 
     test('button themes draw a focus ring outside the control', () {
       final theme = AppTheme.light();
-      for (final style in [
-        theme.filledButtonTheme.style!,
-        theme.elevatedButtonTheme.style!,
-        theme.textButtonTheme.style!,
-        theme.outlinedButtonTheme.style!,
-        theme.iconButtonTheme.style!,
+      // Outside the control: the outlined border sits on its edge, the
+      // other buttons' 2dp ring leaves a 2dp gap (strokeAlign 3, see
+      // focus_indicator_test).
+      for (final (style, strokeAlign) in [
+        (theme.filledButtonTheme.style!, 3.0),
+        (theme.elevatedButtonTheme.style!, 3.0),
+        (theme.textButtonTheme.style!, 3.0),
+        (theme.outlinedButtonTheme.style!, BorderSide.strokeAlignOutside),
+        (theme.iconButtonTheme.style!, 3.0),
       ]) {
         final side = style.side!.resolve({WidgetState.focused})!;
         expect(side.color, AppPalette.light.focusRing);
-        // Outside the control: the outlined border sits on its edge, the
-        // other buttons' ring leaves a gap (see focus_indicator_test).
-        expect(
-          side.strokeAlign,
-          greaterThanOrEqualTo(BorderSide.strokeAlignOutside),
-        );
+        expect(side.strokeAlign, strokeAlign);
       }
     });
 

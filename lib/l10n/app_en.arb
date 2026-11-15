@@ -66,14 +66,14 @@
   "aboutCredit": "Designed & developed by Bharat Sharma",
   "@aboutCredit": {"description": "Credit line on the About screen. Not translated."},
   "aboutLegalese": "© 2026 Bharat Sharma",
-  "@aboutLegalese": {"description": "Copyright line on the open-source licences page."},
+  "@aboutLegalese": {"description": "Copyright line on the open-source licenses page."},
   "aboutSupportSection": "Help & legal",
   "@aboutSupportSection": {"description": "Section title on the About screen."},
-  "aboutPrivacyPolicy": "Privacy Policy",
-  "aboutTermsOfUse": "Terms of Use",
-  "aboutHelpSupport": "Help & Support",
-  "aboutLicenses": "Open-source licences",
-  "@aboutLicenses": {"description": "Row that opens the list of third-party licences."},
+  "aboutPrivacyPolicy": "Privacy policy",
+  "aboutTermsOfUse": "Terms of use",
+  "aboutHelpSupport": "Help & support",
+  "aboutLicenses": "Open-source licenses",
+  "@aboutLicenses": {"description": "Row that opens the list of third-party licenses. US spelling, to match the title of the system licenses page it opens."},
   "aboutAccountSection": "Account",
   "@aboutAccountSection": {"description": "Section title on the About screen."},
   "aboutDeleteAccountInfo": "Account deletion info",
@@ -103,6 +103,11 @@
   "@onboardingPageIndicator": {
     "description": "Screen reader label of the introduction page indicator.",
     "placeholders": {"current": {"type": "int"}, "total": {"type": "int"}}
+  },
+  "onboardingPageAnnouncement": "Page {current} of {total}: {title}",
+  "@onboardingPageAnnouncement": {
+    "description": "Screen reader label of the introduction page indicator, announced when the page changes. {title} is the title of the page.",
+    "placeholders": {"current": {"type": "int"}, "total": {"type": "int"}, "title": {"type": "String"}}
   },
   "onboardingTrackTitle": "Track every expense",
   "onboardingTrackBody": "Log personal and shared spending in your own currency and see where your money goes.",

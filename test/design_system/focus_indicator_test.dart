@@ -90,9 +90,48 @@ void main() {
         _expectContrast(p.textOnAccent, p.focusRing, 4.5, 'mark on halo');
       });
 
-      test('a focused segment fill differs from its resting fill', () {
+      test('the focused segment underline contrasts with segment fills', () {
         for (final fill in [p.surface, p.accentContainer]) {
-          _expectContrast(p.focusRing, fill, 3, 'segment fill');
+          _expectContrast(p.focusRing, fill, 3, 'segment underline');
+        }
+      });
+
+      test('a focused snackbar action inverts against inverseSurface', () {
+        // The page focus ring is too faint on the inverse surface, so a
+        // focused snackbar action gets a solid onInverseSurface fill.
+        _expectContrast(
+          p.onInverseSurface,
+          p.inverseSurface,
+          3,
+          'action focus fill',
+        );
+        _expectContrast(
+          p.inverseSurface,
+          p.onInverseSurface,
+          4.5,
+          'focused action label',
+        );
+        // AppSnackbar actions keep their own label colour; the fill must not
+        // make them harder to read.
+        for (final label in [
+          p.onSuccessContainer,
+          p.onInfoContainer,
+          p.onDangerContainer,
+        ]) {
+          _expectContrast(label, p.onInverseSurface, 4.5, 'AppSnackbar action');
+        }
+      });
+
+      test('the ink focus tint keeps row text readable', () {
+        // ThemeData.focusColor is the faint ink tint of InkWell-based
+        // controls the kit does not wrap (raw ListTile, InkWell, Flutter's
+        // licence page). It cannot reach 3:1 against the page without
+        // pushing textSecondary on it under 4.5:1, so kit widgets add a
+        // FocusOutline instead; this guards the text on the tint.
+        for (final page in _pages(p).values) {
+          final tint = Color.alphaBlend(theme.focusColor, page);
+          _expectContrast(p.textPrimary, tint, 4.5, 'text on focus tint');
+          _expectContrast(p.textSecondary, tint, 4.5, 'text on focus tint');
         }
       });
     });
@@ -135,14 +174,33 @@ void main() {
         expect(shape.resolve({})!.side, BorderSide.none);
       });
 
-      test('a focused segment is filled with the focus colour', () {
+      test('a focused segment keeps its fill and underlines its label', () {
+        // Focus must not read as selection: the fill and label colour stay
+        // as they are, the label gets a focusRing underline and the group
+        // border turns into the focus colour.
         final style = theme.segmentedButtonTheme.style!;
         for (final base in [<WidgetState>{}, _selected]) {
           final focus = {...base, WidgetState.focused};
-          expect(style.backgroundColor!.resolve(focus), p.focusRing);
-          expect(style.foregroundColor!.resolve(focus), p.textOnAccent);
-          expect(style.backgroundColor!.resolve(base), isNot(p.focusRing));
+          expect(
+            style.backgroundColor!.resolve(focus),
+            style.backgroundColor!.resolve(base),
+          );
+          expect(
+            style.foregroundColor!.resolve(focus),
+            style.foregroundColor!.resolve(base),
+          );
+          final label = style.textStyle!.resolve(focus)!;
+          expect(label.decoration, TextDecoration.underline);
+          expect(label.decorationColor, p.focusRing);
+          expect(label.decorationThickness, greaterThanOrEqualTo(2));
+          expect(style.textStyle!.resolve(base)!.decoration, isNull);
+          expect(style.side!.resolve(focus)!.color, p.focusRing);
+          expect(style.side!.resolve(base)!.color, p.outline);
         }
+        expect(
+          style.backgroundColor!.resolve(_selected),
+          isNot(style.backgroundColor!.resolve({})),
+        );
       });
 
       test('switches, checkboxes and radios show a solid halo', () {
@@ -329,6 +387,42 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.tab);
         await tester.pumpAndSettle();
         expect((decoration().border! as Border).top.color, p.focusRing);
+      });
+
+      testWidgets('a focused SnackBarAction inverts on the inverse surface', (
+        tester,
+      ) async {
+        _useKeyboardFocus();
+        final messenger = GlobalKey<ScaffoldMessengerState>();
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.light(),
+            darkTheme: AppTheme.dark(),
+            themeMode: mode,
+            scaffoldMessengerKey: messenger,
+            home: const Scaffold(body: SizedBox.expand()),
+          ),
+        );
+        messenger.currentState!.showSnackBar(
+          SnackBar(
+            content: const Text('Deleted'),
+            action: SnackBarAction(label: 'Undo', onPressed: () {}),
+          ),
+        );
+        await tester.pumpAndSettle();
+        Material material() => tester.widget<Material>(
+          find.descendant(
+            of: find.byType(SnackBarAction),
+            matching: find.byType(Material),
+          ),
+        );
+        expect(material().textStyle!.color, p.inverseAccent);
+        expect(material().color!.a, 0);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pumpAndSettle();
+        expect(material().color, p.onInverseSurface);
+        expect(material().textStyle!.color, p.inverseSurface);
       });
     });
   }

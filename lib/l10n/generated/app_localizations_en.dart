@@ -137,16 +137,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get aboutSupportSection => 'Help & legal';
 
   @override
-  String get aboutPrivacyPolicy => 'Privacy Policy';
+  String get aboutPrivacyPolicy => 'Privacy policy';
 
   @override
-  String get aboutTermsOfUse => 'Terms of Use';
+  String get aboutTermsOfUse => 'Terms of use';
 
   @override
-  String get aboutHelpSupport => 'Help & Support';
+  String get aboutHelpSupport => 'Help & support';
 
   @override
-  String get aboutLicenses => 'Open-source licences';
+  String get aboutLicenses => 'Open-source licenses';
 
   @override
   String get aboutAccountSection => 'Account';
@@ -189,6 +189,11 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String onboardingPageIndicator(int current, int total) {
     return 'Page $current of $total';
+  }
+
+  @override
+  String onboardingPageAnnouncement(int current, int total, String title) {
+    return 'Page $current of $total: $title';
   }
 
   @override

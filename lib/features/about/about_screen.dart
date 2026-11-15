@@ -16,7 +16,7 @@ import '../../l10n/l10n.dart';
 
 /// About and legal: app name, tagline, version and build, the credit line,
 /// links to the privacy policy, terms, support and the account deletion
-/// page, the open-source licences, and (when signed in) Delete account.
+/// page, the open-source licenses, and (when signed in) Delete account.
 ///
 /// Standalone: the caller owns navigation and account deletion. Pass
 /// [onDeleteAccount] to show the Delete account button (for example the
@@ -114,6 +114,12 @@ class _AboutScreenState extends State<AboutScreen> {
   }
 }
 
+/// The About rows never cut their text off (WCAG 1.4.4): at 200% text on a
+/// 320dp screen the deletion info subtitle alone needs four lines, and
+/// translations run longer. AppListTile takes a number, so this is a limit
+/// no row reaches.
+const int _rowMaxLines = 100;
+
 class _AboutBody extends StatelessWidget {
   const _AboutBody({
     required this.version,
@@ -177,18 +183,24 @@ class _AboutBody extends StatelessWidget {
           child: Column(
             children: [
               AppListTile(
+                titleMaxLines: _rowMaxLines,
+                subtitleMaxLines: _rowMaxLines,
                 leading: const Icon(Icons.privacy_tip_outlined),
                 title: l10n.aboutPrivacyPolicy,
                 trailing: external,
                 onTap: () => onOpen(links.privacyPolicy),
               ),
               AppListTile(
+                titleMaxLines: _rowMaxLines,
+                subtitleMaxLines: _rowMaxLines,
                 leading: const Icon(Icons.description_outlined),
                 title: l10n.aboutTermsOfUse,
                 trailing: external,
                 onTap: () => onOpen(links.terms),
               ),
               AppListTile(
+                titleMaxLines: _rowMaxLines,
+                subtitleMaxLines: _rowMaxLines,
                 leading: const Icon(Icons.support_agent_outlined),
                 title: l10n.aboutHelpSupport,
                 subtitle: links.supportEmail,
@@ -196,6 +208,8 @@ class _AboutBody extends StatelessWidget {
                 onTap: onEmailSupport,
               ),
               AppListTile(
+                titleMaxLines: _rowMaxLines,
+                subtitleMaxLines: _rowMaxLines,
                 leading: const Icon(Icons.article_outlined),
                 title: l10n.aboutLicenses,
                 trailing: const Icon(Icons.chevron_right),
@@ -208,6 +222,8 @@ class _AboutBody extends StatelessWidget {
         AppCard(
           padding: groupPadding,
           child: AppListTile(
+            titleMaxLines: _rowMaxLines,
+            subtitleMaxLines: _rowMaxLines,
             leading: const Icon(Icons.manage_accounts_outlined),
             title: l10n.aboutDeleteAccountInfo,
             subtitle: l10n.aboutDeleteAccountInfoSubtitle,
