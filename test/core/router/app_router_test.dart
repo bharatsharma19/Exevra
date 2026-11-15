@@ -5,7 +5,9 @@ import 'package:expense_manager/core/router/app_router.dart';
 import 'package:expense_manager/core/ui/root_messenger.dart';
 import 'package:expense_manager/data/ai/ai_chat_models.dart';
 import 'package:expense_manager/data/repositories/invitation_repository.dart';
+import 'package:expense_manager/features/about/about_screen.dart';
 import 'package:expense_manager/features/auth/screens/login_screen.dart';
+import 'package:expense_manager/features/onboarding/onboarding.dart';
 import 'package:expense_manager/features/profile/screens/invite_screen.dart';
 import 'package:expense_manager/main.dart';
 import 'package:expense_manager/models/group.dart';
@@ -52,6 +54,7 @@ void main() {
     WidgetTester tester, {
     String? signedInAs,
     Uri? initialLink,
+    bool onboardingDone = true,
   }) async {
     backend = TestBackend(signedInAs: signedInAs);
     if (signedInAs != null) {
@@ -62,6 +65,7 @@ void main() {
     invitations = _FakeInvitations();
     final container = (await tester.runAsync(
       () => backend.container(
+        prefs: {OnboardingStore.completedKey: onboardingDone},
         extraOverrides: [
           invitationRepositoryProvider.overrideWithValue(invitations),
         ],
@@ -84,6 +88,87 @@ void main() {
     final c = await pumpApp(tester);
     expect(location(c), '/login');
     expect(find.byType(LoginScreen), findsOneWidget);
+  });
+
+  testWidgets('a fresh device shows the introduction, then sign-in', (
+    tester,
+  ) async {
+    final c = await pumpApp(tester, onboardingDone: false);
+    expect(location(c), '/onboarding');
+    expect(find.byType(OnboardingFlow), findsOneWidget);
+
+    await tester.tap(find.text('Skip'));
+    await _settle(tester);
+    expect(location(c), '/login');
+    expect(find.byType(LoginScreen), findsOneWidget);
+    expect(c.read(onboardingCompletedProvider).value, isTrue);
+  });
+
+  testWidgets('an invite link on a fresh device is not sent to the intro', (
+    tester,
+  ) async {
+    final c = await pumpApp(
+      tester,
+      onboardingDone: false,
+      initialLink: Uri.parse('exevra://invite/$_token'),
+    );
+    expect(location(c), '/invite/$_token');
+    expect(find.byType(InviteScreen), findsOneWidget);
+  });
+
+  testWidgets('About opens from sign-in without Delete account', (
+    tester,
+  ) async {
+    final c = await pumpApp(tester);
+    final about = find.byKey(const Key('login-about'));
+    await tester.ensureVisible(about);
+    await tester.tap(about);
+    await _settle(tester);
+    // Pushed on top of sign-in.
+    expect(find.byType(AboutScreen), findsOneWidget);
+    expect(location(c), '/login');
+    expect(
+      tester.widget<AboutScreen>(find.byType(AboutScreen)).onDeleteAccount,
+      isNull,
+    );
+  });
+
+  testWidgets('/about and /profile/about are routes', (tester) async {
+    final c = await pumpApp(tester);
+    c.read(routerProvider).go('/about');
+    await _settle(tester);
+    expect(location(c), '/about');
+    expect(find.byType(AboutScreen), findsOneWidget);
+    c.read(routerProvider).go('/profile/about');
+    await _settle(tester);
+    // Signed out: the profile copy needs signing in first.
+    expect(location(c), startsWith('/login'));
+  });
+
+  testWidgets('About opens from Profile with Delete account', (tester) async {
+    final c = await pumpApp(tester, signedInAs: 'A');
+    c.read(routerProvider).go('/profile');
+    await _settle(tester);
+    final row = find.byKey(const Key('profile-about'));
+    await tester.ensureVisible(row);
+    await tester.tap(row);
+    await _settle(tester);
+    expect(find.byType(AboutScreen), findsOneWidget);
+    final delete = find.text('Delete account');
+    await tester.scrollUntilVisible(
+      delete,
+      200,
+      scrollable: find
+          .descendant(
+            of: find.byType(AboutScreen),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.tap(delete);
+    await _settle(tester);
+    // The profile's confirmation dialog.
+    expect(find.text('Delete your account?'), findsOneWidget);
   });
 
   testWidgets('an unknown location shows the not-found page', (tester) async {

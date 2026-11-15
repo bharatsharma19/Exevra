@@ -19,6 +19,13 @@ abstract final class AppRoutes {
   static const String insights = '/insights';
   static const String chat = '/chat';
   static const String profile = '/profile';
+  static const String onboarding = '/onboarding';
+
+  /// About for signed-out visitors (no Delete account).
+  static const String about = '/about';
+
+  /// About for a signed-in user, inside the profile tab.
+  static const String profileAbout = '$profile/about';
 
   /// Bottom-navigation tabs, in branch order.
   static const List<String> tabs = [
@@ -33,7 +40,12 @@ abstract final class AppRoutes {
       '$invite/${Uri.encodeComponent(token)}';
 
   /// Screens for signed-out visitors.
-  static const Set<String> entryRoutes = {login, register, forgotPassword};
+  static const Set<String> entryRoutes = {
+    login,
+    register,
+    forgotPassword,
+    about,
+  };
 
   /// Routes a signed-in user is moved away from.
   static const Set<String> authRoutes = {
@@ -44,6 +56,7 @@ abstract final class AppRoutes {
     forgotPassword,
     verifyEmail,
     resetPassword,
+    onboarding,
   };
 
   static bool isInvite(String path) =>
@@ -111,6 +124,48 @@ String? platformLinkRedirect(Uri location) {
     if (!known) return inviteFor(segments.single);
   }
   return null;
+}
+
+/// The redirect for [location] that the introduction needs, given whether
+/// it was [completed] on this device (null while the flag loads).
+///
+/// * Not completed: everything except the introduction itself and
+///   invitation links goes to `/onboarding`.
+/// * Loading (null) or completed: no decision here ([authRedirect] runs).
+///
+/// In the result, `stay` keeps the location and `to` moves there; a null
+/// result leaves the decision to [authRedirect].
+({bool stay, String? to})? onboardingRedirect({
+  required bool? completed,
+  required Uri location,
+}) {
+  if (completed != false) return null;
+  final path = location.path.isEmpty ? AppRoutes.root : location.path;
+  if (path == AppRoutes.onboarding) return (stay: true, to: null);
+  if (AppRoutes.isInvite(path)) return null;
+  return (stay: false, to: AppRoutes.onboarding);
+}
+
+/// The router's redirect: platform links first, then the introduction
+/// (only while [onboardingCompleted] is false), then the auth rules.
+String? appRedirect({
+  required AuthPhase phase,
+  required Uri location,
+  required bool? onboardingCompleted,
+  String? pendingInviteToken,
+}) {
+  final link = platformLinkRedirect(location);
+  if (link != null) return link;
+  final intro = onboardingRedirect(
+    completed: onboardingCompleted,
+    location: location,
+  );
+  if (intro != null) return intro.stay ? null : intro.to;
+  return authRedirect(
+    phase: phase,
+    location: location,
+    pendingInviteToken: pendingInviteToken,
+  );
 }
 
 String? authRedirect({

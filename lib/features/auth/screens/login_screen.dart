@@ -13,6 +13,7 @@ import '../../../core/errors/failure_messages.dart';
 import '../../../core/router/app_routes.dart';
 import '../../../core/utils/haptics.dart';
 import '../../../core/utils/validators.dart';
+import '../../../l10n/l10n.dart';
 import '../../../providers/auth_provider.dart';
 import '../widgets/auth_widgets.dart';
 
@@ -192,6 +193,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               child: const Text('Sign up'),
             ),
           ],
+        ),
+        Center(
+          child: TextButton(
+            key: const Key('login-about'),
+            onPressed: () => unawaited(context.push(AppRoutes.about)),
+            child: Text(context.l10n.aboutTitle),
+          ),
         ),
       ],
     );

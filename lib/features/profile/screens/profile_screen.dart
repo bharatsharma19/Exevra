@@ -2,7 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
 import '../../../core/constants/app_colors.dart';
+import '../../../core/router/app_routes.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/errors/failure_messages.dart';
 import '../../../core/utils/haptics.dart';
@@ -12,8 +15,10 @@ import '../../../providers/app_lock_provider.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/groups_provider.dart';
 import '../../../providers/profile_provider.dart';
+import '../../../l10n/l10n.dart';
 import '../../groups/widgets/groups_section.dart';
 import '../../shared/failure_retry.dart';
+import '../account_deletion.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -159,96 +164,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               child: const Text('Sign Out'),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  void _showDeleteAccountDialog() {
-    AppHaptics.heavy();
-    unawaited(
-      showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text(
-            'Delete your account?',
-            style: TextStyle(color: AppColors.error),
-          ),
-          content: const SingleChildScrollView(
-            child: Text(
-              'This permanently deletes your profile, your personal expenses, '
-              'your settings and your AI assistant history.\n\n'
-              'Expenses you added to shared groups stay with those groups so '
-              "the other members' balances remain correct; they will show as "
-              '"Former member". If you are a group admin, the longest-standing '
-              'member becomes admin; groups with no other members are '
-              'deleted. Payments still waiting for confirmation are '
-              'cancelled.\n\n'
-              "This can't be undone.",
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                unawaited(_deleteAccount());
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.error,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Delete account'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Deletes the account on the server behind a blocking progress dialog.
-  /// The session ends only after the server confirmed the deletion; on
-  /// failure nothing changes and the reason is shown.
-  Future<void> _deleteAccount() async {
-    final navigator = Navigator.of(context, rootNavigator: true);
-    // Kept so only this dialog is closed: once the session ends, the
-    // redirect to sign-in may already have removed it with the page below,
-    // and a blind pop would remove the sign-in page instead.
-    final progress = DialogRoute<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const PopScope(
-        canPop: false,
-        child: AlertDialog(
-          content: Row(
-            children: [
-              SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              SizedBox(width: 16),
-              Expanded(child: Text('Deleting your account...')),
-            ],
-          ),
-        ),
-      ),
-    );
-    unawaited(navigator.push(progress));
-    final messenger = ScaffoldMessenger.of(context);
-    final failure = await ref
-        .read(authControllerProvider.notifier)
-        .deleteAccount();
-    if (navigator.mounted && progress.isActive) navigator.removeRoute(progress);
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          failure == null
-              ? 'Your account was deleted.'
-              : friendlyMessage(failure),
         ),
       ),
     );
@@ -596,6 +511,22 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               child: Column(
                 children: [
                   ListTile(
+                    key: const Key('profile-about'),
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.info_outline),
+                    title: Text(
+                      context.l10n.aboutTitle,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () =>
+                        unawaited(context.push(AppRoutes.profileAbout)),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(
                       Icons.logout_rounded,
@@ -625,7 +556,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         color: AppColors.error,
                       ),
                     ),
-                    onTap: _showDeleteAccountDialog,
+                    onTap: () => confirmAndDeleteAccount(context, ref),
                   ),
                 ],
               ),

@@ -10,6 +10,7 @@ import 'package:expense_manager/data/repositories/group_repository.dart';
 import 'package:expense_manager/data/repositories/insights_repository.dart';
 import 'package:expense_manager/data/repositories/invitation_repository.dart';
 import 'package:expense_manager/data/repositories/settlement_repository.dart';
+import 'package:expense_manager/features/onboarding/onboarding_store.dart';
 import 'package:expense_manager/data/repositories/profile_repository.dart';
 import 'package:expense_manager/models/balance.dart';
 import 'package:expense_manager/models/expense.dart';
@@ -1055,11 +1056,17 @@ class TestBackend {
   /// Incoming links (set before [container] to simulate a cold start).
   FakeLinkSource links = FakeLinkSource();
 
+  /// Device preferences start with the introduction already done (so the
+  /// app opens on its usual screens); pass
+  /// `{OnboardingStore.completedKey: false}` in [prefs] to see it.
   Future<ProviderContainer> container({
     Map<String, Object> prefs = const {},
     List<Override> extraOverrides = const [],
   }) async {
-    SharedPreferences.setMockInitialValues(prefs);
+    SharedPreferences.setMockInitialValues({
+      OnboardingStore.completedKey: true,
+      ...prefs,
+    });
     final preferences = await SharedPreferences.getInstance();
     final container = ProviderContainer(
       retry: (_, _) => null,

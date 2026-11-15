@@ -12,6 +12,65 @@ void main() {
 
   const token = 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG';
 
+  group('introduction', () {
+    String? app(
+      String location, {
+      required bool? completed,
+      AuthPhase phase = AuthPhase.signedOut,
+    }) => appRedirect(
+      phase: phase,
+      location: Uri.parse(location),
+      onboardingCompleted: completed,
+    );
+
+    test('a fresh device goes to the introduction first', () {
+      expect(app('/splash', completed: false), '/onboarding');
+      expect(app('/login', completed: false), '/onboarding');
+      expect(app('/dashboard', completed: false), '/onboarding');
+      expect(
+        app('/dashboard', completed: false, phase: AuthPhase.signedIn),
+        '/onboarding',
+      );
+    });
+
+    test('the introduction itself stays, whatever the auth phase', () {
+      expect(app('/onboarding', completed: false), isNull);
+      expect(
+        app('/onboarding', completed: false, phase: AuthPhase.initializing),
+        isNull,
+      );
+    });
+
+    test('invitation links are never sent to the introduction', () {
+      expect(app('/invite/$token', completed: false), isNull);
+      expect(app('/invite?token=$token', completed: false), isNull);
+    });
+
+    test('while the flag loads nothing redirects to it', () {
+      expect(app('/login', completed: null), isNull);
+      expect(
+        app('/splash', completed: null, phase: AuthPhase.initializing),
+        isNull,
+      );
+    });
+
+    test('once done, the auth rules apply (also to /onboarding)', () {
+      expect(app('/login', completed: true), isNull);
+      expect(app('/onboarding', completed: true), '/login');
+      expect(
+        app('/onboarding', completed: true, phase: AuthPhase.signedIn),
+        '/dashboard',
+      );
+    });
+
+    test('About is open to signed-out visitors', () {
+      expect(app('/about', completed: true), isNull);
+      expect(go(AuthPhase.signedIn, '/about'), isNull);
+      expect(go(AuthPhase.signedIn, '/profile/about'), isNull);
+      expect(go(AuthPhase.signedOut, '/profile/about'), startsWith('/login'));
+    });
+  });
+
   group('links pushed by the platform', () {
     String? map(String location) => platformLinkRedirect(Uri.parse(location));
 

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/about/about_screen.dart';
 import '../../features/auth/screens/email_verification_screen.dart';
 import '../../features/auth/screens/forgot_password_screen.dart';
 import '../../features/auth/screens/login_screen.dart';
@@ -14,7 +15,10 @@ import '../../features/dashboard/screens/dashboard_screen.dart';
 import '../../features/dashboard/screens/main_navigation_shell.dart';
 import '../../features/expenses/screens/expenses_screen.dart';
 import '../../features/insights/screens/insights_screen.dart';
+import '../../features/onboarding/onboarding_flow.dart';
+import '../../features/onboarding/onboarding_store.dart';
 import '../../features/profile/screens/invite_screen.dart';
+import '../../features/profile/screens/profile_about_screen.dart';
 import '../../features/profile/screens/profile_screen.dart';
 import '../../features/startup/not_found_screen.dart';
 import '../../features/startup/splash_screen.dart';
@@ -53,8 +57,8 @@ CustomTransitionPage<T> _page<T>(GoRouterState state, Widget child) {
   );
 }
 
-/// Re-runs the redirect when the auth phase or a pending invitation
-/// changes.
+/// Re-runs the redirect when the auth phase, a pending invitation or the
+/// introduction flag changes.
 class _RouterRefresh extends ChangeNotifier {
   void refresh() => notifyListeners();
 }
@@ -65,24 +69,42 @@ final routerProvider = Provider<GoRouter>((ref) {
     ..listen(authControllerProvider.select((s) => s.phase), (_, _) {
       refresh.refresh();
     })
-    ..listen(pendingInviteProvider, (_, _) => refresh.refresh());
+    ..listen(pendingInviteProvider, (_, _) => refresh.refresh())
+    ..listen<AsyncValue<bool>>(
+      onboardingCompletedProvider,
+      (_, _) => refresh.refresh(),
+    );
 
   final router = GoRouter(
     initialLocation: AppRoutes.splash,
     refreshListenable: refresh,
-    redirect: (context, state) =>
-        platformLinkRedirect(state.uri) ??
-        authRedirect(
-          phase: ref.read(authControllerProvider).phase,
-          location: state.uri,
-          pendingInviteToken: ref.read(pendingInviteProvider),
-        ),
+    redirect: (context, state) => appRedirect(
+      phase: ref.read(authControllerProvider).phase,
+      location: state.uri,
+      // Null while the flag loads: no redirect, so returning users never
+      // see the introduction flash up.
+      onboardingCompleted: ref.read(onboardingCompletedProvider).value,
+      pendingInviteToken: ref.read(pendingInviteProvider),
+    ),
     errorBuilder: (context, state) => const NotFoundScreen(),
     routes: [
       GoRoute(path: AppRoutes.root, redirect: (_, _) => AppRoutes.dashboard),
       GoRoute(
         path: AppRoutes.splash,
         builder: (context, state) => const SplashScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.onboarding,
+        pageBuilder: (context, state) => _page(
+          state,
+          // Runs after the flag is already true, so the redirect does not
+          // bring the user back here.
+          OnboardingFlow(onFinished: () => context.go(AppRoutes.login)),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.about,
+        pageBuilder: (context, state) => _page(state, const AboutScreen()),
       ),
       // Older links: /invite?token=<token>.
       GoRoute(
@@ -147,6 +169,15 @@ final routerProvider = Provider<GoRouter>((ref) {
                 GoRoute(
                   path: path,
                   pageBuilder: (context, state) => _page(state, screen),
+                  routes: [
+                    if (path == AppRoutes.profile)
+                      GoRoute(
+                        // /profile/about
+                        path: 'about',
+                        pageBuilder: (context, state) =>
+                            _page(state, const ProfileAboutScreen()),
+                      ),
+                  ],
                 ),
               ],
             ),
