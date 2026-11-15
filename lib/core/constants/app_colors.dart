@@ -51,7 +51,11 @@ class AppColors {
   static const Color error = Color(0xFFEF4444);
   static const Color info = Color(0xFF3B82F6);
 
-  // Category Color Map
+  /// Legacy category colours, the same in both themes. Several (Food,
+  /// Utilities, the cyan fallback) are low contrast on light surfaces. New
+  /// code uses `context.palette.categoryColor(name)`, which is per theme and
+  /// contrast-checked. Not marked `@Deprecated` yet because the analyzer
+  /// would then fail on the screens that still call it.
   static const Map<String, Color> categoryColors = {
     'Food': Color(0xFFF59E0B),
     'Transport': Color(0xFF3B82F6),
@@ -65,6 +69,8 @@ class AppColors {
     'Other': Color(0xFF64748B),
   };
 
+  /// Legacy lookup in [categoryColors]; use
+  /// `context.palette.categoryColor(name)` in new code.
   static Color getCategoryColor(String category) {
     return categoryColors[category] ?? const Color(0xFF00E5FF);
   }

@@ -1,3 +1,4 @@
+import 'package:expense_manager/core/constants/app_constants.dart';
 import 'package:expense_manager/core/theme/app_palette.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -179,6 +180,100 @@ void main() {
           }
         }
         expect(close, isEmpty, reason: close.join('\n'));
+      });
+
+      test('chart order survives deuteranopia and protanopia', () {
+        // Neighbouring series (including the wrap from the last to the
+        // first) and the first five series must stay apart for the most
+        // common colour-vision deficiencies.
+        final chart = palette.chart;
+        final pairs = {
+          for (var i = 0; i < 5; i++)
+            for (var j = i + 1; j < 5; j++) (i, j),
+          for (var i = 0; i < chart.length; i++) (i, (i + 1) % chart.length),
+        };
+        final close = <String>[];
+        for (final (i, j) in pairs) {
+          for (final type in Cvd.values) {
+            final d = deltaE(
+              simulateCvd(chart[i], type),
+              simulateCvd(chart[j], type),
+            );
+            if (d < 12) {
+              close.add(
+                '${type.name}: chart[$i] ${hex(chart[i])} vs chart[$j] '
+                '${hex(chart[j])}: Delta E ${d.toStringAsFixed(1)}',
+              );
+            }
+          }
+        }
+        expect(close, isEmpty, reason: close.join('\n'));
+      });
+
+      test('onChart reaches 4.5:1 on every chart and category colour', () {
+        _expectPairs([
+          for (var i = 0; i < palette.chart.length; i++)
+            _Pair(
+              'onChart on chart[$i]',
+              palette.onChart,
+              palette.chart[i],
+              _text,
+            ),
+          for (final c in palette.categories.entries)
+            _Pair('onChart on ${c.key}', palette.onChart, c.value, _text),
+          _Pair(
+            'onChart on categoryFallback',
+            palette.onChart,
+            palette.categoryFallback,
+            _text,
+          ),
+        ]);
+      });
+
+      test('category colours reach 3:1 and cover every category', () {
+        _expectPairs([
+          for (final c in palette.categories.entries)
+            for (final s in ['background', 'surface', 'surfaceVariant'])
+              _Pair('${c.key} vs $s', c.value, _surfaces(palette)[s]!, _ui),
+          _Pair(
+            'categoryFallback vs surface',
+            palette.categoryFallback,
+            palette.surface,
+            _ui,
+          ),
+        ]);
+        for (final category in AppConstants.categories) {
+          expect(
+            palette.categories.containsKey(category.name),
+            isTrue,
+            reason: 'No palette colour for ${category.name}',
+          );
+        }
+        expect(palette.categoryColor('food'), palette.categories['Food']);
+        expect(palette.categoryColor('Unknown'), palette.categoryFallback);
+      });
+
+      test('selected navigation and focus indicators reach 3:1', () {
+        // The navigation indicator outline and selected icon/label colour,
+        // the selected list tile outline and the focus ring all sit on the
+        // surface or page background.
+        _expectPairs([
+          for (final s in ['background', 'surface', 'surfaceElevated'])
+            _Pair('accent vs $s', palette.accent, _surfaces(palette)[s]!, _ui),
+          _Pair(
+            'accent vs accentContainer',
+            palette.accent,
+            palette.accentContainer,
+            _ui,
+          ),
+          for (final s in ['background', 'surface', 'surfaceElevated'])
+            _Pair(
+              'focusRing vs $s',
+              palette.focusRing,
+              _surfaces(palette)[s]!,
+              _ui,
+            ),
+        ]);
       });
 
       test('all palette colours are opaque except the scrim', () {

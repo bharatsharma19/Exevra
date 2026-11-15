@@ -60,6 +60,9 @@ class AppPalette extends ThemeExtension<AppPalette> {
     required this.scrim,
     required this.focusRing,
     required this.chart,
+    required this.onChart,
+    required this.categories,
+    required this.categoryFallback,
   });
 
   /// Brightness of the theme this palette belongs to.
@@ -194,15 +197,45 @@ class AppPalette extends ThemeExtension<AppPalette> {
   /// Keyboard and input focus indicator. At least 3:1 against [surface] and [background].
   final Color focusRing;
 
-  /// Categorical chart palette: eight hues that are distinct from each other
-  /// and at least 3:1 against [surface]. Index with `chart[i % chart.length]`.
+  /// Categorical chart palette: eight hues, each at least 3:1 against
+  /// [surface] and 4.5:1 against [onChart]. Index with [chartColor].
+  ///
+  /// The order matters: neighbouring series and the first five colours stay
+  /// distinguishable under simulated deuteranopia and protanopia
+  /// (`contrast_test.dart`). Colour alone still cannot carry meaning: every
+  /// chart must also label its slices, bars or legend entries with text.
   final List<Color> chart;
+
+  /// Text and icons drawn on any [chart] or [categories] colour (for example
+  /// percentage labels inside pie slices). At least 4.5:1 on each of them.
+  final Color onChart;
+
+  /// Stable colour per expense category, keyed by the category names in
+  /// `AppConstants.categories`. Read it with [categoryColor] so a category
+  /// keeps its colour regardless of list order or filtering. Each colour is
+  /// at least 3:1 against [surface] and 4.5:1 against [onChart]. Pair the
+  /// colour with the category icon and name; never rely on colour alone.
+  final Map<String, Color> categories;
+
+  /// Colour for categories missing from [categories].
+  final Color categoryFallback;
 
   /// Whether this is the dark palette.
   bool get isDark => brightness == Brightness.dark;
 
   /// Chart colour for series [index], wrapping around the palette.
   Color chartColor(int index) => chart[index % chart.length];
+
+  /// Colour of expense [category] (case-insensitive), or [categoryFallback].
+  Color categoryColor(String category) {
+    final exact = categories[category];
+    if (exact != null) return exact;
+    final lower = category.toLowerCase();
+    for (final entry in categories.entries) {
+      if (entry.key.toLowerCase() == lower) return entry.value;
+    }
+    return categoryFallback;
+  }
 
   /// Palette for the light theme.
   static const AppPalette light = AppPalette(
@@ -252,14 +285,28 @@ class AppPalette extends ThemeExtension<AppPalette> {
     focusRing: Color(0xFF0E7490),
     chart: <Color>[
       Color(0xFF0E7490),
-      Color(0xFF7C3AED),
       Color(0xFFB45309),
-      Color(0xFFDB2777),
-      Color(0xFF059669),
-      Color(0xFF2563EB),
+      Color(0xFF7C3AED),
+      Color(0xFF047857),
+      Color(0xFF1E40AF),
       Color(0xFF4D7C0F),
-      Color(0xFFDC2626),
+      Color(0xFFC026D3),
+      Color(0xFFB91C1C),
     ],
+    onChart: Color(0xFFFFFFFF),
+    categories: <String, Color>{
+      'Food': Color(0xFFB45309),
+      'Transport': Color(0xFF1D4ED8),
+      'Housing': Color(0xFF7C3AED),
+      'Entertainment': Color(0xFFBE185D),
+      'Healthcare': Color(0xFF047857),
+      'Utilities': Color(0xFF0E7490),
+      'Shopping': Color(0xFFC2410C),
+      'Personal': Color(0xFF4338CA),
+      'Education': Color(0xFF4D7C0F),
+      'Other': Color(0xFF475569),
+    },
+    categoryFallback: Color(0xFF475569),
   );
 
   /// Palette for the dark theme.
@@ -310,14 +357,28 @@ class AppPalette extends ThemeExtension<AppPalette> {
     focusRing: Color(0xFF67E8F9),
     chart: <Color>[
       Color(0xFF22D3EE),
-      Color(0xFFA78BFA),
       Color(0xFFFBBF24),
-      Color(0xFFF472B6),
+      Color(0xFFA78BFA),
       Color(0xFF34D399),
-      Color(0xFFFB923C),
-      Color(0xFF60A5FA),
+      Color(0xFFF472B6),
       Color(0xFFA3E635),
+      Color(0xFF60A5FA),
+      Color(0xFFFB923C),
     ],
+    onChart: Color(0xFF04141C),
+    categories: <String, Color>{
+      'Food': Color(0xFFFBBF24),
+      'Transport': Color(0xFF60A5FA),
+      'Housing': Color(0xFFA78BFA),
+      'Entertainment': Color(0xFFF472B6),
+      'Healthcare': Color(0xFF34D399),
+      'Utilities': Color(0xFF22D3EE),
+      'Shopping': Color(0xFFFB923C),
+      'Personal': Color(0xFF818CF8),
+      'Education': Color(0xFFA3E635),
+      'Other': Color(0xFF94A3B8),
+    },
+    categoryFallback: Color(0xFF94A3B8),
   );
 
   @override
@@ -367,6 +428,9 @@ class AppPalette extends ThemeExtension<AppPalette> {
     Color? scrim,
     Color? focusRing,
     List<Color>? chart,
+    Color? onChart,
+    Map<String, Color>? categories,
+    Color? categoryFallback,
   }) {
     return AppPalette(
       brightness: brightness ?? this.brightness,
@@ -414,6 +478,9 @@ class AppPalette extends ThemeExtension<AppPalette> {
       scrim: scrim ?? this.scrim,
       focusRing: focusRing ?? this.focusRing,
       chart: chart ?? this.chart,
+      onChart: onChart ?? this.onChart,
+      categories: categories ?? this.categories,
+      categoryFallback: categoryFallback ?? this.categoryFallback,
     );
   }
 
@@ -470,6 +537,12 @@ class AppPalette extends ThemeExtension<AppPalette> {
         for (var i = 0; i < chart.length; i++)
           c(chart[i], other.chart[i % other.chart.length]),
       ],
+      onChart: c(onChart, other.onChart),
+      categories: <String, Color>{
+        for (final entry in categories.entries)
+          entry.key: c(entry.value, other.categoryColor(entry.key)),
+      },
+      categoryFallback: c(categoryFallback, other.categoryFallback),
     );
   }
 }

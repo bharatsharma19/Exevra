@@ -45,6 +45,49 @@ List<double> _lab(Color c) {
   return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
 }
 
+/// Colour-vision deficiencies simulated by [simulateCvd].
+enum Cvd {
+  /// Red-blind.
+  protanopia,
+
+  /// Green-blind (the most common).
+  deuteranopia,
+}
+
+// Machado, Oliveira and Fernandes (2009), severity 1.0, in linear RGB.
+const _cvdMatrices = {
+  Cvd.protanopia: [
+    [0.152286, 1.052583, -0.204868],
+    [0.114503, 0.786281, 0.099216],
+    [-0.003882, -0.048116, 1.051998],
+  ],
+  Cvd.deuteranopia: [
+    [0.367322, 0.860646, -0.227968],
+    [0.280085, 0.672501, 0.047413],
+    [-0.011820, 0.042940, 0.968881],
+  ],
+};
+
+/// How [color] looks to someone with [type] colour blindness.
+Color simulateCvd(Color color, Cvd type) {
+  double lin(double v) =>
+      v <= 0.04045 ? v / 12.92 : math.pow((v + 0.055) / 1.055, 2.4).toDouble();
+  double gamma(double v) {
+    final c = v.clamp(0.0, 1.0);
+    return c <= 0.0031308
+        ? 12.92 * c
+        : 1.055 * math.pow(c, 1 / 2.4).toDouble() - 0.055;
+  }
+
+  final rgb = [lin(color.r), lin(color.g), lin(color.b)];
+  final m = _cvdMatrices[type]!;
+  final out = [
+    for (final row in m)
+      gamma(row[0] * rgb[0] + row[1] * rgb[1] + row[2] * rgb[2]),
+  ];
+  return Color.from(alpha: 1, red: out[0], green: out[1], blue: out[2]);
+}
+
 /// `#RRGGBB` for failure tables.
 String hex(Color c) {
   String two(double v) =>

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../accessibility/focus_outline.dart';
 import '../theme/app_palette.dart';
 import '../theme/app_tokens.dart';
 
@@ -11,6 +12,10 @@ import '../theme/app_tokens.dart';
 ///
 /// At large text sizes (150% and up) the [trailing] widget moves under the
 /// text, so a wide amount or badge cannot squeeze the title into a sliver.
+///
+/// A [selected] row gets an accent outline on top of the pale selected fill,
+/// so selection does not depend on a low-contrast fill alone, and a focused
+/// row draws a focus ring.
 class AppListTile extends StatelessWidget {
   /// Creates a list row.
   const AppListTile({
@@ -80,8 +85,14 @@ class AppListTile extends StatelessWidget {
               color: enabled ? palette.textSecondary : palette.textTertiary,
             ),
           );
-    final tile = ListTile(
+    Widget tile = ListTile(
       minTileHeight: AppSizes.minTapTarget,
+      shape: selected
+          ? RoundedRectangleBorder(
+              borderRadius: AppRadius.mdAll,
+              side: BorderSide(color: palette.accent, width: 2),
+            )
+          : null,
       enabled: enabled,
       selected: selected,
       onTap: onTap,
@@ -104,6 +115,9 @@ class AppListTile extends StatelessWidget {
             )
           : subtitleText,
     );
+    if (enabled && (onTap != null || onLongPress != null)) {
+      tile = FocusOutline(borderRadius: AppRadius.mdAll, child: tile);
+    }
     if (semanticLabel != null) {
       return Semantics(
         label: semanticLabel,

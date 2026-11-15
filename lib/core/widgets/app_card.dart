@@ -2,6 +2,7 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
+import '../accessibility/focus_outline.dart';
 import '../theme/app_palette.dart';
 import '../theme/app_tokens.dart';
 
@@ -17,7 +18,8 @@ import '../theme/app_tokens.dart';
 ///
 /// When [onTap] is set, the card is a button: the ink ripple paints on the
 /// card's own [Material] (above the background), so it is visible in both
-/// themes, and screen readers get a single button node with the card's text.
+/// themes, screen readers get a single button node with the card's text, the
+/// card is at least 48 dp tall, and keyboard focus draws a focus ring.
 class AppCard extends StatelessWidget {
   /// Creates a solid card.
   const AppCard({
@@ -97,13 +99,17 @@ class AppCard extends StatelessWidget {
           : BorderSide.none,
     );
 
+    final tappable = onTap != null || onLongPress != null;
     Widget content = Padding(padding: padding, child: child);
-    if (onTap != null || onLongPress != null) {
+    if (tappable) {
       content = InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
         customBorder: shape,
-        child: content,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: AppSizes.minTapTarget),
+          child: content,
+        ),
       );
     }
 
@@ -124,8 +130,8 @@ class AppCard extends StatelessWidget {
       );
     }
 
-    final tappable = onTap != null || onLongPress != null;
     if (tappable) {
+      card = FocusOutline(borderRadius: borderRadius, child: card);
       // One screen reader node: the action plus the card's text.
       card = MergeSemantics(
         child: Semantics(button: true, label: semanticLabel, child: card),

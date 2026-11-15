@@ -13,8 +13,9 @@ import 'confirm_dialog.dart';
 /// UnsavedChangesGuard(hasChanges: _dirty, child: Form(...))
 /// ```
 ///
-/// Barrier taps and drags on modal bottom sheets bypass [PopScope]; open
-/// guarded sheets with `isDismissible: false` and `enableDrag: false`.
+/// A tap on a modal sheet's barrier goes through the guard, but a drag on
+/// the sheet closes it without asking; open guarded sheets with
+/// `showAppSheet(guarded: true)`, which turns dragging off.
 class UnsavedChangesGuard extends StatelessWidget {
   /// Creates a guard.
   const UnsavedChangesGuard({

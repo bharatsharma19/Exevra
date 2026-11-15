@@ -71,9 +71,12 @@ class ConfirmDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
+    // scrollable: the title and message scroll together, so the dialog fits
+    // on a 320 dp screen at 200% text with the actions still reachable.
     return AlertDialog(
+      scrollable: true,
       title: Text(title),
-      content: SingleChildScrollView(child: Text(message)),
+      content: Text(message),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),

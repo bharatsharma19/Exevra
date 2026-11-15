@@ -70,11 +70,15 @@ class OfflineBanner extends StatelessWidget {
         ),
       ),
     );
+    const hidden = SizedBox(width: double.infinity);
+    // Under reduced motion, swap without AnimatedSize: a zero-length
+    // AnimatedSize completes inside its own layout and asserts.
+    if (context.reduceMotion) return visible ? banner : hidden;
     return AnimatedSize(
-      duration: context.reduceMotion ? Duration.zero : AppDurations.medium,
+      duration: AppDurations.medium,
       curve: Curves.easeOut,
       alignment: Alignment.topCenter,
-      child: visible ? banner : const SizedBox(width: double.infinity),
+      child: visible ? banner : hidden,
     );
   }
 }

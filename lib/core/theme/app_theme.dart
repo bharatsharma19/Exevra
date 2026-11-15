@@ -26,10 +26,12 @@ class AppTheme {
   /// The dark theme.
   static ThemeData dark() => _dark;
 
-  /// The light theme. Same as [light].
+  /// Legacy alias of [light], kept while `main.dart` and the screens still
+  /// use it. New code calls [light]. It is not marked `@Deprecated` yet
+  /// because the analyzer would then fail on the remaining call sites.
   static ThemeData get lightTheme => _light;
 
-  /// The dark theme. Same as [dark].
+  /// Legacy alias of [dark]; see [lightTheme].
   static ThemeData get darkTheme => _dark;
 
   /// Builds the [ColorScheme] for [p]. Exposed for tests.
@@ -82,6 +84,18 @@ class AppTheme {
     final buttonText = text.labelLarge!.copyWith(fontSize: 16);
     const minButton = Size(AppSizes.minTapTarget, AppSizes.minTapTarget);
 
+    // Keyboard and D-pad focus: a 2 dp ring drawn outside the control, so it
+    // sits on the page (at least 3:1, see contrast_test) instead of on the
+    // control's own fill, where an overlay or same-colour ring would vanish.
+    final focusRing = BorderSide(
+      color: p.focusRing,
+      width: 2,
+      strokeAlign: BorderSide.strokeAlignOutside,
+    );
+    final focusSide = WidgetStateProperty.resolveWith<BorderSide?>(
+      (states) => states.contains(WidgetState.focused) ? focusRing : null,
+    );
+
     OutlineInputBorder inputBorder(Color color, [double width = 1]) =>
         OutlineInputBorder(
           borderRadius: AppRadius.mdAll,
@@ -119,20 +133,31 @@ class AppTheme {
         backgroundColor: p.surface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
+        // The selected destination does not rely on the pale indicator fill:
+        // the indicator has an accent outline (at least 3:1 against the bar),
+        // and the icon and label switch to the accent colour and a heavier
+        // weight. Screens should also pass a filled `selectedIcon`.
         indicatorColor: p.accentContainer,
+        indicatorShape: StadiumBorder(side: BorderSide(color: p.accent)),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         iconTheme: WidgetStateProperty.resolveWith(
           (states) => IconThemeData(
             size: AppSizes.icon,
             color: states.contains(WidgetState.selected)
-                ? p.onAccentContainer
+                ? p.accent
                 : p.textSecondary,
           ),
         ),
         labelTextStyle: WidgetStateProperty.resolveWith(
           (states) => states.contains(WidgetState.selected)
-              ? text.labelMedium!.copyWith(color: p.textPrimary)
-              : text.labelMedium!.copyWith(color: p.textSecondary),
+              ? text.labelMedium!.copyWith(
+                  color: p.accent,
+                  fontWeight: FontWeight.w800,
+                )
+              : text.labelMedium!.copyWith(
+                  color: p.textSecondary,
+                  fontWeight: FontWeight.w500,
+                ),
         ),
       ),
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
@@ -241,6 +266,8 @@ class AppTheme {
         leadingAndTrailingTextStyle: text.labelLarge!.copyWith(
           color: p.textSecondary,
         ),
+        // A theme-level shape cannot vary with selection, so the pale fill is
+        // backed by an accent outline in AppListTile; prefer that widget.
         selectedColor: p.onAccentContainer,
         selectedTileColor: p.accentContainer,
         shape: const RoundedRectangleBorder(borderRadius: AppRadius.mdAll),
@@ -289,7 +316,7 @@ class AppTheme {
           shape: buttonShape,
           textStyle: buttonText,
           tapTargetSize: MaterialTapTargetSize.padded,
-        ),
+        ).copyWith(side: focusSide),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
@@ -300,18 +327,20 @@ class AppTheme {
           shape: buttonShape,
           textStyle: buttonText,
           tapTargetSize: MaterialTapTargetSize.padded,
-        ),
+        ).copyWith(side: focusSide),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style:
             ButtonStyle(
               side: WidgetStateBorderSide.resolveWith(
-                (states) => BorderSide(
-                  color: states.contains(WidgetState.disabled)
-                      ? p.outlineVariant
-                      : p.accent,
-                  width: 1.2,
-                ),
+                (states) => states.contains(WidgetState.focused)
+                    ? focusRing.copyWith(width: 3)
+                    : BorderSide(
+                        color: states.contains(WidgetState.disabled)
+                            ? p.outlineVariant
+                            : p.accent,
+                        width: 1.2,
+                      ),
               ),
             ).merge(
               OutlinedButton.styleFrom(
@@ -334,7 +363,7 @@ class AppTheme {
           shape: buttonShape,
           textStyle: text.labelLarge,
           tapTargetSize: MaterialTapTargetSize.padded,
-        ),
+        ).copyWith(side: focusSide),
       ),
       iconButtonTheme: IconButtonThemeData(
         style: IconButton.styleFrom(
@@ -342,7 +371,7 @@ class AppTheme {
           disabledForegroundColor: p.textTertiary,
           minimumSize: minButton,
           tapTargetSize: MaterialTapTargetSize.padded,
-        ),
+        ).copyWith(side: focusSide),
       ),
       segmentedButtonTheme: SegmentedButtonThemeData(
         style: ButtonStyle(
@@ -446,13 +475,19 @@ class AppTheme {
 /// Legacy: new code uses `AppCard` (solid) or `AppCard.glass` (hero surfaces
 /// only) from `lib/core/widgets/app_card.dart`. This widget stays until the
 /// screens are migrated.
+///
+/// The backdrop blur is opt-in: it is applied only when [blurSigma] is above
+/// zero, because every `BackdropFilter` adds a compositing pass and list rows
+/// built from this card dropped frames while scrolling. Pass a [blurSigma]
+/// only for a single hero surface. The ink ripple paints above the gradient
+/// fill, so taps are visible.
 class GlassCard extends StatelessWidget {
   /// Creates a glass card.
   const GlassCard({
     super.key,
     required this.child,
     this.borderRadius = 20,
-    this.blurSigma = 14,
+    this.blurSigma = 0,
     this.padding,
     this.margin,
     this.border,
@@ -466,7 +501,7 @@ class GlassCard extends StatelessWidget {
   /// Corner radius.
   final double borderRadius;
 
-  /// Backdrop blur strength.
+  /// Backdrop blur strength. Zero (the default) skips the blur.
   final double blurSigma;
 
   /// Padding around [child]. Defaults to 18 on all sides.
@@ -487,11 +522,13 @@ class GlassCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final radius = BorderRadius.circular(borderRadius);
 
-    final Widget cardContent = Container(
-      margin: margin,
+    // Ink paints the fill on the Material, so the InkWell ripple shows above
+    // it instead of under an opaque Container.
+    Widget card = Ink(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(borderRadius),
+        borderRadius: radius,
         border:
             border ??
             Border.all(
@@ -514,30 +551,36 @@ class GlassCard extends StatelessWidget {
               end: Alignment.bottomRight,
             ),
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(borderRadius),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-          child: Padding(
-            padding: padding ?? const EdgeInsets.all(18),
-            child: child,
-          ),
-        ),
+      child: Padding(
+        padding: padding ?? const EdgeInsets.all(18),
+        child: child,
       ),
     );
 
     if (onTap != null) {
-      return Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(borderRadius),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(borderRadius),
-          onTap: onTap,
-          child: cardContent,
+      card = InkWell(borderRadius: radius, onTap: onTap, child: card);
+    }
+
+    card = Material(
+      type: MaterialType.transparency,
+      borderRadius: radius,
+      clipBehavior: Clip.antiAlias,
+      child: card,
+    );
+
+    if (blurSigma > 0) {
+      card = ClipRRect(
+        borderRadius: radius,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+          child: card,
         ),
       );
     }
 
-    return cardContent;
+    if (margin != null) {
+      card = Padding(padding: margin!, child: card);
+    }
+    return card;
   }
 }

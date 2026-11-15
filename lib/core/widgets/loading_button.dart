@@ -77,7 +77,9 @@ class LoadingButton extends StatelessWidget {
         else if (icon != null)
           Icon(icon, size: AppSizes.iconSm),
         if (isLoading || icon != null) const SizedBox(width: AppSpacing.sm),
-        Flexible(child: Text(label, textAlign: TextAlign.center, maxLines: 2)),
+        // No maxLines: at large text sizes the label wraps and the button
+        // grows taller instead of clipping words.
+        Flexible(child: Text(label, textAlign: TextAlign.center)),
       ],
     );
 

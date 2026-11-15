@@ -148,6 +148,39 @@ class KitGallery extends StatelessWidget {
             ],
           ),
         ),
+        const SectionHeader(title: 'Inputs'),
+        const Padding(
+          padding: AppSpacing.page,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              AmountField(
+                label: 'Amount',
+                currencySymbol: '₹',
+                initialValue: '1250.00',
+                helperText: 'Split equally between 3 people',
+              ),
+              SizedBox(height: AppSpacing.md),
+              AmountField(
+                label: 'Your share',
+                currencySymbol: '₹',
+                errorText: 'Enter an amount above zero',
+              ),
+              SizedBox(height: AppSpacing.md),
+              AppPasswordField(label: 'Password'),
+              SizedBox(height: AppSpacing.md),
+              Row(
+                children: [
+                  AppAvatar(name: 'Priya Sharma'),
+                  SizedBox(width: AppSpacing.sm),
+                  AppAvatar(name: 'Arjun'),
+                  SizedBox(width: AppSpacing.sm),
+                  AppAvatar(name: 'Meera Iyer'),
+                ],
+              ),
+            ],
+          ),
+        ),
         const SectionHeader(title: 'List'),
         AppListTile(
           leading: const Icon(Icons.restaurant),
@@ -161,6 +194,13 @@ class KitGallery extends StatelessWidget {
           title: 'Settlement from Arjun',
           subtitle: 'Yesterday',
           trailing: const StatusBadge(StatusBadgeKind.pending),
+          onTap: () {},
+        ),
+        AppListTile(
+          leading: const Icon(Icons.group_outlined),
+          title: 'Flatmates',
+          subtitle: 'Selected group',
+          selected: true,
           onTap: () {},
         ),
         const SectionHeader(title: 'Badges'),

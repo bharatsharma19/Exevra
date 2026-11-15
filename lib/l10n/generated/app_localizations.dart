@@ -154,6 +154,18 @@ abstract class AppLocalizations {
   /// **'Retry'**
   String get retry;
 
+  /// Tooltip of the button that reveals a hidden password.
+  ///
+  /// In en, this message translates to:
+  /// **'Show password'**
+  String get showPassword;
+
+  /// Tooltip of the button that hides a revealed password.
+  ///
+  /// In en, this message translates to:
+  /// **'Hide password'**
+  String get hidePassword;
+
   /// Snackbar action that reverts the last change.
   ///
   /// In en, this message translates to:
