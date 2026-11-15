@@ -34,6 +34,7 @@ class ChatMessage {
     this.status = ChatMessageStatus.done,
     this.provider,
     this.errorCode,
+    this.serverMessage,
   });
 
   final String id;
@@ -47,6 +48,9 @@ class ChatMessage {
 
   /// Set when [status] is [ChatMessageStatus.error].
   final AiErrorCode? errorCode;
+
+  /// The server's friendly copy for [errorCode], when it sent one.
+  final String? serverMessage;
 
   bool get isStreaming => status == ChatMessageStatus.streaming;
 
@@ -69,6 +73,7 @@ class ChatMessage {
     AiProvider? provider,
     bool clearProvider = false,
     AiErrorCode? errorCode,
+    String? serverMessage,
     bool clearError = false,
   }) {
     return ChatMessage(
@@ -79,6 +84,7 @@ class ChatMessage {
       status: status ?? this.status,
       provider: clearProvider ? null : provider ?? this.provider,
       errorCode: clearError ? null : errorCode ?? this.errorCode,
+      serverMessage: clearError ? null : serverMessage ?? this.serverMessage,
     );
   }
 
@@ -90,6 +96,7 @@ class ChatMessage {
     'status': status.name,
     'provider': ?provider?.name,
     'error': ?errorCode?.name,
+    'notice': ?serverMessage,
   };
 
   /// Restores a saved message; null when [json] is not one. A message saved
@@ -124,6 +131,7 @@ class ChatMessage {
       errorCode: AiErrorCode.values
           .where((c) => c.name == json['error'])
           .firstOrNull,
+      serverMessage: json['notice'] is String ? json['notice'] as String : null,
     );
   }
 }

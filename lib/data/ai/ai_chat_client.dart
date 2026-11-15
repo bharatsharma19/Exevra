@@ -68,6 +68,7 @@ class AiChatClient implements AiChatApi {
     http.Client Function()? httpClientFactory,
     this.connectTimeout = const Duration(seconds: 20),
     this.idleTimeout = const Duration(seconds: 45),
+    this.overallTimeout = const Duration(seconds: 150),
   }) : _httpClientFactory = httpClientFactory ?? http.Client.new;
 
   /// The function URL for a project base URL.
@@ -90,6 +91,10 @@ class AiChatClient implements AiChatApi {
   /// 15 s while it waits).
   final Duration idleTimeout;
 
+  /// Longest time an open stream may run, pings included. Text received
+  /// before it ends the stream is kept as an interrupted answer.
+  final Duration overallTimeout;
+
   @override
   Stream<AiStreamEvent> stream(
     AiChatRequest request, {
@@ -105,6 +110,9 @@ class AiChatClient implements AiChatApi {
     final client = _httpClientFactory();
     var cancelled = false;
     StreamSubscription<SseEvent>? events;
+    // Completed by the pump, or by onCancel: a cancelled subscription fires
+    // no onDone, and run() must still reach its finally block.
+    final pumped = Completer<void>();
 
     Future<void> finish() async {
       doAbort();
@@ -141,7 +149,7 @@ class AiChatClient implements AiChatApi {
           return;
         }
         if (cancelled) return;
-        await _pump(response, controller, abort, (s) => events = s);
+        await _pump(response, controller, abort, pumped, (s) => events = s);
       } on AiChatException catch (e) {
         fail(e);
       } on Object catch (e, s) {
@@ -162,6 +170,7 @@ class AiChatClient implements AiChatApi {
       cancelled = true;
       doAbort();
       await events?.cancel();
+      if (!pumped.isCompleted) pumped.complete();
       client.close();
     };
     return controller.stream;
@@ -194,9 +203,9 @@ class AiChatClient implements AiChatApi {
     http.StreamedResponse response,
     StreamController<AiStreamEvent> out,
     Completer<void> abort,
+    Completer<void> done,
     void Function(StreamSubscription<SseEvent>) onSubscription,
   ) {
-    final done = Completer<void>();
     var sawText = false;
     var terminal = false;
 
@@ -233,6 +242,13 @@ class AiChatClient implements AiChatApi {
       },
     );
     late final StreamSubscription<SseEvent> sub;
+    final overall = Timer(overallTimeout, () {
+      if (terminal || out.isClosed) return;
+      if (!abort.isCompleted) abort.complete();
+      endWith(AiErrorCode.timeout);
+      unawaited(sub.cancel());
+      if (!done.isCompleted) done.complete();
+    });
     sub = decodeSse(idle).listen(
       (event) {
         final mapped = parseAiEvent(event);
@@ -264,7 +280,7 @@ class AiChatClient implements AiChatApi {
       cancelOnError: false,
     );
     onSubscription(sub);
-    return done.future;
+    return done.future.whenComplete(overall.cancel);
   }
 
   static Future<void> _drain(http.StreamedResponse response) async {

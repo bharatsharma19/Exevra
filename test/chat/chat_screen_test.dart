@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:expense_manager/core/constants/app_constants.dart';
 import 'package:expense_manager/core/theme/app_theme.dart';
 import 'package:expense_manager/data/ai/ai_chat_models.dart';
@@ -5,6 +7,7 @@ import 'package:expense_manager/data/repositories/ai_report_repository.dart';
 import 'package:expense_manager/features/chat/chat_copy.dart';
 import 'package:expense_manager/features/chat/screens/chat_screen.dart';
 import 'package:expense_manager/features/chat/widgets/consent_view.dart';
+import 'package:expense_manager/features/chat/widgets/report_sheet.dart';
 import 'package:expense_manager/features/chat/widgets/safe_markdown.dart';
 import 'package:expense_manager/providers/chat_provider.dart';
 import 'package:expense_manager/providers/profile_provider.dart';
@@ -135,11 +138,14 @@ void main() {
         expect(find.textContaining("Anthropic's Claude"), findsOneWidget);
         expect(find.textContaining("Google's Gemini"), findsOneWidget);
         expect(
-          find.textContaining('amounts, categories, dates'),
+          find.textContaining(
+            '15 most recent expenses (title, category, amount and date',
+          ),
           findsOneWidget,
         );
         expect(find.text('Not now'), findsOneWidget);
 
+        await tester.ensureVisible(find.text('Read the privacy policy'));
         await tester.tap(find.text('Read the privacy policy'));
         await tester.pump();
         expect(env.launched.single, ChatConsentView.privacyPolicy);
@@ -167,8 +173,169 @@ void main() {
         await tester.pump();
         expect(find.byType(ChatConsentView), findsOneWidget);
       });
+
+      testWidgets('conversation text meets AA contrast', (tester) async {
+        final env = await _pump(tester, theme: theme);
+        await tester.enterText(find.byType(TextField), 'Hello');
+        await tester.pump();
+        await tester.tap(find.byTooltip('Send message'));
+        await tester.pump();
+        await env.api.last.fail(AiErrorCode.unavailable);
+        await tester.pump();
+        await tester.pump();
+        expect(find.text('Hello'), findsOneWidget);
+        expect(find.text(ChatCopy.error(AiErrorCode.unavailable)), findsOne);
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+      });
+
+      testWidgets('consent text and buttons meet AA contrast', (tester) async {
+        await _pump(tester, theme: theme, consent: false);
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+        await tester.ensureVisible(find.text('Not now'));
+        await tester.pump();
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+      });
     });
   }
+
+  group('large text on a small screen', () {
+    void smallScreen(WidgetTester tester, {double keyboard = 0}) {
+      tester.view
+        ..physicalSize = const Size(960, 1920)
+        ..devicePixelRatio = 3
+        ..viewInsets = FakeViewPadding(bottom: keyboard * 3);
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    }
+
+    testWidgets('the conversation fits with the keyboard open', (tester) async {
+      final env = await _pump(tester, theme: AppTheme.lightTheme);
+      await tester.tap(find.text(AppConstants.aiQuickPrompts.first));
+      await tester.pump();
+      await env.api.last.finish([
+        const AiDelta('You spent ₹1,200 on food.'),
+        const AiDone(),
+      ]);
+      await tester.pump();
+      smallScreen(tester, keyboard: 280);
+      await tester.pump();
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(TextField), findsOneWidget);
+      final list = find.byWidgetPredicate(
+        (w) => w is ListView && w.scrollDirection == Axis.vertical,
+      );
+      expect(tester.getSize(list).height, greaterThan(100));
+    });
+
+    testWidgets('the link dialog scrolls', (tester) async {
+      const url = 'https://example.com/a-very-long-path/that/keeps/going?x=1';
+      await _pump(
+        tester,
+        theme: AppTheme.lightTheme,
+        child: const Scaffold(body: SafeMarkdown(data: 'x')),
+      );
+      smallScreen(tester);
+      await tester.pump();
+      final context = tester.element(find.byType(SafeMarkdown));
+      unawaited(confirmAndOpenLink(context, url, (_) async => true));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.ensureVisible(find.text('Cancel'));
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.text('Open this link?'), findsNothing);
+    });
+
+    testWidgets('the report sheet buttons wrap', (tester) async {
+      final env = await _pump(tester, theme: AppTheme.darkTheme);
+      await tester.tap(find.text(AppConstants.aiQuickPrompts.first));
+      await tester.pump();
+      await env.api.last.finish([const AiDelta('An answer'), const AiDone()]);
+      await tester.pump();
+      await tester.pump();
+      smallScreen(tester);
+      await tester.pump();
+      final bubble = tester.element(find.byTooltip('Report response'));
+      unawaited(
+        showReportSheet(bubble, env.container.read(chatProvider).messages.last),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Send report'), findsOneWidget);
+    });
+
+    testWidgets('the assistant-off view scrolls', (tester) async {
+      await _pump(tester, theme: AppTheme.lightTheme, consent: false);
+      smallScreen(tester);
+      await tester.pump();
+      await tester.ensureVisible(find.text('Not now'));
+      await tester.tap(find.text('Not now'));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      await tester.ensureVisible(find.text('Turn on the assistant'));
+      expect(find.text('Turn on the assistant'), findsOneWidget);
+    });
+  });
+
+  testWidgets('a drag toward older messages survives streamed tokens', (
+    tester,
+  ) async {
+    final env = await _pump(tester, theme: AppTheme.lightTheme);
+    await tester.tap(find.text(AppConstants.aiQuickPrompts.first));
+    await tester.pump();
+    final long = [for (var i = 0; i < 80; i++) 'Line $i of the answer.'];
+    env.api.last.emit(AiDelta(long.join('\n\n')));
+    await tester.pump();
+    await tester.pump();
+
+    final list = find.byWidgetPredicate(
+      (w) => w is ListView && w.scrollDirection == Axis.vertical,
+    );
+    final position = tester
+        .state<ScrollableState>(
+          find.descendant(of: list, matching: find.byType(Scrollable)).first,
+        )
+        .position;
+    expect(position.pixels, position.maxScrollExtent);
+
+    final gesture = await tester.startGesture(tester.getCenter(list));
+    await gesture.moveBy(const Offset(0, 30));
+    await tester.pump();
+    await gesture.moveBy(const Offset(0, 10));
+    await tester.pump();
+    final dragged = position.pixels;
+    expect(dragged, lessThan(position.maxScrollExtent));
+    expect(position.maxScrollExtent - dragged, lessThan(48));
+
+    env.api.last.emit(const AiDelta(' More.'));
+    await tester.pump();
+    await tester.pump();
+    expect(position.pixels, dragged);
+
+    await gesture.moveBy(const Offset(0, 20));
+    await tester.pump();
+    expect(position.pixels, closeTo(dragged - 20, 0.5));
+    await gesture.up();
+    await tester.pump(const Duration(seconds: 1));
+
+    env.api.last.emit(const AiDelta(' Even more.'));
+    await tester.pump();
+    await tester.pump();
+    expect(position.pixels, lessThan(position.maxScrollExtent));
+    expect(find.byTooltip('Jump to latest'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Jump to latest'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(position.pixels, position.maxScrollExtent);
+    env.api.last.emit(const AiDelta(' Last.'));
+    await tester.pump();
+    await tester.pump();
+    expect(position.pixels, position.maxScrollExtent);
+    await env.api.last.finish([const AiDone()]);
+    await tester.pump();
+  });
 
   testWidgets('server consent_required shows the consent screen', (
     tester,

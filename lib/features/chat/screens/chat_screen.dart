@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -11,32 +12,48 @@ import '../../../providers/chat_provider.dart';
 import '../../../providers/profile_provider.dart';
 import '../../shared/failure_retry.dart';
 import '../chat_copy.dart';
+import '../chat_theme.dart';
 import '../widgets/consent_view.dart';
 import '../widgets/message_bubble.dart';
 
 /// The Exevra Assistant: consent gate, conversation and input.
-class ChatScreen extends ConsumerStatefulWidget {
+class ChatScreen extends StatelessWidget {
   const ChatScreen({super.key});
 
   @override
-  ConsumerState<ChatScreen> createState() => _ChatScreenState();
+  Widget build(BuildContext context) {
+    // Everything below, dialogs and sheets included, uses colour roles that
+    // reach AA contrast.
+    return Theme(
+      data: ChatTheme.of(Theme.of(context)),
+      child: const _ChatView(),
+    );
+  }
 }
 
-class _ChatScreenState extends ConsumerState<ChatScreen> {
+class _ChatView extends ConsumerStatefulWidget {
+  const _ChatView();
+
+  @override
+  ConsumerState<_ChatView> createState() => _ChatViewState();
+}
+
+class _ChatViewState extends ConsumerState<_ChatView> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
   bool _notNow = false;
 
-  /// True while the list is scrolled to (near) the newest message; streamed
-  /// tokens are followed only then.
+  /// True while the list shows the newest message; streamed tokens are
+  /// followed only then. Any user scroll toward older messages clears it.
   bool _atBottom = true;
+  ScrollDirection _lastUserDirection = ScrollDirection.idle;
+  bool _followQueued = false;
 
   static const double _bottomSlack = 48;
 
   @override
   void initState() {
     super.initState();
-    _scroll.addListener(_onScroll);
     _input.addListener(() => setState(() {}));
   }
 
@@ -47,22 +64,46 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     super.dispose();
   }
 
-  void _onScroll() {
-    if (!_scroll.hasClients) return;
-    final p = _scroll.position;
-    final atBottom = p.pixels >= p.maxScrollExtent - _bottomSlack;
-    if (atBottom != _atBottom) setState(() => _atBottom = atBottom);
+  void _setAtBottom(bool value) {
+    if (value != _atBottom) setState(() => _atBottom = value);
+  }
+
+  bool _onScrollNotification(ScrollNotification n) {
+    if (n.depth != 0 || n.metrics.axis != Axis.vertical) return false;
+    if (n is UserScrollNotification) {
+      if (n.direction != ScrollDirection.idle) {
+        _lastUserDirection = n.direction;
+      }
+      // Toward older messages: stop following at once, so a stream never
+      // pulls the list out from under the user's finger.
+      if (n.direction == ScrollDirection.forward) _setAtBottom(false);
+    } else if (n is ScrollEndNotification) {
+      final slack = _lastUserDirection == ScrollDirection.forward
+          ? 1.0
+          : _bottomSlack;
+      _setAtBottom(n.metrics.extentAfter <= slack);
+    }
+    return false;
   }
 
   void _followIfAtBottom() {
-    if (!_atBottom) return;
+    if (!_atBottom || _followQueued) return;
+    _followQueued = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scroll.hasClients) return;
-      _scroll.jumpTo(_scroll.position.maxScrollExtent);
+      _followQueued = false;
+      if (!mounted || !_atBottom || !_scroll.hasClients) return;
+      final p = _scroll.position;
+      // jumpTo would end a drag, fling or the Jump to latest animation.
+      if (p.isScrollingNotifier.value ||
+          p.userScrollDirection != ScrollDirection.idle) {
+        return;
+      }
+      if (p.pixels < p.maxScrollExtent) _scroll.jumpTo(p.maxScrollExtent);
     });
   }
 
   void _jumpToLatest() {
+    _lastUserDirection = ScrollDirection.idle;
     setState(() => _atBottom = true);
     if (!_scroll.hasClients) return;
     unawaited(
@@ -84,6 +125,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
     AppHaptics.light();
     if (text == null) _input.clear();
+    _lastUserDirection = ScrollDirection.idle;
     setState(() => _atBottom = true);
     unawaited(ref.read(chatProvider.notifier).sendMessage(query));
   }
@@ -92,6 +134,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
         title: const Text('Clear conversation?'),
         content: const Text(
           'This deletes the conversation from this device. It cannot be '
@@ -184,66 +227,91 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ? ChatCopy.complete
         : '';
 
+    final media = MediaQuery.of(context);
+    // With the keyboard open or large text, the quick prompts would leave
+    // the conversation no room.
+    final compact =
+        media.viewInsets.bottom > 0 || media.textScaler.scale(14) > 14 * 1.5;
+
     return SafeArea(
       top: false,
-      child: Column(
-        children: [
-          Expanded(
-            child: Stack(
-              children: [
-                if (messages.isEmpty)
-                  _EmptyState(onPrompt: _send)
-                else
-                  ListView.builder(
-                    controller: _scroll,
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
-                    itemCount: messages.length,
-                    itemBuilder: (context, i) => MessageBubble(
-                      key: ValueKey(messages[i].id),
-                      message: messages[i],
-                      isLast: i == messages.length - 1,
-                      onRetry: () =>
-                          unawaited(ref.read(chatProvider.notifier).retry()),
+      child: LayoutBuilder(
+        builder: (context, constraints) => Column(
+          children: [
+            Expanded(
+              child: Stack(
+                children: [
+                  if (messages.isEmpty)
+                    _EmptyState(onPrompt: _send)
+                  else
+                    NotificationListener<ScrollNotification>(
+                      onNotification: _onScrollNotification,
+                      child: ListView.builder(
+                        controller: _scroll,
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+                        itemCount: messages.length,
+                        itemBuilder: (context, i) => MessageBubble(
+                          key: ValueKey(messages[i].id),
+                          message: messages[i],
+                          isLast: i == messages.length - 1,
+                          onRetry: () => unawaited(
+                            ref.read(chatProvider.notifier).retry(),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                if (messages.isNotEmpty && !_atBottom)
-                  PositionedDirectional(
-                    bottom: 12,
-                    end: 12,
-                    child: FloatingActionButton.small(
-                      heroTag: null,
-                      tooltip: 'Jump to latest',
-                      onPressed: _jumpToLatest,
-                      child: const Icon(Icons.arrow_downward_rounded),
+                  if (messages.isNotEmpty && !_atBottom)
+                    PositionedDirectional(
+                      bottom: 12,
+                      end: 12,
+                      child: FloatingActionButton.small(
+                        heroTag: null,
+                        tooltip: 'Jump to latest',
+                        onPressed: _jumpToLatest,
+                        child: const Icon(Icons.arrow_downward_rounded),
+                      ),
                     ),
-                  ),
-              ],
-            ),
-          ),
-          Semantics(
-            liveRegion: true,
-            label: announcement,
-            child: const SizedBox(width: double.infinity, height: 0),
-          ),
-          if (messages.isNotEmpty && !chat.isStreaming)
-            _PromptStrip(onPrompt: _send),
-          _InputBar(
-            controller: _input,
-            streaming: chat.isStreaming,
-            onSend: _send,
-            onStop: () => ref.read(chatProvider.notifier).stop(),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text(
-              ChatCopy.disclaimer,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
+                ],
               ),
             ),
-          ),
-        ],
+            Semantics(
+              liveRegion: true,
+              label: announcement,
+              child: const SizedBox(width: double.infinity, height: 0),
+            ),
+            // The controls never take more than half the height; past that
+            // they scroll, so the conversation keeps its share.
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: constraints.maxHeight / 2),
+              child: SingleChildScrollView(
+                reverse: true,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (messages.isNotEmpty && !chat.isStreaming && !compact)
+                      _PromptStrip(onPrompt: _send),
+                    _InputBar(
+                      controller: _input,
+                      streaming: chat.isStreaming,
+                      onSend: _send,
+                      onStop: () => ref.read(chatProvider.notifier).stop(),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                      child: Text(
+                        ChatCopy.disclaimer,
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -366,6 +434,16 @@ class _InputBar extends StatelessWidget {
               maxLines: 5,
               maxLength: AiChatRequest.maxUserMessageLength,
               maxLengthEnforcement: MaxLengthEnforcement.enforced,
+              // The counter appears only close to the limit.
+              buildCounter:
+                  (
+                    context, {
+                    required currentLength,
+                    required isFocused,
+                    required maxLength,
+                  }) => maxLength != null && currentLength > maxLength - 200
+                  ? Text('$currentLength/$maxLength')
+                  : null,
               textCapitalization: TextCapitalization.sentences,
               textInputAction: TextInputAction.send,
               onSubmitted: (_) {
@@ -373,6 +451,7 @@ class _InputBar extends StatelessWidget {
               },
               decoration: const InputDecoration(
                 hintText: 'Ask about your spending…',
+                hintMaxLines: 1,
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
@@ -407,7 +486,7 @@ class _AssistantOff extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,

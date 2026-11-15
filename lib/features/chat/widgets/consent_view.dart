@@ -108,8 +108,11 @@ class _ChatConsentViewState extends ConsumerState<ChatConsentView> {
             section(
               Icons.receipt_long_outlined,
               'What is sent',
-              'A summary of your expenses (amounts, categories, dates and '
-                  'group names) and the messages you write to the assistant.',
+              'Your spending totals by category and month, your 15 most '
+                  'recent expenses (title, category, amount and date; for '
+                  'group expenses only your share), the names of your groups, '
+                  'your currency and time zone, and the messages you write, '
+                  'including earlier messages in this chat.',
             ),
             section(
               Icons.cloud_outlined,
@@ -127,7 +130,8 @@ class _ChatConsentViewState extends ConsumerState<ChatConsentView> {
               Icons.toggle_on_outlined,
               "It's optional",
               'You can use Exevra without the assistant and turn it off '
-                  'at any time in Settings.',
+                  'at any time in Settings. Turning it off also deletes this '
+                  'conversation from this device.',
             ),
             Align(
               alignment: AlignmentDirectional.centerStart,

@@ -6,6 +6,7 @@ import 'package:expense_manager/data/ai/ai_chat_models.dart';
 import 'package:expense_manager/features/chat/chat_copy.dart';
 import 'package:expense_manager/providers/auth_provider.dart';
 import 'package:expense_manager/providers/chat_provider.dart';
+import 'package:expense_manager/providers/profile_provider.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -22,8 +23,8 @@ void main() {
 
   Future<void> boot({Map<String, Object> prefs = const {}}) async {
     backend = TestBackend(signedInAs: 'A');
-    backend.profiles.profiles['A'] = profileOf('A');
-    backend.profiles.profiles['B'] = profileOf('B');
+    backend.profiles.profiles['A'] = profileOf('A').copyWith(aiConsent: true);
+    backend.profiles.profiles['B'] = profileOf('B').copyWith(aiConsent: true);
     api = FakeAiChatApi();
     container = await chatContainer(backend, api, prefs: prefs);
     addTearDown(container.dispose);
@@ -215,7 +216,7 @@ void main() {
       AiErrorCode.rateLimited:
           "You're sending messages quickly. Try again in a minute.",
       AiErrorCode.quotaExceeded:
-          "You've reached today's assistant limit. It resets tomorrow.",
+          "You've reached today's assistant limit. It resets at midnight UTC.",
       AiErrorCode.unavailable:
           'The assistant is unavailable right now. Please try again shortly.',
       AiErrorCode.offline:
@@ -233,13 +234,61 @@ void main() {
       });
     }
 
-    test('stream error events map the same way', () async {
+    test('a stream rate_limited is an outage worded by the server', () async {
+      const busy = 'The assistant is busy right now. Please try again soon.';
       final sending = await send('q');
       await api.last.finish([
-        const AiStreamError(AiErrorCode.rateLimited, message: 'server copy'),
+        const AiStreamError(AiErrorCode.rateLimited, message: busy),
       ]);
       await sending.done;
-      expect(last().errorCode, AiErrorCode.rateLimited);
+      expect(last().errorCode, AiErrorCode.unavailable);
+      expect(
+        ChatCopy.error(last().errorCode, serverMessage: last().serverMessage),
+        busy,
+      );
+    });
+
+    test('a stream rate_limited without copy never blames the user', () async {
+      final sending = await send('q');
+      await api.last.finish([const AiStreamError(AiErrorCode.rateLimited)]);
+      await sending.done;
+      expect(
+        ChatCopy.error(last().errorCode, serverMessage: last().serverMessage),
+        isNot(contains('quickly')),
+      );
+    });
+
+    test('429 quota_exceeded shows the server copy and keeps it', () async {
+      const copy =
+          "You've used today's assistant messages. It resets at "
+          'midnight UTC.';
+      final sending = await send('q');
+      await api.last.failWith(
+        const AiChatException(
+          AiErrorCode.quotaExceeded,
+          serverMessage: copy,
+          retryAfter: Duration(hours: 3),
+        ),
+      );
+      await sending.done;
+      expect(last().errorCode, AiErrorCode.quotaExceeded);
+      expect(
+        ChatCopy.error(last().errorCode, serverMessage: last().serverMessage),
+        copy,
+      );
+      final restored = ChatMessage.fromJson(last().toJson())!;
+      expect(restored.serverMessage, copy);
+    });
+
+    test('server copy is not used for local-only codes or when huge', () {
+      expect(
+        ChatCopy.error(AiErrorCode.invalidRequest, serverMessage: 'bad tz'),
+        isNot('bad tz'),
+      );
+      expect(
+        ChatCopy.error(AiErrorCode.unavailable, serverMessage: 'x' * 400),
+        ChatCopy.error(AiErrorCode.unavailable),
+      );
     });
 
     test('every code has copy and none is raw', () {
@@ -282,6 +331,77 @@ void main() {
     api.last.emit(const AiDelta('late'));
     await settle();
     expect(chat().messages, isEmpty);
+  });
+
+  group('request zone and locale', () {
+    test('ids the server rejects fall back to the offset zone', () {
+      const ist = Duration(hours: 5, minutes: 30);
+      expect(ChatNotifier.requestTimeZone('Asia/Kolkata', ist), 'Asia/Kolkata');
+      expect(ChatNotifier.requestTimeZone('GMT+05:30', ist), 'Asia/Kolkata');
+      expect(
+        ChatNotifier.requestTimeZone('GMT-5', -const Duration(hours: 5)),
+        'Etc/GMT+5',
+      );
+      expect(ChatNotifier.requestTimeZone('', Duration.zero), 'UTC');
+    });
+
+    test('malformed locales are left out', () {
+      expect(ChatNotifier.requestLocale('en-IN'), 'en-IN');
+      expect(ChatNotifier.requestLocale('en_IN'), 'en-IN');
+      expect(ChatNotifier.requestLocale('zh-Hant-TW'), 'zh-Hant-TW');
+      expect(ChatNotifier.requestLocale('es-419'), 'es-419');
+      expect(ChatNotifier.requestLocale('en-12'), isNull);
+      expect(ChatNotifier.requestLocale('e'), isNull);
+      expect(ChatNotifier.requestLocale(null), isNull);
+    });
+
+    test('the request carries the checked values', () async {
+      final sending = await send('q');
+      expect(api.last.request.timeZone, 'Asia/Kolkata');
+      expect(api.last.request.locale, isNotNull);
+      await api.last.finish([const AiDone()]);
+      await sending.done;
+    });
+  });
+
+  test('turning the assistant off deletes the conversation', () async {
+    final sending = await send('q');
+    await api.last.finish([const AiDelta('Food: 1200'), const AiDone()]);
+    await sending.done;
+    final prefs = container.read(sharedPreferencesProvider);
+    final key = UserPrefs.key('A', ChatNotifier.historyPref);
+    expect(prefs.containsKey(key), isTrue);
+
+    await container.read(profileProvider.future);
+    expect(
+      await container.read(profileProvider.notifier).setAiConsent(false),
+      isNull,
+    );
+    await settle();
+
+    expect(chat().messages, isEmpty);
+    expect(prefs.containsKey(key), isFalse);
+  });
+
+  test('history is not restored while the assistant is off', () async {
+    final key = UserPrefs.key('A', ChatNotifier.historyPref);
+    final saved = jsonEncode([
+      ChatMessage(
+        id: 'u-1',
+        isUser: true,
+        text: 'q',
+        createdAt: DateTime.utc(2026),
+      ).toJson(),
+    ]);
+    backend.profiles.profiles['A'] = profileOf('A').copyWith(aiConsent: false);
+    container.dispose();
+    container = await chatContainer(backend, api, prefs: {key: saved});
+    addTearDown(container.dispose);
+    await container.read(profileProvider.future);
+    container.listen(chatProvider, (_, _) {});
+    await settle();
+    expect(chat().messages, isEmpty);
+    expect(container.read(sharedPreferencesProvider).containsKey(key), isFalse);
   });
 
   test('ignores blank, oversize and concurrent sends', () async {

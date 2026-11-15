@@ -38,9 +38,11 @@ class FakeCall {
     await controller.close();
   }
 
-  Future<void> fail(AiErrorCode code) async {
+  Future<void> fail(AiErrorCode code) => failWith(AiChatException(code));
+
+  Future<void> failWith(AiChatException error) async {
     if (controller.isClosed) return;
-    controller.addError(AiChatException(code));
+    controller.addError(error);
     await controller.close();
   }
 }

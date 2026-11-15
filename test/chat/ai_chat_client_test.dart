@@ -45,6 +45,10 @@ class FakeHttp extends http.BaseClient {
   final List<http.Request> requests = [];
   final List<StreamController<List<int>>> bodies = [];
   bool aborted = false;
+  int closes = 0;
+
+  @override
+  void close() => closes++;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
@@ -95,12 +99,14 @@ AiChatClient clientFor(
   FakeHttp http, {
   FakeSession? session,
   Duration idle = const Duration(seconds: 45),
+  Duration overall = const Duration(seconds: 150),
 }) => AiChatClient(
   endpoint: AiChatClient.endpointFor('https://example.supabase.co/'),
   anonKey: 'anon',
   session: session ?? FakeSession(),
   httpClientFactory: () => http,
   idleTimeout: idle,
+  overallTimeout: overall,
 );
 
 Future<AiChatException> errorOf(Stream<AiStreamEvent> stream) async {
@@ -280,6 +286,66 @@ void main() {
       clientFor(fake, idle: const Duration(milliseconds: 50)).stream(request),
     );
     expect(e.code, AiErrorCode.timeout);
+    expect(fake.aborted, isTrue);
+  });
+
+  test('pings cannot keep a stream open past the overall timeout', () async {
+    final fake = FakeHttp([
+      Reply(200, chunks: [null]),
+    ]);
+    final client = clientFor(
+      fake,
+      idle: const Duration(milliseconds: 80),
+      overall: const Duration(milliseconds: 200),
+    );
+    final pinger = Timer.periodic(const Duration(milliseconds: 20), (_) {
+      if (fake.bodies.isNotEmpty && !fake.bodies.first.isClosed) {
+        fake.bodies.first.add(utf8.encode(': ping\n\n'));
+      }
+    });
+    addTearDown(pinger.cancel);
+    final e = await errorOf(client.stream(request));
+    expect(e.code, AiErrorCode.timeout);
+    expect(fake.aborted, isTrue);
+  });
+
+  test('text before the overall timeout ends as interrupted', () async {
+    final fake = FakeHttp([
+      Reply(
+        200,
+        chunks: [
+          sse('delta', {'text': 'Half'}),
+          null,
+        ],
+      ),
+    ]);
+    final events = await clientFor(
+      fake,
+      overall: const Duration(milliseconds: 50),
+    ).stream(request).toList();
+    expect(events.whereType<AiDelta>().single.text, 'Half');
+    expect((events.last as AiInterrupted).reason, 'timeout');
+  });
+
+  test('cancelling mid-stream lets the request finish', () async {
+    final fake = FakeHttp([
+      Reply(
+        200,
+        chunks: [
+          sse('delta', {'text': 'Hi'}),
+          null,
+        ],
+      ),
+    ]);
+    final first = Completer<void>();
+    final sub = clientFor(fake).stream(request).listen((_) {
+      if (!first.isCompleted) first.complete();
+    });
+    await first.future;
+    await sub.cancel();
+    await pumpEventQueue();
+    // Once from onCancel, once from run()'s finally block.
+    expect(fake.closes, 2);
     expect(fake.aborted, isTrue);
   });
 

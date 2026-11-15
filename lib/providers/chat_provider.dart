@@ -84,7 +84,16 @@ class ChatNotifier extends Notifier<ChatState> {
       _active?.cancel();
       _active = null;
     });
-    return ChatState(messages: uid == null ? const [] : _load(uid));
+    // Turning the assistant off deletes the conversation from the device.
+    ref.listen(userProfileProvider.select((p) => p?.aiConsent), (prev, next) {
+      if (next == false && prev != false) unawaited(clear());
+    });
+    if (uid == null) return const ChatState();
+    if (ref.read(userProfileProvider)?.aiConsent == false) {
+      unawaited(_removeHistory(uid));
+      return const ChatState();
+    }
+    return ChatState(messages: _load(uid));
   }
 
   /// Sends [text] as a new question. Ignored while an answer is streaming,
@@ -157,6 +166,10 @@ class ChatNotifier extends Notifier<ChatState> {
     state = const ChatState();
     final uid = _uid;
     if (uid == null) return;
+    await _removeHistory(uid);
+  }
+
+  Future<void> _removeHistory(String uid) async {
     try {
       await ref
           .read(sharedPreferencesProvider)
@@ -164,6 +177,30 @@ class ChatNotifier extends Notifier<ChatState> {
     } on Object catch (e) {
       AppLogger.warn('Could not clear the chat history', e.runtimeType);
     }
+  }
+
+  static final RegExp _zoneChars = RegExp(r'^[A-Za-z0-9_+\-/]{1,64}$');
+  static final RegExp _gmtOffset = RegExp(r'^GMT[+-]');
+
+  // language[-script][-region](-variant)*, as Intl canonicalises it.
+  static final RegExp _localeTag = RegExp(
+    r'^[A-Za-z]{2,3}(-[A-Za-z]{4})?(-([A-Za-z]{2}|[0-9]{3}))?'
+    r'(-([A-Za-z0-9]{5,8}|[0-9][A-Za-z0-9]{3}))*$',
+  );
+
+  /// [zone] when the server can accept it, else an IANA zone with the
+  /// device's [offset] (Android reports custom zones as `GMT+05:30`).
+  static String requestTimeZone(String zone, Duration offset) =>
+      _zoneChars.hasMatch(zone) && !_gmtOffset.hasMatch(zone)
+      ? zone
+      : DeviceTimeZone.fallbackForOffset(offset);
+
+  /// [locale] as a well-formed BCP 47 tag, or null to leave it out (the
+  /// server rejects tags Intl cannot canonicalise).
+  static String? requestLocale(String? locale) {
+    if (locale == null) return null;
+    final tag = locale.trim().replaceAll('_', '-');
+    return tag.length <= 35 && _localeTag.hasMatch(tag) ? tag : null;
   }
 
   /// The user allowed the assistant (consent saved on the server).
@@ -229,8 +266,8 @@ class ChatNotifier extends Notifier<ChatState> {
         ref.read(userProfileProvider)?.locale ?? ref.read(deviceLocaleProvider);
     final request = AiChatRequest(
       messages: turns,
-      timeZone: zone,
-      locale: locale,
+      timeZone: requestTimeZone(zone, DateTime.now().timeZoneOffset),
+      locale: requestLocale(locale),
     );
 
     void finish() {
@@ -264,7 +301,11 @@ class ChatNotifier extends Notifier<ChatState> {
               AppLogger.error('Assistant stream failed', error, stack);
             }
             if (code == AiErrorCode.aborted) return;
-            _fail(messageId, code);
+            _fail(
+              messageId,
+              code,
+              error is AiChatException ? error.serverMessage : null,
+            );
             finish();
           },
           onDone: () {
@@ -324,19 +365,30 @@ class ChatNotifier extends Notifier<ChatState> {
             ),
           );
         } else {
-          _fail(id, code);
+          // In the stream, rate_limited means every provider was busy, not
+          // that the user sent too much: word it as an outage.
+          _fail(
+            id,
+            code == AiErrorCode.rateLimited ? AiErrorCode.unavailable : code,
+            message,
+          );
         }
         finish();
     }
   }
 
-  void _fail(String id, AiErrorCode code) {
+  void _fail(String id, AiErrorCode code, [String? serverMessage]) {
     _update(
       id,
-      (m) => m.copyWith(
+      (m) => ChatMessage(
+        id: m.id,
+        isUser: false,
         text: '',
+        createdAt: m.createdAt,
         status: ChatMessageStatus.error,
+        provider: m.provider,
         errorCode: code,
+        serverMessage: serverMessage,
       ),
     );
     if (code == AiErrorCode.consentRequired) {

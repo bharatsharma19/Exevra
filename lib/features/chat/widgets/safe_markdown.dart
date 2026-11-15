@@ -115,6 +115,7 @@ Future<void> confirmAndOpenLink(
     builder: (context) {
       final scheme = Theme.of(context).colorScheme;
       return AlertDialog(
+        scrollable: true,
         title: Text(canOpen ? 'Open this link?' : "This link can't be opened"),
         content: Column(
           mainAxisSize: MainAxisSize.min,

@@ -136,8 +136,11 @@ class _ReportSheetState extends ConsumerState<_ReportSheet> {
               Text(_error!, style: TextStyle(color: scheme.error)),
             ],
             const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
+            OverflowBar(
+              alignment: MainAxisAlignment.end,
+              overflowAlignment: OverflowBarAlignment.end,
+              spacing: 8,
+              overflowSpacing: 4,
               children: [
                 TextButton(
                   onPressed: _sending
@@ -145,7 +148,6 @@ class _ReportSheetState extends ConsumerState<_ReportSheet> {
                       : () => Navigator.of(context).pop(false),
                   child: const Text('Cancel'),
                 ),
-                const SizedBox(width: 8),
                 FilledButton(
                   onPressed: _reason == null || _sending ? null : _submit,
                   child: _sending

@@ -22,8 +22,33 @@ abstract final class ChatCopy {
       'Ask about your spending, budgets or ways to save, or tap a prompt '
       'below to get started.';
 
-  /// Friendly copy for [code]; never raw server or exception text.
-  static String error(AiErrorCode? code) => switch (code) {
+  /// Longest server message shown as is.
+  static const int maxServerMessageLength = 300;
+
+  /// Codes whose server copy is shown in place of the local text: the
+  /// server knows whether a limit is the user's or every provider's, and
+  /// when the quota resets.
+  static const Set<AiErrorCode> _serverWorded = {
+    AiErrorCode.rateLimited,
+    AiErrorCode.quotaExceeded,
+    AiErrorCode.unavailable,
+  };
+
+  /// Friendly copy for [code]: the server's [serverMessage] (which the
+  /// contract defines as friendly copy) for limits and outages, else local
+  /// text. Never exception text.
+  static String error(AiErrorCode? code, {String? serverMessage}) {
+    final server = serverMessage?.trim() ?? '';
+    if (code != null &&
+        _serverWorded.contains(code) &&
+        server.isNotEmpty &&
+        server.length <= maxServerMessageLength) {
+      return server;
+    }
+    return _local(code);
+  }
+
+  static String _local(AiErrorCode? code) => switch (code) {
     AiErrorCode.offline => friendlyMessage(const AppFailure.offline()),
     AiErrorCode.network =>
       "Couldn't reach the assistant. Check your connection and try again.",
@@ -36,7 +61,7 @@ abstract final class ChatCopy {
     AiErrorCode.rateLimited =>
       "You're sending messages quickly. Try again in a minute.",
     AiErrorCode.quotaExceeded =>
-      "You've reached today's assistant limit. It resets tomorrow.",
+      "You've reached today's assistant limit. It resets at midnight UTC.",
     AiErrorCode.tooLong =>
       'That conversation is too long. Clear the chat and try again.',
     AiErrorCode.unavailable =>

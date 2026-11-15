@@ -83,7 +83,10 @@ class MessageBubble extends StatelessWidget {
       const SizedBox(height: 6),
       if (message.status == ChatMessageStatus.error)
         _ErrorCard(
-          message: ChatCopy.error(message.errorCode),
+          message: ChatCopy.error(
+            message.errorCode,
+            serverMessage: message.serverMessage,
+          ),
           onRetry: isLast && message.canRetry ? onRetry : null,
         )
       else if (message.isStreaming && !hasText)
