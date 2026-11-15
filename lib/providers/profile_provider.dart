@@ -55,8 +55,36 @@ final themePreferenceProvider =
 /// The signed-in user's profile. Null when signed out. Refetched whenever
 /// the user changes, starting over at loading with no value (see
 /// [UserScopedNotifier]).
+///
+/// Writes are optimistic. What is shown is the profile the server last
+/// confirmed with every write still on its way applied in the order they
+/// were made. Each column remembers the latest write confirmed for it, so
+/// an older answer (success or failure) never undoes a newer write: a
+/// failed write only drops its own change, and a column keeps the value of
+/// the newest confirmed write.
 class ProfileNotifier extends UserScopedNotifier<UserProfile?> {
   ProfileRepository get _repo => ref.read(profileRepositoryProvider);
+
+  /// The profile as the server last confirmed it, per column.
+  UserProfile? _confirmed;
+
+  /// Writes on their way, by request number (oldest first).
+  final Map<int, ProfileUpdate> _pending = {};
+  int _requests = 0;
+
+  /// Column to the number of the latest write confirmed for it.
+  final Map<String, int> _confirmedWrites = {};
+
+  static const Set<String> _columns = {
+    'display_name',
+    'avatar_url',
+    'currency',
+    'timezone',
+    'locale',
+    'theme_mode',
+    'haptics_enabled',
+    'ai_consent',
+  };
 
   @override
   AsyncValue<UserProfile?> whenSignedOut() => const AsyncData(null);
@@ -70,12 +98,95 @@ class ProfileNotifier extends UserScopedNotifier<UserProfile?> {
         .read(sharedPreferencesProvider)
         .getBool(UserPrefs.key(userId, UserPrefs.haptics));
     if (cachedHaptics != null) AppHaptics.isEnabled = cachedHaptics;
+    if (owner != userId) {
+      // Writes of another user are never applied to this profile.
+      _confirmed = null;
+      _pending.clear();
+      _confirmedWrites.clear();
+    }
     return ref.watch(profileRepositoryProvider).fetch(userId);
   }
 
   @override
   void onLoaded(String userId, UserProfile? value) {
-    if (value != null) unawaited(_afterLoad(userId, value));
+    if (value == null) return;
+    _confirmed = value;
+    _confirmedWrites.clear();
+    if (_pending.isNotEmpty) _show();
+    unawaited(_afterLoad(userId, value));
+  }
+
+  /// Shows the confirmed profile with the writes on their way applied.
+  void _show() {
+    var profile = _confirmed;
+    if (profile == null || !ref.mounted) return;
+    for (final update in _pending.values) {
+      profile = profile!.apply(update);
+    }
+    state = AsyncData(profile);
+  }
+
+  /// Takes the server's answer to write [request] ([update]): the columns
+  /// it wrote, and the others, unless a newer write to that column was
+  /// confirmed already.
+  void _confirm(int request, ProfileUpdate update, UserProfile saved) {
+    final base = _confirmed ?? saved;
+    final take = {
+      for (final column in _columns)
+        if ((_confirmedWrites[column] ?? 0) <= request) column,
+    };
+    for (final column in update.fields.keys) {
+      if ((_confirmedWrites[column] ?? 0) < request) {
+        _confirmedWrites[column] = request;
+      }
+    }
+    _confirmed = _takeColumns(base, saved, take).copyWith(
+      updatedAt: saved.updatedAt.isAfter(base.updatedAt)
+          ? saved.updatedAt
+          : base.updatedAt,
+    );
+  }
+
+  /// [into] with the [columns] of [from].
+  static UserProfile _takeColumns(
+    UserProfile into,
+    UserProfile from,
+    Set<String> columns,
+  ) => into.copyWith(
+    displayName: columns.contains('display_name') ? from.displayName : null,
+    avatarUrl: columns.contains('avatar_url') ? from.avatarUrl : unset,
+    currency: columns.contains('currency') ? from.currency : null,
+    timezone: columns.contains('timezone') ? from.timezone : null,
+    locale: columns.contains('locale') ? from.locale : unset,
+    themeMode: columns.contains('theme_mode') ? from.themeMode : null,
+    hapticsEnabled: columns.contains('haptics_enabled')
+        ? from.hapticsEnabled
+        : null,
+    aiConsent: columns.contains('ai_consent') ? from.aiConsent : null,
+    aiConsentAt: columns.contains('ai_consent') ? from.aiConsentAt : unset,
+  );
+
+  /// Sends [update] for [userId], showing it right away. Returns the
+  /// failure, or null once the server saved it. Only this write's own
+  /// change is dropped when it fails.
+  Future<AppFailure?> _write(String userId, ProfileUpdate update) async {
+    final request = ++_requests;
+    _pending[request] = update;
+    _show();
+    try {
+      final saved = await _repo.update(userId, update);
+      if (!_isFor(userId)) return null;
+      _pending.remove(request);
+      _confirm(request, update, saved);
+      _show();
+      return null;
+    } on AppFailure catch (failure) {
+      if (_isFor(userId)) {
+        _pending.remove(request);
+        _show();
+      }
+      return failure;
+    }
   }
 
   Future<void> _afterLoad(String userId, UserProfile profile) async {
@@ -136,15 +247,18 @@ class ProfileNotifier extends UserScopedNotifier<UserProfile?> {
             : null,
       );
       if (update.isEmpty || !_isFor(userId)) return;
-      final saved = await _repo.update(userId, update);
-      if (_isFor(userId)) state = AsyncData(saved);
+      final failure = await _write(userId, update);
+      if (failure != null) {
+        AppLogger.warn('Device settings were not synced', failure);
+      }
     } on AppFailure catch (failure) {
       AppLogger.warn('Device settings were not synced', failure);
     }
   }
 
-  /// Writes [update] (only the fields it sets), showing it immediately and
-  /// rolling back on failure. Returns the failure, or null on success.
+  /// Writes [update] (only the fields it sets), showing it immediately.
+  /// On failure only this write's change is dropped (never a newer one).
+  /// Returns the failure, or null on success.
   Future<AppFailure?> updateProfile(ProfileUpdate update) async {
     final userId = ref.read(currentUserIdProvider);
     if (userId == null) return const AppFailure.sessionExpired();
@@ -157,21 +271,16 @@ class ProfileNotifier extends UserScopedNotifier<UserProfile?> {
       }
       return failure;
     }
-    state = AsyncData(before.apply(update));
-    try {
-      final saved = await _repo.update(userId, update);
-      if (_isFor(userId)) {
-        state = AsyncData(saved);
-        await _applyLocally(userId, saved);
-      }
-      return null;
-    } on AppFailure catch (failure) {
-      if (_isFor(userId)) {
-        state = AsyncData(before);
-        ref.read(failureReporterProvider.notifier).report(failure);
-      }
+    _confirmed ??= before;
+    final failure = await _write(userId, update);
+    if (!_isFor(userId)) return failure;
+    if (failure != null) {
+      ref.read(failureReporterProvider.notifier).report(failure);
       return failure;
     }
+    final shown = state.value;
+    if (shown != null) await _applyLocally(userId, shown);
+    return null;
   }
 
   Future<AppFailure?> setCurrency(String currency) =>
@@ -204,6 +313,7 @@ class ProfileNotifier extends UserScopedNotifier<UserProfile?> {
   void setActiveGroupLocally(String? groupId) {
     final current = state.value;
     if (current == null || current.activeGroupId == groupId) return;
+    _confirmed = _confirmed?.copyWith(activeGroupId: groupId);
     state = AsyncData(current.copyWith(activeGroupId: groupId));
   }
 }

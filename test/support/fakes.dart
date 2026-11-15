@@ -295,6 +295,10 @@ class FakeProfileRepository implements ProfileRepository {
   /// When set, updates wait for it before running.
   Completer<void>? holdUpdates;
 
+  /// When non-empty, each update takes the next completer when it is sent
+  /// and waits for it; completing it with an error fails that update.
+  final List<Completer<void>> heldUpdates = [];
+
   @override
   Future<UserProfile> fetch(String userId) async {
     await gate.pass();
@@ -308,6 +312,8 @@ class FakeProfileRepository implements ProfileRepository {
   @override
   Future<UserProfile> update(String userId, ProfileUpdate update) async {
     updates.add((userId, update));
+    final held = heldUpdates.isEmpty ? null : heldUpdates.removeAt(0);
+    await held?.future;
     await holdUpdates?.future;
     final failure = failUpdates;
     if (failure != null) throw failure;

@@ -496,6 +496,83 @@ void main() {
       expect(container.read(userProfileProvider)?.currency, 'INR');
     });
 
+    group('overlapping preference updates', () {
+      late TestBackend backend;
+      late ProviderContainer container;
+
+      setUp(() async {
+        backend = TestBackend(signedInAs: 'A');
+        backend.profiles.profiles['A'] = profileOf('A');
+        container = await backend.container();
+        addTearDown(container.dispose);
+        container.listen(profileProvider, (_, _) {});
+        await settle(10);
+        expect(container.read(userProfileProvider)?.currency, 'INR');
+        backend.profiles.updates.clear();
+      });
+
+      ProfileNotifier notifier() => container.read(profileProvider.notifier);
+      UserProfile? shown() => container.read(userProfileProvider);
+
+      (Completer<void>, Completer<void>) holdTwo() {
+        final first = Completer<void>();
+        final second = Completer<void>();
+        backend.profiles.heldUpdates.addAll([first, second]);
+        return (first, second);
+      }
+
+      test('an older failure does not undo a newer confirmed write', () async {
+        final (first, second) = holdTwo();
+        final older = notifier().setCurrency('USD');
+        final newer = notifier().setCurrency('EUR');
+        await settle();
+        expect(shown()?.currency, 'EUR');
+
+        second.complete();
+        expect(await newer, isNull);
+        first.completeError(const AppFailure.network());
+        expect(await older, isA<NetworkFailure>());
+        await settle();
+
+        expect(shown()?.currency, 'EUR');
+        expect(backend.profiles.profiles['A']?.currency, 'EUR');
+      });
+
+      test('a failure only rolls back the columns it wrote', () async {
+        final (first, second) = holdTwo();
+        final currency = notifier().setCurrency('USD');
+        final haptics = notifier().setHapticsEnabled(false);
+        await settle();
+
+        second.complete();
+        expect(await haptics, isNull);
+        first.completeError(const AppFailure.network());
+        expect(await currency, isA<NetworkFailure>());
+        await settle();
+
+        expect(shown()?.currency, 'INR');
+        expect(shown()?.hapticsEnabled, isFalse);
+      });
+
+      test('an older success does not hide a newer write on its way', () async {
+        final (first, second) = holdTwo();
+        final older = notifier().setCurrency('USD');
+        final newer = notifier().setCurrency('EUR');
+        await settle();
+
+        first.complete();
+        expect(await older, isNull);
+        await settle();
+        expect(shown()?.currency, 'EUR');
+
+        second.completeError(const AppFailure.network());
+        expect(await newer, isA<NetworkFailure>());
+        await settle();
+        // The newer write failed: the confirmed older one shows.
+        expect(shown()?.currency, 'USD');
+      });
+    });
+
     test('updates send only the changed column', () async {
       final backend = TestBackend(signedInAs: 'A');
       backend.profiles.profiles['A'] = profileOf('A');
