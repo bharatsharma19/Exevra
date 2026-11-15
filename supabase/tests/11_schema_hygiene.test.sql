@@ -258,7 +258,8 @@ select is((select array_agg(p.oid::regprocedure::text order by 1) from pg_proc a
 select is((select array_agg(p.oid::regprocedure::text order by 1) from pg_proc as p
            where p.pronamespace = 'public'::regnamespace
              and p.proname in ('prepare_account_deletion', 'purge_old_invitations', 'purge_old_ai_usage',
-                               'pick_successor_admin', 'group_balance_rows', 'group_split_member_ids')
+                               'pick_successor_admin', 'group_balance_rows', 'group_split_member_ids',
+                               'expense_has_departed_participant')
              and (has_function_privilege('authenticated', p.oid, 'execute') or not has_function_privilege('service_role', p.oid, 'execute'))),
           null, 'maintenance and internal functions are service_role only');
 select is((select array_agg(c.oid::regclass::text order by 1) from pg_class as c

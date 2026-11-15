@@ -7,15 +7,24 @@
 --     approved and have role admin or member (viewers and pending members are excluded);
 --   * on UPDATE of amount_minor, or of the payer (user_id, to a non-NULL value): the amount is split
 --     again among the SAME participants, i.e. exactly the users who already have split rows for the
---     expense (frozen at creation, including members who have left since and former members whose
---     user_id is NULL), with the same payer-first remainder rule. Current group membership is never
---     consulted again: members who joined later are never added and nobody is removed. An expense
---     without any split row (possible only for legacy data) is charged to its payer alone, so its
---     balances still sum to zero.
+--     expense (frozen at creation), with the same payer-first remainder rule. Current group
+--     membership is never consulted again: members who joined later are never added and nobody is
+--     removed. An expense without any split row (possible only for legacy data) is charged to its
+--     payer alone, so its balances still sum to zero.
 -- Later joins, leaves and role changes never rewrite existing splits. When a participant's account
 -- is deleted their user_id becomes NULL (shown as "Former member"); that change does not re-split.
 -- Deleting an expense deletes its splits (ON DELETE CASCADE). group_id never changes after insert
--- (expenses_before_write), so an expense is never converted between personal and group.
+-- (expenses_before_write); move_expense_scope() moves an expense by deleting it and inserting a new
+-- row (20261115001600).
+--
+-- Departed participants lock an expense. When the frozen participant set of a group expense (its
+-- split user_ids plus the payer) contains anyone who is no longer an approved member of the group
+-- (members who left or were removed, and former members whose user_id is NULL), its amount and payer
+-- cannot change and it cannot be deleted (P0001 expense_locked_member_left): either would change the
+-- balance of someone who can no longer settle in the group. Title, category, note, date and receipt
+-- edits stay allowed. A role change (e.g. to viewer) does not count as leaving. The rule applies to
+-- every writer (clients, service_role, the table owner); the only exception is the deletion of the
+-- whole group, whose cascade removes its expenses.
 --
 -- public.split_equal_shares(total, member_ids, payer) is the single, pure implementation of the
 -- equal split. Shares always sum exactly to the total; leftover minor units are assigned by the
@@ -171,6 +180,75 @@ CREATE TRIGGER trigger_expense_splits_amount
           AND (NEW.amount_minor IS DISTINCT FROM OLD.amount_minor
                OR (NEW.user_id IS NOT NULL AND NEW.user_id IS DISTINCT FROM OLD.user_id)))
     EXECUTE FUNCTION public.expense_splits_sync();
+
+-- -----------------------------------------------------------------------------
+-- Lock: expenses shared with departed participants
+-- -----------------------------------------------------------------------------
+-- true when the participants of a group expense (split rows plus p_payer) include a NULL user or
+-- someone without an approved membership of p_group_id. false for a personal expense.
+CREATE OR REPLACE FUNCTION public.expense_has_departed_participant(p_expense_id uuid, p_group_id uuid, p_payer uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+    SELECT p_group_id IS NOT NULL AND EXISTS (
+        SELECT 1
+        FROM (
+            SELECT s.user_id FROM public.expense_splits AS s WHERE s.expense_id = p_expense_id
+            UNION ALL
+            SELECT p_payer
+        ) AS participant (user_id)
+        WHERE participant.user_id IS NULL
+           OR NOT EXISTS (
+               SELECT 1 FROM public.group_members AS gm
+               WHERE gm.group_id = p_group_id AND gm.user_id = participant.user_id AND gm.status = 'approved'
+           )
+    );
+$$;
+REVOKE ALL ON FUNCTION public.expense_has_departed_participant(uuid, uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.expense_has_departed_participant(uuid, uuid, uuid) TO service_role;
+
+CREATE OR REPLACE FUNCTION public.expenses_departed_member_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+    -- Key-share lock on the group: membership RPCs (leave_group, remove_member, ...) lock the group
+    -- row FOR UPDATE, so this check and a concurrent departure run one after the other. A group that
+    -- no longer exists is being deleted as a whole (FK cascade): its expenses go with it.
+    PERFORM 1 FROM public.groups AS g WHERE g.id = OLD.group_id FOR KEY SHARE;
+    IF NOT FOUND THEN
+        RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+    END IF;
+    IF public.expense_has_departed_participant(OLD.id, OLD.group_id, OLD.user_id) THEN
+        RAISE EXCEPTION 'expense_locked_member_left' USING ERRCODE = 'P0001',
+            DETAIL = 'A participant of this expense is no longer a member of the group.',
+            HINT = 'Only the title, category, note, date and receipt can still be edited.';
+    END IF;
+    RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.expenses_departed_member_guard() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS trigger_expenses_departed_guard_update ON public.expenses;
+CREATE TRIGGER trigger_expenses_departed_guard_update
+    BEFORE UPDATE OF amount_minor, user_id ON public.expenses
+    FOR EACH ROW
+    WHEN (OLD.group_id IS NOT NULL
+          AND (NEW.amount_minor IS DISTINCT FROM OLD.amount_minor
+               OR (NEW.user_id IS NOT NULL AND NEW.user_id IS DISTINCT FROM OLD.user_id)))
+    EXECUTE FUNCTION public.expenses_departed_member_guard();
+
+DROP TRIGGER IF EXISTS trigger_expenses_departed_guard_delete ON public.expenses;
+CREATE TRIGGER trigger_expenses_departed_guard_delete
+    BEFORE DELETE ON public.expenses
+    FOR EACH ROW
+    WHEN (OLD.group_id IS NOT NULL)
+    EXECUTE FUNCTION public.expenses_departed_member_guard();
 
 -- -----------------------------------------------------------------------------
 -- Back-fill legacy group expenses (current approved admins and members)

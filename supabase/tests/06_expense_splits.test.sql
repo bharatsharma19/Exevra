@@ -167,7 +167,7 @@ $$;
 
 grant execute on all functions in schema tests to anon, authenticated;
 
-select plan(57);
+select plan(59);
 
 -- ---------------------------------------------------------------------------
 -- split_equal_shares
@@ -321,27 +321,17 @@ select tests.create_group_as('alice', 'Cabin', 'INR');
 select tests.add_member(tests.gid('Cabin'), 'bob', 'member');
 select tests.add_member(tests.gid('Cabin'), 'carol', 'member');
 select tests.add_expense('bob', 'Cabin', 'Firewood', 900);
-select tests.remove_member(tests.gid('Cabin'), 'carol');
 select tests.add_member(tests.gid('Cabin'), 'late', 'member');
-select tests.add_expense('alice', 'Cabin', 'Groceries after', 600);
 select tests.authenticate_as('bob');
 select lives_ok($$ update public.expenses set amount_minor = 1000 where id = tests.eid('Firewood') $$,
-                'the payer edits the amount after one member left and another joined');
+                'the payer edits the amount after another member joined');
 reset role;
 select is((select array_agg(user_id order by user_id) from public.expense_splits where expense_id = tests.eid('Firewood')),
           (select array_agg(id order by id) from tests.users where name in ('alice', 'bob', 'carol')),
           'an amount edit keeps exactly the participants frozen at creation');
-select is(tests.share('Firewood', 'carol'), 333::bigint, 'a member who left is re-split with the original participants');
+select is(tests.share('Firewood', 'carol'), 333::bigint, 'every original participant is re-split');
 select is(tests.share('Firewood', 'bob'), 334::bigint, 'the payer still takes the leftover unit');
 select is(tests.share('Firewood', 'late'), null::bigint, 'a member who joined later is never added by an edit');
-select tests.authenticate_as('alice');
-select lives_ok($$ update public.expenses set amount_minor = 601 where id = tests.eid('Groceries after') $$,
-                'an expense added after a member left is edited');
-reset role;
-select is((select count(*) from public.expense_splits where expense_id = tests.eid('Groceries after') and user_id = tests.uid('carol')),
-          0::bigint, 'a member who left before the expense is never added by an edit');
-select is((select sum(share_minor) from public.expense_splits where expense_id = tests.eid('Groceries after')), 601::numeric,
-          'the edited amount is fully split');
 
 -- A new payer (privileged writers only): same participants, the leftover unit follows the payer.
 update public.expenses set user_id = tests.uid('alice') where id = tests.eid('Firewood');
@@ -350,6 +340,23 @@ select is((select array_agg(user_id order by user_id) from public.expense_splits
           'a payer change keeps the same participants');
 select is(tests.share('Firewood', 'alice'), 334::bigint, 'the new payer takes the leftover unit');
 select is(tests.share('Firewood', 'bob'), 333::bigint, 'the previous payer no longer does');
+
+-- Once a participant has left, the amount and payer are locked (12_expense_locks covers the rule).
+select tests.remove_member(tests.gid('Cabin'), 'carol');
+select tests.authenticate_as('alice');
+select throws_ok($$ update public.expenses set amount_minor = 1100 where id = tests.eid('Firewood') $$,
+                 'P0001', 'expense_locked_member_left', 'an expense shared with a member who left keeps its amount');
+reset role;
+select is(tests.share('Firewood', 'carol'), 333::bigint, 'the departed member''s share is unchanged');
+select tests.add_expense('alice', 'Cabin', 'Groceries after', 600);
+select tests.authenticate_as('alice');
+select lives_ok($$ update public.expenses set amount_minor = 601 where id = tests.eid('Groceries after') $$,
+                'an expense added after a member left is edited');
+reset role;
+select is((select count(*) from public.expense_splits where expense_id = tests.eid('Groceries after') and user_id = tests.uid('carol')),
+          0::bigint, 'a member who left before the expense is never added by an edit');
+select is((select sum(share_minor) from public.expense_splits where expense_id = tests.eid('Groceries after')), 601::numeric,
+          'the edited amount is fully split');
 
 -- An expense without split rows (possible only for legacy data) never draws in the current members.
 delete from public.expense_splits where expense_id = tests.eid('Groceries after');
@@ -398,8 +405,8 @@ select tests.authenticate_as('outsider');
 select is((select count(*) from public.expense_splits), 0::bigint, 'non-members cannot read splits');
 reset role;
 
-delete from public.expenses where id = tests.eid('Taxi');
-select is((select count(*) from public.expense_splits where expense_id = tests.eid('Taxi')), 0::bigint,
+delete from public.expenses where id = tests.eid('Ramen');
+select is((select count(*) from public.expense_splits where expense_id = tests.eid('Ramen')), 0::bigint,
           'deleting an expense removes its splits');
 
 select * from finish();

@@ -4,7 +4,7 @@
 begin;
 set local client_min_messages = warning;
 create extension if not exists pgtap with schema extensions;
-select plan(33);
+select plan(35);
 
 -- Timestamps of existing rows are kept: the conversion is not a user edit.
 select is((select count(*) from public.expenses where updated_at <> '2025-01-02 00:00:00+00'), 0::bigint,
@@ -142,6 +142,12 @@ select is((select string_agg(gm.group_id || '/' || gm.user_id || ': ' || e.err, 
            cross join lateral (select pg_temp.leave_error(gm.group_id, gm.user_id) as err) as e
            where gm.status = 'approved' and e.err is not null),
           null, 'after settling every suggestion, every approved member can leave');
+
+-- A legacy expense paid by someone who already left the group is locked (amount and deletion).
+select throws_ok($$ update public.expenses set amount_minor = amount_minor + 1 where id = '20000000-0000-0000-0000-000000000007' $$,
+                 'P0001', 'expense_locked_member_left', 'a legacy expense paid by a member who left keeps its amount');
+select throws_ok($$ delete from public.expenses where id = '20000000-0000-0000-0000-000000000007' $$,
+                 'P0001', 'expense_locked_member_left', 'and cannot be deleted');
 
 select * from finish();
 rollback;
