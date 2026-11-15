@@ -370,8 +370,23 @@ class FakeGroupRepository implements GroupRepository {
   AppFailure? failCreate;
   bool createBeforeFailing = false;
 
+  /// When set, join, rotate and member changes wait for it, then throw
+  /// [failActions] when that is set.
+  Completer<void>? holdActions;
+  AppFailure? failActions;
+
+  /// Number of `get_user_groups` calls.
+  int fetchCalls = 0;
+
+  Future<void> _action() async {
+    await holdActions?.future;
+    final failure = failActions;
+    if (failure != null) throw failure;
+  }
+
   @override
   Future<List<Group>> fetchMyGroups() async {
+    fetchCalls++;
     if (heldFetches.isNotEmpty) return heldFetches.removeAt(0).future;
     await gate.pass();
     final failure = failFetch;
@@ -445,6 +460,7 @@ class FakeGroupRepository implements GroupRepository {
   @override
   Future<JoinRequest> joinByCode(String code) async {
     calls.add('join:$code');
+    await _action();
     if (code.toUpperCase().startsWith('BAD')) {
       throw const AppFailure.business('invalid_code');
     }
@@ -471,6 +487,7 @@ class FakeGroupRepository implements GroupRepository {
     GroupRole role = GroupRole.member,
   }) async {
     calls.add('approve:$userId:${role.name}');
+    await _action();
     _updateMember(
       groupId,
       userId,
@@ -485,6 +502,7 @@ class FakeGroupRepository implements GroupRepository {
     bool force = false,
   }) async {
     calls.add('remove:$userId:$force');
+    await _action();
     if (!force && unsettled.contains(userId)) {
       throw const AppFailure.business('outstanding_balance');
     }
@@ -498,12 +516,14 @@ class FakeGroupRepository implements GroupRepository {
     GroupRole role,
   ) async {
     calls.add('role:$userId:${role.name}');
+    await _action();
     _updateMember(groupId, userId, (m) => m.copyWith(role: role));
   }
 
   @override
   Future<void> transferAdmin(String groupId, String newAdminId) async {
     calls.add('transfer:$newAdminId');
+    await _action();
     final me = currentUser()!;
     _updateMember(
       groupId,
@@ -542,6 +562,7 @@ class FakeGroupRepository implements GroupRepository {
   @override
   Future<InviteCode> rotateInviteCode(String groupId) async {
     calls.add('rotate:$groupId');
+    await _action();
     return InviteCode('NEWC0DE0NEWC0DE0', DateTime.utc(2026, 12, 15));
   }
 }
@@ -934,6 +955,10 @@ class FakeInvitationRepository implements InvitationRepository {
     sent: true,
   );
   AppFailure? failSend;
+  AppFailure? failRevoke;
+
+  /// When set, send and revoke wait for it before running.
+  Completer<void>? holdWrites;
 
   @override
   Future<SentInvitation> send({
@@ -941,6 +966,7 @@ class FakeInvitationRepository implements InvitationRepository {
     required String email,
     GroupRole role = GroupRole.member,
   }) async {
+    await holdWrites?.future;
     final f = failSend;
     if (f != null) throw f;
     sentTo.add(email);
@@ -967,6 +993,9 @@ class FakeInvitationRepository implements InvitationRepository {
 
   @override
   Future<void> revoke(String invitationId) async {
+    await holdWrites?.future;
+    final f = failRevoke;
+    if (f != null) throw f;
     revoked.add(invitationId);
     pending.removeWhere((i) => i.id == invitationId);
   }

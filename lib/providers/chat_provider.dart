@@ -5,6 +5,7 @@ import '../core/logging/app_logger.dart';
 import '../core/utils/haptics.dart';
 import '../services/ai_chat_service.dart';
 import 'auth_provider.dart';
+import 'session_guard.dart';
 
 class ChatMessage {
   final String id;
@@ -106,7 +107,9 @@ class ChatNotifier extends Notifier<ChatState> {
   Future<void> sendMessage(String text) async {
     final query = text.trim();
     if (query.isEmpty || state.isGenerating) return;
-    final owner = ref.read(currentUserIdProvider);
+    const action = 'an assistant reply';
+    final session = SessionGuard.start(() => ref);
+    if (!session.holds(action)) return;
 
     AppHaptics.light();
 
@@ -137,19 +140,19 @@ class ChatNotifier extends Notifier<ChatState> {
     try {
       final reply = await _aiService.ask(query);
       replyText = reply.text;
-      AppHaptics.medium();
+      if (session.isCurrent) AppHaptics.medium();
     } on AiChatFailure catch (failure) {
       replyText = failure.userMessage;
       failureMessage = failure.userMessage;
     } catch (e, stackTrace) {
       AppLogger.error('Assistant request failed', e, stackTrace);
-      AppHaptics.error();
+      if (session.isCurrent) AppHaptics.error();
       replyText = genericFailureMessage;
       failureMessage = genericFailureMessage;
     }
 
-    // The user changed while waiting: this reply is not theirs.
-    if (!ref.mounted || ref.read(currentUserIdProvider) != owner) return;
+    // The session changed while waiting: this reply is not the new one's.
+    if (!session.holds(action)) return;
     state = state.copyWith(
       messages: state.messages.map((m) {
         if (m.id == assistantMsgId) {

@@ -15,7 +15,6 @@ import '../models/currency_info.dart';
 import '../models/json_reader.dart';
 import '../models/profile.dart';
 import 'auth_provider.dart';
-import 'failure_reporter.dart';
 import 'user_scoped.dart';
 
 /// The device locale as a BCP-47 tag (for example `en-IN`).
@@ -62,6 +61,11 @@ final themePreferenceProvider =
 /// an older answer (success or failure) never undoes a newer write: a
 /// failed write only drops its own change, and a column keeps the value of
 /// the newest confirmed write.
+///
+/// A reload may have read the profile before a write was confirmed. Each
+/// load is stamped with the confirmation count when it starts, and the
+/// columns of writes confirmed after that keep their confirmed value when
+/// the load lands; the other columns take the loaded value.
 class ProfileNotifier extends UserScopedNotifier<UserProfile?> {
   ProfileRepository get _repo => ref.read(profileRepositoryProvider);
 
@@ -74,6 +78,16 @@ class ProfileNotifier extends UserScopedNotifier<UserProfile?> {
 
   /// Column to the number of the latest write confirmed for it.
   final Map<String, int> _confirmedWrites = {};
+
+  /// Number of confirmed writes so far.
+  int _confirmations = 0;
+
+  /// Column to the value of [_confirmations] when a write of it was last
+  /// confirmed.
+  final Map<String, int> _columnConfirmedAt = {};
+
+  /// [_confirmations] when the latest load started.
+  int _loadStamp = 0;
 
   static const Set<String> _columns = {
     'display_name',
@@ -103,17 +117,35 @@ class ProfileNotifier extends UserScopedNotifier<UserProfile?> {
       _confirmed = null;
       _pending.clear();
       _confirmedWrites.clear();
+      _columnConfirmedAt.clear();
     }
+    // Only the latest load is applied, so one stamp is enough.
+    _loadStamp = _confirmations;
     return ref.watch(profileRepositoryProvider).fetch(userId);
   }
 
   @override
   void onLoaded(String userId, UserProfile? value) {
     if (value == null) return;
-    _confirmed = value;
-    _confirmedWrites.clear();
-    if (_pending.isNotEmpty) _show();
-    unawaited(_afterLoad(userId, value));
+    final previous = _confirmed;
+    // Columns written and confirmed after this load started: the loaded
+    // row may predate those writes.
+    final newer = {
+      for (final MapEntry(key: column, value: at) in _columnConfirmedAt.entries)
+        if (at > _loadStamp) column,
+    };
+    final merged = previous == null || newer.isEmpty
+        ? value
+        : _takeColumns(value, previous, newer).copyWith(
+            updatedAt: previous.updatedAt.isAfter(value.updatedAt)
+                ? previous.updatedAt
+                : value.updatedAt,
+          );
+    _confirmed = merged;
+    if (_pending.isNotEmpty || !identical(merged, value)) _show();
+    final session = guard();
+    if (session.userId != userId) return;
+    unawaited(_afterLoad(session, merged));
   }
 
   /// Shows the confirmed profile with the writes on their way applied.
@@ -135,10 +167,12 @@ class ProfileNotifier extends UserScopedNotifier<UserProfile?> {
       for (final column in _columns)
         if ((_confirmedWrites[column] ?? 0) <= request) column,
     };
+    final confirmation = ++_confirmations;
     for (final column in update.fields.keys) {
       if ((_confirmedWrites[column] ?? 0) < request) {
         _confirmedWrites[column] = request;
       }
+      _columnConfirmedAt[column] = confirmation;
     }
     _confirmed = _takeColumns(base, saved, take).copyWith(
       updatedAt: saved.updatedAt.isAfter(base.updatedAt)
@@ -166,56 +200,63 @@ class ProfileNotifier extends UserScopedNotifier<UserProfile?> {
     aiConsentAt: columns.contains('ai_consent') ? from.aiConsentAt : unset,
   );
 
-  /// Sends [update] for [userId], showing it right away. Returns the
-  /// failure, or null once the server saved it. Only this write's own
-  /// change is dropped when it fails.
-  Future<AppFailure?> _write(String userId, ProfileUpdate update) async {
+  /// Sends [update] for the user of [session], showing it right away.
+  /// Returns the failure, or null once the server saved it. Only this
+  /// write's own change is dropped when it fails. When the session ended
+  /// meanwhile nothing is applied and [SessionGuard.dropped] is returned.
+  Future<AppFailure?> _write(SessionGuard session, ProfileUpdate update) async {
+    const action = 'a profile write';
+    final userId = session.userId;
+    if (userId == null || !_applies(session, action)) {
+      return SessionGuard.dropped;
+    }
     final request = ++_requests;
     _pending[request] = update;
     _show();
     try {
       final saved = await _repo.update(userId, update);
-      if (!_isFor(userId)) return null;
+      if (!_applies(session, action)) return SessionGuard.dropped;
       _pending.remove(request);
       _confirm(request, update, saved);
       _show();
       return null;
     } on AppFailure catch (failure) {
-      if (_isFor(userId)) {
-        _pending.remove(request);
-        _show();
-      }
+      if (!_applies(session, action)) return SessionGuard.dropped;
+      _pending.remove(request);
+      _show();
       return failure;
     }
   }
 
-  Future<void> _afterLoad(String userId, UserProfile profile) async {
-    if (!_isFor(userId)) return;
-    await _applyLocally(userId, profile);
-    await _syncDeviceSettings(userId, profile);
+  Future<void> _afterLoad(SessionGuard session, UserProfile profile) async {
+    if (!_applies(session, 'a profile load')) return;
+    await _applyLocally(session, profile);
+    await _syncDeviceSettings(session, profile);
   }
 
-  /// Whether a result for [userId] may still be applied. The notifier is
-  /// reused across sign-ins, so after an await the signed-in user (and the
-  /// loaded profile) may be someone else's.
-  bool _isFor(String userId) {
-    if (!ref.mounted || ref.read(currentUserIdProvider) != userId) {
-      return false;
-    }
+  /// Whether a result of [action], started in [session], may still be
+  /// applied: the session holds (see [SessionGuard]) and the loaded
+  /// profile, if any, is that user's.
+  bool _applies(SessionGuard session, String action) {
+    if (!session.holds(action)) return false;
     final owner = state.value?.id;
-    return owner == null || owner == userId;
+    if (owner == null || owner == session.userId) return true;
+    AppLogger.debug('Dropped the result of $action: another profile shows');
+    return false;
   }
 
   /// Mirrors server preferences on the device (server wins).
-  Future<void> _applyLocally(String userId, UserProfile profile) async {
-    if (!_isFor(userId)) return;
+  Future<void> _applyLocally(SessionGuard session, UserProfile profile) async {
+    const action = 'a preference mirror';
+    final userId = session.userId;
+    if (userId == null || !_applies(session, action)) return;
     AppHaptics.isEnabled = profile.hapticsEnabled;
     final themes = ref.read(themePreferenceProvider.notifier);
     if (ref.read(themePreferenceProvider) != profile.themeMode) {
       await themes.setLocal(profile.themeMode);
     }
     // Signing out meanwhile clears this user's keys; do not write them back.
-    if (!_isFor(userId)) return;
+    if (!_applies(session, action)) return;
     try {
       await ref
           .read(sharedPreferencesProvider)
@@ -230,9 +271,16 @@ class ProfileNotifier extends UserScopedNotifier<UserProfile?> {
 
   /// Stores the device time zone, and on first use the device locale and
   /// its currency, on the profile. Failures are logged, not shown.
-  Future<void> _syncDeviceSettings(String userId, UserProfile profile) async {
+  Future<void> _syncDeviceSettings(
+    SessionGuard session,
+    UserProfile profile,
+  ) async {
+    const action = 'a device settings sync';
     try {
+      if (!_applies(session, action)) return;
       final zone = await ref.read(deviceTimeZoneProvider.future);
+      // The provider may be gone, or the session over, after the await.
+      if (!_applies(session, action)) return;
       final locale = ref.read(deviceLocaleProvider);
       final firstRun = profile.locale == null;
       final deviceCurrency = AppLocale.currencyFor(locale);
@@ -246,9 +294,9 @@ class ProfileNotifier extends UserScopedNotifier<UserProfile?> {
             ? deviceCurrency
             : null,
       );
-      if (update.isEmpty || !_isFor(userId)) return;
-      final failure = await _write(userId, update);
-      if (failure != null) {
+      if (update.isEmpty) return;
+      final failure = await _write(session, update);
+      if (failure != null && session.isCurrent) {
         AppLogger.warn('Device settings were not synced', failure);
       }
     } on AppFailure catch (failure) {
@@ -259,27 +307,31 @@ class ProfileNotifier extends UserScopedNotifier<UserProfile?> {
   /// Writes [update] (only the fields it sets), showing it immediately.
   /// On failure only this write's change is dropped (never a newer one).
   /// Returns the failure, or null on success.
-  Future<AppFailure?> updateProfile(ProfileUpdate update) async {
-    final userId = ref.read(currentUserIdProvider);
+  Future<AppFailure?> updateProfile(ProfileUpdate update) =>
+      _update(guard(), update);
+
+  Future<AppFailure?> _update(
+    SessionGuard session,
+    ProfileUpdate update,
+  ) async {
+    const action = 'a profile update';
+    final userId = session.userId;
     if (userId == null) return const AppFailure.sessionExpired();
+    if (!session.holds(action)) return SessionGuard.dropped;
     final before = state.value;
     if (before == null || before.id != userId) {
       // The profile has not loaded (or failed to): nothing to change yet.
-      const failure = AppFailure.notFound(key: 'profile_not_found');
-      if (ref.mounted) {
-        ref.read(failureReporterProvider.notifier).report(failure);
-      }
-      return failure;
+      return session.fail(
+        const AppFailure.notFound(key: 'profile_not_found'),
+        action,
+      );
     }
     _confirmed ??= before;
-    final failure = await _write(userId, update);
-    if (!_isFor(userId)) return failure;
-    if (failure != null) {
-      ref.read(failureReporterProvider.notifier).report(failure);
-      return failure;
-    }
+    final failure = await _write(session, update);
+    if (!_applies(session, action)) return SessionGuard.dropped;
+    if (failure != null) return session.fail(failure, action);
     final shown = state.value;
-    if (shown != null) await _applyLocally(userId, shown);
+    if (shown != null) await _applyLocally(session, shown);
     return null;
   }
 
@@ -304,9 +356,12 @@ class ProfileNotifier extends UserScopedNotifier<UserProfile?> {
   /// Applies the theme on the device right away and saves it to the
   /// profile when signed in.
   Future<AppFailure?> setThemeMode(ThemePreference mode) async {
+    final session = guard();
     await ref.read(themePreferenceProvider.notifier).setLocal(mode);
+    if (session.userId == null) return null;
+    if (!session.holds('a theme change')) return SessionGuard.dropped;
     if (state.value == null) return null;
-    return updateProfile(ProfileUpdate(themeMode: mode));
+    return _update(session, ProfileUpdate(themeMode: mode));
   }
 
   /// Records the active group after the server changed it (no write).

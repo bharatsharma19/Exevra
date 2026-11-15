@@ -4,6 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/errors/app_failure.dart';
 import 'auth_provider.dart';
+import 'session_guard.dart';
+
+export 'session_guard.dart';
 
 /// Data that belongs to the signed-in user, loaded asynchronously.
 ///
@@ -46,6 +49,12 @@ abstract class UserScopedNotifier<T> extends Notifier<AsyncValue<T>> {
 
   /// Called after the data of [userId] was applied.
   void onLoaded(String userId, T value) {}
+
+  /// The session an action of this notifier starts in. Every async action
+  /// captures one first and checks [SessionGuard.holds] after each
+  /// `await`, before it changes the state, calls a follow-up RPC or
+  /// reports a failure (see [SessionGuard]).
+  SessionGuard guard() => SessionGuard.start(() => ref);
 
   @override
   AsyncValue<T> build() {

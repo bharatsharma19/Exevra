@@ -17,6 +17,7 @@ import 'package:expense_manager/providers/failure_reporter.dart';
 import 'package:expense_manager/providers/group_detail_providers.dart';
 import 'package:expense_manager/providers/groups_provider.dart';
 import 'package:expense_manager/providers/profile_provider.dart';
+import 'package:expense_manager/providers/session_guard.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show ProviderListenable;
 import 'package:flutter_test/flutter_test.dart';
@@ -157,7 +158,7 @@ void main() {
       ]);
 
       held.complete([groupOf('gA', adminId: 'A')]);
-      expect(await refreshing, isNull);
+      expect(await refreshing, SessionGuard.dropped);
       await settle();
 
       final state = container.read(groupsProvider).value!;

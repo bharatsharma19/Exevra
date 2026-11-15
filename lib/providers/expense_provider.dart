@@ -11,7 +11,7 @@ import '../models/group.dart';
 import '../models/json_reader.dart';
 import 'auth_provider.dart';
 import 'data_revision.dart';
-import 'failure_reporter.dart';
+import 'session_guard.dart';
 import 'groups_provider.dart';
 
 /// Which expenses the list shows within the active scope.
@@ -214,6 +214,10 @@ final expenseListRegistryProvider = Provider<ExpenseListRegistry>(
 /// * Writes show immediately, are replaced by the server's row on success
 ///   and rolled back on failure; the failure is returned and reported once.
 /// * Other lists, balances and insights reload through [dataRevisionProvider].
+/// * Every action captures the session it starts in (see [SessionGuard]);
+///   when that session ended meanwhile its result is dropped: no state
+///   change, no follow-up call (a convert's delete would run with the next
+///   user's token) and no report.
 class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
   ExpenseListNotifier(this.key);
 
@@ -235,6 +239,14 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
   int? _ownRevision;
 
   ExpenseRepository get _repo => ref.read(expenseRepositoryProvider);
+
+  /// The session an action of this list starts in.
+  SessionGuard _session() => SessionGuard.start(() => ref);
+
+  /// Whether the result of [action], started in [session], may still be
+  /// applied: the session holds and is the one of this list's user.
+  bool _holds(SessionGuard session, String action) =>
+      session.userId == key.userId && session.holds(action);
 
   @override
   Future<ExpenseListState> build() async {
@@ -289,6 +301,8 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
   /// Re-reads the list in place (as many rows as are loaded now), keeping
   /// the current rows visible. Returns the failure, or null.
   Future<AppFailure?> reload() async {
+    const action = 'an expense list reload';
+    final session = _session();
     final generation = ++_generation;
     final confirmed = _confirmed;
     final loaded = state.value?.items.where((e) => !e.isSyncing).length ?? 0;
@@ -299,7 +313,7 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
         query: key.query,
         limit: limit,
       );
-      if (!ref.mounted || generation != _generation) return null;
+      if (!_holds(session, action) || generation != _generation) return null;
       // A write was confirmed while this page was on its way, so the page
       // may not include it: read again.
       if (confirmed != _confirmed) return reload();
@@ -315,7 +329,7 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
       );
       return null;
     } on AppFailure catch (failure) {
-      if (!ref.mounted || generation != _generation) return null;
+      if (!_holds(session, action) || generation != _generation) return null;
       if (state.value == null) {
         state = AsyncError(failure, StackTrace.current);
       }
@@ -329,6 +343,8 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
     final current = state.value;
     final cursor = current?.next;
     if (current == null || cursor == null || current.isLoadingMore) return;
+    const action = 'an expense page';
+    final session = _session();
     final generation = _generation;
     final confirmed = _confirmed;
     state = AsyncData(
@@ -341,7 +357,7 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
         after: cursor,
         limit: pageSize,
       );
-      if (!ref.mounted) return;
+      if (!_holds(session, action)) return;
       final now = state.value;
       if (generation != _generation ||
           now == null ||
@@ -363,7 +379,7 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
       // The page may predate a write confirmed meanwhile.
       if (confirmed != _confirmed) unawaited(reload());
     } on AppFailure catch (failure) {
-      if (!ref.mounted) return;
+      if (!_holds(session, action)) return;
       final now = state.value;
       if (generation != _generation ||
           now == null ||
@@ -394,11 +410,15 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
   Future<AppFailure?> add(ExpenseDraft draft, {bool report = true}) async {
     final invalid = draft.validate();
     if (invalid != null) return AppFailure.validation(key: invalid);
+    const action = 'an expense add';
+    final session = _session();
+    if (!_holds(session, action)) return SessionGuard.dropped;
     final localId = '${Expense.localIdPrefix}${++_localIds}';
     final optimistic = draft.toOptimistic(localId: localId, userId: key.userId);
     _update((items) => _insertSorted(items, optimistic));
     try {
       final saved = await _repo.create(key.userId, draft);
+      if (!_holds(session, action)) return SessionGuard.dropped;
       _confirmed++;
       _update(
         (items) => _insertSorted(
@@ -410,11 +430,13 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
       AppHaptics.success();
       return null;
     } on AppFailure catch (failure) {
+      if (!_holds(session, action)) return SessionGuard.dropped;
       _update((items) => items.where((e) => e.id != localId).toList());
       // A create that failed in transit may still have been saved, and the
       // server assigns ids, so a blind retry could add the expense twice.
-      return _fail(
+      return session.fail(
         _inTransit(failure) ? _unconfirmed() : failure,
+        action,
         report: report,
       );
     }
@@ -436,6 +458,9 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
     if (edited.id.startsWith(Expense.localIdPrefix)) {
       return const AppFailure.business('expense_not_saved_yet');
     }
+    const action = 'an expense edit';
+    final session = _session();
+    if (!_holds(session, action)) return SessionGuard.dropped;
     final before = _find(edited.id);
     _update(
       (items) => _insertSorted(
@@ -445,6 +470,7 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
     );
     try {
       final saved = await _repo.update(edited);
+      if (!_holds(session, action)) return SessionGuard.dropped;
       _confirmed++;
       _update(
         (items) =>
@@ -454,12 +480,13 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
       AppHaptics.success();
       return null;
     } on AppFailure catch (failure) {
+      if (!_holds(session, action)) return SessionGuard.dropped;
       _update((items) {
         final rest = items.where((e) => e.id != edited.id).toList();
         return before == null ? rest : _insertSorted(rest, before);
       });
       _reloadIfInTransit(failure);
-      return _fail(failure, report: report);
+      return session.fail(failure, action, report: report);
     }
   }
 
@@ -469,16 +496,21 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
     if (expense.id.startsWith(Expense.localIdPrefix)) {
       return const AppFailure.business('expense_not_saved_yet');
     }
+    const action = 'an expense delete';
+    final session = _session();
+    if (!_holds(session, action)) return SessionGuard.dropped;
     final before = _find(expense.id) ?? expense;
     _deleted.add(expense.id);
     _update((items) => items.where((e) => e.id != expense.id).toList());
     try {
       await _repo.delete(expense.id);
+      if (!_holds(session, action)) return SessionGuard.dropped;
       _confirmed++;
       _changed();
       AppHaptics.medium();
       return null;
     } on AppFailure catch (failure) {
+      if (!_holds(session, action)) return SessionGuard.dropped;
       _deleted.remove(expense.id);
       _reloadIfInTransit(failure);
       _update(
@@ -487,7 +519,7 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
           before,
         ),
       );
-      return _fail(failure, report: report);
+      return session.fail(failure, action, report: report);
     }
   }
 
@@ -520,6 +552,9 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
     }
     final invalid = target.validate();
     if (invalid != null) return AppFailure.validation(key: invalid);
+    const action = 'an expense move';
+    final session = _session();
+    if (!_holds(session, action)) return SessionGuard.dropped;
     final before = _find(original.id) ?? original;
     final localId = '${Expense.localIdPrefix}${++_localIds}';
     final optimistic = target.toOptimistic(
@@ -535,8 +570,12 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
     Expense? created;
     try {
       created = await _repo.create(key.userId, target);
+      // The delete would run with the next user's token. The copy and the
+      // original then both stay; the user sees both after signing in.
+      if (!_holds(session, action)) return SessionGuard.dropped;
       _confirmed++;
       await _repo.delete(original.id);
+      if (!_holds(session, action)) return SessionGuard.dropped;
       _deleted.add(original.id);
       final saved = created;
       _update(
@@ -554,6 +593,7 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
       AppHaptics.success();
       return null;
     } on AppFailure catch (failure) {
+      if (!_holds(session, action)) return SessionGuard.dropped;
       final copy = created;
       final unsure = _inTransit(failure);
       // After a failure in transit the original may already be gone, so
@@ -562,9 +602,11 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
       if (copy != null && !unsure) {
         try {
           await _repo.delete(copy.id);
+          if (!_holds(session, action)) return SessionGuard.dropped;
           _deleted.add(copy.id);
           _confirmed++;
         } on AppFailure catch (undoFailure) {
+          if (!_holds(session, action)) return SessionGuard.dropped;
           // Both rows exist now; a reload shows them so nothing is hidden.
           AppLogger.warn('Could not remove the converted copy', undoFailure);
           _reloadAll();
@@ -576,7 +618,11 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
             .toList();
         return _insertSorted(rest, before);
       });
-      return _fail(unsure ? _unconfirmed() : failure, report: report);
+      return session.fail(
+        unsure ? _unconfirmed() : failure,
+        action,
+        report: report,
+      );
     }
   }
 
@@ -597,14 +643,6 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
   void _reloadAll() {
     if (!ref.mounted) return;
     ref.read(dataRevisionProvider.notifier).bump(DataKind.expenses);
-  }
-
-  AppFailure _fail(AppFailure failure, {bool report = true}) {
-    AppHaptics.error();
-    if (report && ref.mounted) {
-      ref.read(failureReporterProvider.notifier).report(failure);
-    }
-    return failure;
   }
 
   /// Tells other lists, balances and insights that expenses changed.
@@ -651,6 +689,10 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
   /// the [server] rows. A row this list did not show before ([known]) with
   /// the same content is taken to be it and is not shown twice; the answer
   /// then replaces the optimistic row by the server's id.
+  ///
+  /// Accepted limit: an identical row saved on another device meanwhile
+  /// is matched the same way and stays hidden until the next reload after
+  /// the add's answer (then both rows show, by their ids).
   List<Expense> _merge(
     List<Expense> server,
     Iterable<Expense> pending, {

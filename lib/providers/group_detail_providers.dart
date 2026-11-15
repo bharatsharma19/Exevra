@@ -17,21 +17,15 @@ import '../models/settlement.dart';
 import 'auth_provider.dart';
 import 'data_revision.dart';
 import 'expense_provider.dart';
-import 'failure_reporter.dart';
 import 'groups_provider.dart';
 import 'user_scoped.dart';
 
-/// Group data is only loaded for a signed-in user. Every provider here is
-/// a [UserScopedNotifier]: signed out it fails with "session expired", and
-/// when the user changes it starts over at loading, so no data of the
-/// previous user is shown.
-AppFailure _report(Ref ref, AppFailure failure, {bool report = true}) {
-  AppHaptics.error();
-  if (report && ref.mounted) {
-    ref.read(failureReporterProvider.notifier).report(failure);
-  }
-  return failure;
-}
+// Group data is only loaded for a signed-in user. Every provider here is
+// a [UserScopedNotifier]: signed out it fails with "session expired", and
+// when the user changes it starts over at loading, so no data of the
+// previous user is shown. Every write captures a [SessionGuard] and drops
+// its result (state, follow-up calls, failure reports) once that session
+// has ended.
 
 /// Members of a group as other members see them (no email or phone).
 /// Pending join requests are included only for the admin.
@@ -47,19 +41,22 @@ class GroupMembersNotifier extends UserScopedFuture<List<GroupMember>> {
   GroupRepository get _repo => ref.read(groupRepositoryProvider);
 
   Future<AppFailure?> _act(
-    Future<void> Function() action, {
+    Future<void> Function() run, {
     bool report = true,
   }) async {
+    const action = 'a member change';
+    final session = guard();
+    if (!session.holds(action)) return SessionGuard.dropped;
     try {
-      await action();
+      await run();
+      if (!session.holds(action)) return SessionGuard.dropped;
       AppHaptics.success();
-      if (!ref.mounted) return null;
       ref.read(dataRevisionProvider.notifier).bump(DataKind.members);
       // Roles and member counts on the group list change too.
       await ref.read(groupsProvider.notifier).refresh();
-      return null;
+      return session.holds(action) ? null : SessionGuard.dropped;
     } on AppFailure catch (failure) {
-      return _report(ref, failure, report: report);
+      return session.fail(failure, action, report: report);
     }
   }
 
@@ -224,8 +221,11 @@ class SettlementsNotifier extends UserScopedNotifier<SettlementHistory> {
 
   /// Loads the next page of older payments.
   Future<void> loadMore() async {
+    const action = 'a payment history page';
+    final session = guard();
     final current = state.value;
-    if (current == null ||
+    if (!session.holds(action) ||
+        current == null ||
         !current.hasMore ||
         current.isLoadingMore ||
         current.items.isEmpty ||
@@ -247,7 +247,7 @@ class SettlementsNotifier extends UserScopedNotifier<SettlementHistory> {
         after: cursor,
         limit: pageSize + 1,
       );
-      if (!ref.mounted) return;
+      if (!session.holds(action)) return;
       final now = state.value;
       if (now == null || !_continues(now, cursor, generation)) {
         _dropPage();
@@ -264,7 +264,7 @@ class SettlementsNotifier extends UserScopedNotifier<SettlementHistory> {
         ),
       );
     } on AppFailure catch (failure) {
-      if (!ref.mounted) return;
+      if (!session.holds(action)) return;
       final now = state.value;
       if (now == null || !_continues(now, cursor, generation)) {
         _dropPage();
@@ -296,19 +296,22 @@ class SettlementsNotifier extends UserScopedNotifier<SettlementHistory> {
   /// instead of inviting a retry that could record a payment twice.
   Future<AppFailure?> _write(
     String target,
-    Future<Settlement> Function() action, {
+    Future<Settlement> Function() run, {
     bool report = true,
   }) async {
+    const action = 'a payment write';
+    final session = guard();
+    if (!session.holds(action)) return SessionGuard.dropped;
     if (!_inFlight.add(target)) {
-      return _report(
-        ref,
+      return session.fail(
         const AppFailure.business('settlement_in_progress'),
+        action,
         report: report,
       );
     }
     try {
-      final saved = await action();
-      if (!ref.mounted) return null;
+      final saved = await run();
+      if (!session.holds(action)) return SessionGuard.dropped;
       final current = state.value ?? const SettlementHistory();
       state = AsyncData(
         SettlementHistory(
@@ -323,15 +326,14 @@ class SettlementsNotifier extends UserScopedNotifier<SettlementHistory> {
       AppHaptics.success();
       return null;
     } on AppFailure catch (failure) {
+      if (!session.holds(action)) return SessionGuard.dropped;
       if (!failure.outcomeUnknown) {
-        return _report(ref, failure, report: report);
+        return session.fail(failure, action, report: report);
       }
-      if (ref.mounted) {
-        ref.read(dataRevisionProvider.notifier).bump(DataKind.settlements);
-      }
-      return _report(
-        ref,
+      ref.read(dataRevisionProvider.notifier).bump(DataKind.settlements);
+      return session.fail(
         const AppFailure.network(key: 'settlement_unconfirmed'),
+        action,
         report: report,
       );
     } finally {
@@ -412,28 +414,37 @@ class PendingInvitationsNotifier
     GroupRole role = GroupRole.member,
     bool report = true,
   }) async {
+    const action = 'an invitation';
+    final session = guard();
+    if (!session.holds(action)) return (null, SessionGuard.dropped);
     try {
       final sent = await _repo.send(groupId: groupId, email: email, role: role);
+      if (!session.holds(action)) return (null, SessionGuard.dropped);
       AppHaptics.success();
-      if (ref.mounted) ref.invalidateSelf();
+      ref.invalidateSelf();
       return (sent, null);
     } on AppFailure catch (failure) {
-      return (null, _report(ref, failure, report: report));
+      return (null, session.fail(failure, action, report: report));
     }
   }
 
   Future<AppFailure?> revoke(String invitationId) async {
+    const action = 'an invitation revocation';
+    final session = guard();
+    if (!session.holds(action)) return SessionGuard.dropped;
     final before = state.value;
     if (before != null) {
       state = AsyncData(before.where((i) => i.id != invitationId).toList());
     }
     try {
       await _repo.revoke(invitationId);
+      if (!session.holds(action)) return SessionGuard.dropped;
       AppHaptics.medium();
       return null;
     } on AppFailure catch (failure) {
-      if (ref.mounted && before != null) state = AsyncData(before);
-      return _report(ref, failure);
+      if (!session.holds(action)) return SessionGuard.dropped;
+      if (before != null) state = AsyncData(before);
+      return session.fail(failure, action);
     }
   }
 }

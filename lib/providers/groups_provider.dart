@@ -10,7 +10,6 @@ import '../models/group.dart';
 import '../models/json_reader.dart';
 import '../models/profile.dart';
 import 'auth_provider.dart';
-import 'failure_reporter.dart';
 import 'profile_provider.dart';
 import 'user_scoped.dart';
 
@@ -63,7 +62,9 @@ enum GroupCreateStatus {
   /// The list was reloaded; the user checks it before trying again.
   unconfirmed,
 
-  /// The server refused it; nothing was created.
+  /// The server refused it; nothing was created. Also the result when the
+  /// user changed while it ran ([SessionGuard.dropped]): nothing is done
+  /// for or shown to the next user.
   failed,
 }
 
@@ -135,14 +136,15 @@ class GroupsNotifier extends UserScopedNotifier<GroupsState> {
     ref.invalidateSelf();
   }
 
-  /// Whether a result requested for [userId] may still be applied: the
-  /// notifier is reused across sign-ins, so after an await the signed-in
-  /// user (and the loaded state) may belong to someone else.
-  bool _isFor(String? userId) {
-    if (!ref.mounted || userId == null) return false;
-    if (ref.read(currentUserIdProvider) != userId) return false;
+  /// Whether the result of [action], started in [session], may be
+  /// applied: the notifier is reused across sign-ins, so after an await
+  /// the signed-in user (and the loaded state) may be someone else's.
+  bool _applies(SessionGuard session, String action) {
+    if (!session.holds(action)) return false;
     final owner = state.value?.userId;
-    return owner == null || owner == userId;
+    if (owner == null || owner == session.userId) return true;
+    AppLogger.debug('Dropped the result of $action: other groups are loaded');
+    return false;
   }
 
   /// The saved active group if it is still an approved membership.
@@ -152,33 +154,32 @@ class GroupsNotifier extends UserScopedNotifier<GroupsState> {
     return match.isEmpty ? null : saved;
   }
 
-  void _report(AppFailure failure, {bool report = true}) {
-    if (report && ref.mounted) {
-      ref.read(failureReporterProvider.notifier).report(failure);
-    }
-    AppHaptics.error();
-  }
-
   /// Re-reads the group list, keeping the active scope when still valid.
-  /// With [report] false a failure is only returned.
-  Future<AppFailure?> refresh({bool report = true}) async {
-    final userId = ref.read(currentUserIdProvider);
+  /// With [report] false a failure is only returned. When the user changed
+  /// meanwhile the result is dropped and [SessionGuard.dropped] returned.
+  Future<AppFailure?> refresh({bool report = true}) =>
+      _refresh(guard(), report: report);
+
+  Future<AppFailure?> _refresh(
+    SessionGuard session, {
+    bool report = true,
+  }) async {
+    const action = 'a groups refresh';
+    if (!session.holds(action)) return SessionGuard.dropped;
     try {
       final groups = await _repo.fetchMyGroups();
-      if (!_isFor(userId)) return null;
+      if (!_applies(session, action)) return SessionGuard.dropped;
       final active = state.value?.activeGroupId;
       state = AsyncData(
         GroupsState(
           groups: groups,
           activeGroupId: _resolve(groups, active),
-          userId: userId,
+          userId: session.userId,
         ),
       );
       return null;
     } on AppFailure catch (failure) {
-      if (!_isFor(userId)) return null;
-      _report(failure, report: report);
-      return failure;
+      return session.fail(failure, action, report: report);
     }
   }
 
@@ -186,36 +187,56 @@ class GroupsNotifier extends UserScopedNotifier<GroupsState> {
   /// switch. Writes are sent in order, and when the latest switch fails
   /// the scope the server holds is shown again. With [report] false a
   /// failure is only returned.
-  Future<AppFailure?> switchScope(String? groupId, {bool report = true}) async {
+  Future<AppFailure?> switchScope(String? groupId, {bool report = true}) =>
+      _switchScope(guard(), groupId, report: report);
+
+  Future<AppFailure?> _switchScope(
+    SessionGuard session,
+    String? groupId, {
+    bool report = true,
+  }) async {
+    const action = 'a scope switch';
     final current = state.value;
-    final userId = current?.userId;
-    if (current == null || userId == null) return null;
+    if (current == null || current.userId == null) return null;
+    if (current.userId != session.userId || !_applies(session, action)) {
+      return SessionGuard.dropped;
+    }
     if (current.activeGroupId == groupId) return null;
     AppHaptics.selection();
     final number = ++_scopeSwitches;
     state = AsyncData(current.copyWith(activeGroupId: groupId));
-    final write = _scopeWrites.then((_) => _repo.setActiveGroup(groupId));
+    final write = _scopeWrites.then((_) {
+      // Queued behind an earlier write: when the session ended meanwhile
+      // the call would run as the next user.
+      if (!session.holds(action)) throw SessionGuard.dropped;
+      return _repo.setActiveGroup(groupId);
+    });
     _scopeWrites = write.then<void>((_) {}, onError: (Object _) {});
     try {
       await write;
-      if (!_isFor(userId)) return null;
+      if (!_applies(session, action)) return SessionGuard.dropped;
       _serverScope = groupId;
       if (number == _scopeSwitches) {
         ref.read(profileProvider.notifier).setActiveGroupLocally(groupId);
       }
       return null;
     } on AppFailure catch (failure) {
-      if (!_isFor(userId)) return null;
+      if (!_applies(session, action)) return SessionGuard.dropped;
       // A later switch decides the scope (and reports its own failure).
       if (number != _scopeSwitches) return failure;
       final now = state.value ?? current;
       final restored = _resolve(now.groups, _serverScope);
       state = AsyncData(now.copyWith(activeGroupId: restored));
       ref.read(profileProvider.notifier).setActiveGroupLocally(restored);
-      _report(failure, report: report);
-      return failure;
+      return session.fail(failure, action, report: report);
     }
   }
+
+  /// What a group creation returns when the user changed while it ran.
+  static const GroupCreateResult _droppedCreate = GroupCreateResult(
+    GroupCreateStatus.failed,
+    failure: SessionGuard.dropped,
+  );
 
   /// Creates a group and makes it active. With [report] false failures
   /// are only returned (for a form that shows them itself).
@@ -225,31 +246,43 @@ class GroupsNotifier extends UserScopedNotifier<GroupsState> {
   /// retry would make a second group). A request that failed on the way
   /// may also have created it: the list is reloaded and the result says
   /// so instead of inviting a retry.
+  ///
+  /// When the user changed while it ran nothing more is done for them (no
+  /// reload, no `set_active_group`, no report) and the result is
+  /// [GroupCreateStatus.failed] with [SessionGuard.dropped].
   Future<GroupCreateResult> createGroup(
     String name, {
     required String currency,
     bool report = true,
   }) async {
+    const action = 'a group creation';
+    final session = guard();
+    if (!session.holds(action)) return _droppedCreate;
     final String id;
     try {
       id = await _repo.createGroup(name: name, currency: currency);
     } on AppFailure catch (failure) {
+      if (!session.holds(action)) return _droppedCreate;
       if (failure.outcomeUnknown) {
-        await refresh(report: false);
+        await _refresh(session, report: false);
+        if (!session.holds(action)) return _droppedCreate;
         const unconfirmed = AppFailure.network(key: 'group_unconfirmed');
-        _report(unconfirmed, report: report);
+        session.fail(unconfirmed, action, report: report);
         return const GroupCreateResult(
           GroupCreateStatus.unconfirmed,
           failure: unconfirmed,
         );
       }
-      _report(failure, report: report);
+      session.fail(failure, action, report: report);
       return GroupCreateResult(GroupCreateStatus.failed, failure: failure);
     }
+    if (!session.holds(action)) return _droppedCreate;
     // Opening needs the group in the list; without it the scope would
     // point at a group this device cannot show.
     final problem =
-        await refresh(report: report) ?? await switchScope(id, report: report);
+        await _refresh(session, report: report) ??
+        await _switchScope(session, id, report: report);
+    if (!session.holds(action)) return _droppedCreate;
     if (problem != null) {
       return GroupCreateResult(
         GroupCreateStatus.createdNotOpened,
@@ -266,42 +299,53 @@ class GroupsNotifier extends UserScopedNotifier<GroupsState> {
     String code, {
     bool report = true,
   }) async {
+    const action = 'a join request';
+    final session = guard();
+    if (!session.holds(action)) return (null, SessionGuard.dropped);
     try {
       final request = await _repo.joinByCode(code);
-      await refresh();
+      if (!session.holds(action)) return (null, SessionGuard.dropped);
+      await _refresh(session);
+      if (!session.holds(action)) return (null, SessionGuard.dropped);
       AppHaptics.success();
       return (request, null);
     } on AppFailure catch (failure) {
-      _report(failure, report: report);
-      return (null, failure);
+      return (null, session.fail(failure, action, report: report));
     }
   }
 
   /// Issues a new invite code for [groupId] (admin only); the old code
   /// stops working.
   Future<(InviteCode?, AppFailure?)> rotateInviteCode(String groupId) async {
+    const action = 'an invite code rotation';
+    final session = guard();
+    if (!session.holds(action)) return (null, SessionGuard.dropped);
     try {
       final code = await _repo.rotateInviteCode(groupId);
-      await refresh();
+      if (!session.holds(action)) return (null, SessionGuard.dropped);
+      await _refresh(session);
+      if (!session.holds(action)) return (null, SessionGuard.dropped);
       AppHaptics.success();
       return (code, null);
     } on AppFailure catch (failure) {
-      _report(failure);
-      return (null, failure);
+      return (null, session.fail(failure, action));
     }
   }
 
   /// Accepts an email invitation; the server makes that group active.
   Future<AppFailure?> acceptInvitation(String token) async {
-    final userId = ref.read(currentUserIdProvider);
+    const action = 'an invitation acceptance';
+    final session = guard();
+    if (!session.holds(action)) return SessionGuard.dropped;
     try {
       final groupId = await ref
           .read(invitationRepositoryProvider)
           .accept(token);
-      await refresh();
-      if (!_isFor(userId)) return null;
+      if (!session.holds(action)) return SessionGuard.dropped;
+      await _refresh(session);
+      if (!_applies(session, action)) return SessionGuard.dropped;
       _serverScope = groupId;
-      final current = state.value ?? GroupsState(userId: userId);
+      final current = state.value ?? GroupsState(userId: session.userId);
       state = AsyncData(
         current.copyWith(activeGroupId: _resolve(current.groups, groupId)),
       );
@@ -309,9 +353,7 @@ class GroupsNotifier extends UserScopedNotifier<GroupsState> {
       AppHaptics.success();
       return null;
     } on AppFailure catch (failure) {
-      if (!_isFor(userId)) return null;
-      _report(failure);
-      return failure;
+      return session.fail(failure, action);
     }
   }
 
@@ -330,31 +372,33 @@ class GroupsNotifier extends UserScopedNotifier<GroupsState> {
     String groupId,
     Future<Object?> Function() action,
   ) async {
-    final userId = ref.read(currentUserIdProvider);
+    const what = 'a group removal';
+    final session = guard();
+    if (!session.holds(what)) return SessionGuard.dropped;
     try {
       await action();
     } on AppFailure catch (failure) {
-      if (!_isFor(userId)) return null;
-      _report(failure);
-      return failure;
+      return session.fail(failure, what);
     }
+    if (!session.holds(what)) return SessionGuard.dropped;
     AppHaptics.medium();
     try {
-      await _reloadFromServer();
+      await _reloadFromServer(session);
     } on AppFailure catch (failure) {
+      if (!session.holds(what)) return SessionGuard.dropped;
       AppLogger.warn(
         'Groups did not reload after a membership change',
         failure,
       );
-      _dropLocally(groupId, userId);
+      _dropLocally(groupId, session);
     }
-    return null;
+    return session.holds(what) ? null : SessionGuard.dropped;
   }
 
   /// Removes [groupId] from the loaded state; personal mode when it was
   /// the active group.
-  void _dropLocally(String groupId, String? userId) {
-    if (!_isFor(userId)) return;
+  void _dropLocally(String groupId, SessionGuard session) {
+    if (!_applies(session, 'a local group removal')) return;
     final current = state.value;
     if (current == null) return;
     if (_serverScope == groupId) _serverScope = null;
@@ -372,14 +416,15 @@ class GroupsNotifier extends UserScopedNotifier<GroupsState> {
 
   /// Re-reads groups and the server's active group after a membership
   /// change made on the server.
-  Future<void> _reloadFromServer() async {
-    final userId = ref.read(currentUserIdProvider);
-    if (userId == null) return;
+  Future<void> _reloadFromServer(SessionGuard session) async {
+    const action = 'a groups reload';
+    final userId = session.userId;
+    if (userId == null || !session.holds(action)) return;
     final results = await Future.wait<Object?>([
       _repo.fetchMyGroups(),
       ref.read(profileRepositoryProvider).fetch(userId),
     ]);
-    if (!_isFor(userId)) return;
+    if (!_applies(session, action)) return;
     final groups = results[0]! as List<Group>;
     final saved = (results[1] as UserProfile?)?.activeGroupId;
     _serverScope = saved;
