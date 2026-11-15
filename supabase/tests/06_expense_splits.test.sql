@@ -167,7 +167,7 @@ $$;
 
 grant execute on all functions in schema tests to anon, authenticated;
 
-select plan(42);
+select plan(57);
 
 -- ---------------------------------------------------------------------------
 -- split_equal_shares
@@ -312,6 +312,59 @@ select is((select count(*) from public.expense_splits where expense_id = tests.e
           'a deleted account''s share is kept without a user');
 select is((select sum(share_minor) from public.expense_splits where expense_id = tests.eid('Taxi')), 1000::numeric,
           'shares still add up after an account is deleted');
+
+-- ---------------------------------------------------------------------------
+-- Amount and payer edits re-split among the participants frozen at creation
+-- ---------------------------------------------------------------------------
+select tests.create_user('late');
+select tests.create_group_as('alice', 'Cabin', 'INR');
+select tests.add_member(tests.gid('Cabin'), 'bob', 'member');
+select tests.add_member(tests.gid('Cabin'), 'carol', 'member');
+select tests.add_expense('bob', 'Cabin', 'Firewood', 900);
+select tests.remove_member(tests.gid('Cabin'), 'carol');
+select tests.add_member(tests.gid('Cabin'), 'late', 'member');
+select tests.add_expense('alice', 'Cabin', 'Groceries after', 600);
+select tests.authenticate_as('bob');
+select lives_ok($$ update public.expenses set amount_minor = 1000 where id = tests.eid('Firewood') $$,
+                'the payer edits the amount after one member left and another joined');
+reset role;
+select is((select array_agg(user_id order by user_id) from public.expense_splits where expense_id = tests.eid('Firewood')),
+          (select array_agg(id order by id) from tests.users where name in ('alice', 'bob', 'carol')),
+          'an amount edit keeps exactly the participants frozen at creation');
+select is(tests.share('Firewood', 'carol'), 333::bigint, 'a member who left is re-split with the original participants');
+select is(tests.share('Firewood', 'bob'), 334::bigint, 'the payer still takes the leftover unit');
+select is(tests.share('Firewood', 'late'), null::bigint, 'a member who joined later is never added by an edit');
+select tests.authenticate_as('alice');
+select lives_ok($$ update public.expenses set amount_minor = 601 where id = tests.eid('Groceries after') $$,
+                'an expense added after a member left is edited');
+reset role;
+select is((select count(*) from public.expense_splits where expense_id = tests.eid('Groceries after') and user_id = tests.uid('carol')),
+          0::bigint, 'a member who left before the expense is never added by an edit');
+select is((select sum(share_minor) from public.expense_splits where expense_id = tests.eid('Groceries after')), 601::numeric,
+          'the edited amount is fully split');
+
+-- A new payer (privileged writers only): same participants, the leftover unit follows the payer.
+update public.expenses set user_id = tests.uid('alice') where id = tests.eid('Firewood');
+select is((select array_agg(user_id order by user_id) from public.expense_splits where expense_id = tests.eid('Firewood')),
+          (select array_agg(id order by id) from tests.users where name in ('alice', 'bob', 'carol')),
+          'a payer change keeps the same participants');
+select is(tests.share('Firewood', 'alice'), 334::bigint, 'the new payer takes the leftover unit');
+select is(tests.share('Firewood', 'bob'), 333::bigint, 'the previous payer no longer does');
+
+-- An expense without split rows (possible only for legacy data) never draws in the current members.
+delete from public.expense_splits where expense_id = tests.eid('Groceries after');
+update public.expenses set amount_minor = 700 where id = tests.eid('Groceries after');
+select is((select array_agg(user_id::text || ':' || share_minor) from public.expense_splits where expense_id = tests.eid('Groceries after')),
+          array[tests.uid('alice')::text || ':700'], 'an expense without split rows is charged to its payer, not to current members');
+select is((select sum(net_minor) from public.group_balance_rows(tests.gid('Cabin'))), 0::numeric,
+          'balances still sum to zero after the edits');
+
+-- A group expense never becomes personal, nor the other way round.
+select throws_ok(format($$ update public.expenses set group_id = null where id = %L $$, tests.eid('Firewood')),
+                 '22023', 'expense_group_immutable', 'a group expense cannot become personal');
+select tests.add_expense('alice', null, 'Solo', 100);
+select throws_ok(format($$ update public.expenses set group_id = %L where id = %L $$, tests.gid('Cabin'), tests.eid('Solo')),
+                 '22023', 'expense_group_immutable', 'a personal expense cannot become a group expense');
 
 -- A currency without minor units.
 select tests.create_group_as('alice', 'Tokyo', 'JPY');

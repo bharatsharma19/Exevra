@@ -5,15 +5,24 @@
 -- written only by a trigger:
 --   * on INSERT of a group expense: an equal split among the group's members at that moment who are
 --     approved and have role admin or member (viewers and pending members are excluded);
---   * on UPDATE of amount_minor: the new amount is split again among the SAME participants.
+--   * on UPDATE of amount_minor, or of the payer (user_id, to a non-NULL value): the amount is split
+--     again among the SAME participants, i.e. exactly the users who already have split rows for the
+--     expense (frozen at creation, including members who have left since and former members whose
+--     user_id is NULL), with the same payer-first remainder rule. Current group membership is never
+--     consulted again: members who joined later are never added and nobody is removed. An expense
+--     without any split row (possible only for legacy data) is charged to its payer alone, so its
+--     balances still sum to zero.
 -- Later joins, leaves and role changes never rewrite existing splits. When a participant's account
--- is deleted their user_id becomes NULL (shown as "Former member").
+-- is deleted their user_id becomes NULL (shown as "Former member"); that change does not re-split.
+-- Deleting an expense deletes its splits (ON DELETE CASCADE). group_id never changes after insert
+-- (expenses_before_write), so an expense is never converted between personal and group.
 --
 -- public.split_equal_shares(total, member_ids, payer) is the single, pure implementation of the
 -- equal split. Shares always sum exactly to the total; leftover minor units are assigned by the
 -- clearly delimited deterministic rule below.
 --
--- Legacy group expenses are back-filled using the group's current approved admins and members.
+-- Legacy group expenses are back-filled using the group's current approved admins and members (the
+-- payer alone when the group has none).
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.expense_splits (
@@ -119,18 +128,21 @@ BEGIN
     END IF;
 
     IF TG_OP = 'UPDATE' THEN
-        IF NEW.amount_minor = OLD.amount_minor THEN
+        IF NEW.amount_minor = OLD.amount_minor
+           AND (NEW.user_id IS NOT DISTINCT FROM OLD.user_id OR NEW.user_id IS NULL) THEN
             RETURN NULL;
         END IF;
-        -- Same participants as before; only the amounts change.
+        -- Exactly the participants frozen at creation; current membership is never consulted.
         SELECT pg_catalog.array_agg(s.user_id ORDER BY s.slot)
         INTO v_participants
         FROM public.expense_splits AS s
         WHERE s.expense_id = NEW.id;
         DELETE FROM public.expense_splits AS s WHERE s.expense_id = NEW.id;
-    END IF;
-
-    IF v_participants IS NULL THEN
+        IF v_participants IS NULL THEN
+            -- No split rows (legacy data only): the payer carries the whole amount.
+            v_participants := ARRAY[NEW.user_id];
+        END IF;
+    ELSE
         v_participants := public.group_split_member_ids(NEW.group_id);
     END IF;
 
@@ -153,9 +165,11 @@ CREATE TRIGGER trigger_expense_splits_insert
 
 DROP TRIGGER IF EXISTS trigger_expense_splits_amount ON public.expenses;
 CREATE TRIGGER trigger_expense_splits_amount
-    AFTER UPDATE OF amount_minor ON public.expenses
+    AFTER UPDATE OF amount_minor, user_id ON public.expenses
     FOR EACH ROW
-    WHEN (NEW.group_id IS NOT NULL AND NEW.amount_minor IS DISTINCT FROM OLD.amount_minor)
+    WHEN (NEW.group_id IS NOT NULL
+          AND (NEW.amount_minor IS DISTINCT FROM OLD.amount_minor
+               OR (NEW.user_id IS NOT NULL AND NEW.user_id IS DISTINCT FROM OLD.user_id)))
     EXECUTE FUNCTION public.expense_splits_sync();
 
 -- -----------------------------------------------------------------------------
@@ -164,11 +178,10 @@ CREATE TRIGGER trigger_expense_splits_amount
 INSERT INTO public.expense_splits (expense_id, slot, group_id, user_id, share_minor)
 SELECT e.id, s.ord::smallint, e.group_id, s.user_id, s.share_minor
 FROM public.expenses AS e
-CROSS JOIN LATERAL (SELECT public.group_split_member_ids(e.group_id) AS ids) AS m
+CROSS JOIN LATERAL (SELECT COALESCE(public.group_split_member_ids(e.group_id), ARRAY[e.user_id]) AS ids) AS m
 CROSS JOIN LATERAL public.split_equal_shares(e.amount_minor, m.ids, e.user_id)
      WITH ORDINALITY AS s (user_id, share_minor, ord)
 WHERE e.group_id IS NOT NULL
-  AND m.ids IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM public.expense_splits AS x WHERE x.expense_id = e.id);
 
 -- -----------------------------------------------------------------------------
