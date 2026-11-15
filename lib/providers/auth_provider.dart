@@ -1,525 +1,245 @@
 import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_riverpod/legacy.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
-import '../models/user_profile.dart';
-import '../services/auth_service.dart';
-import '../services/supabase_service.dart';
-import '../core/config/demo_mode.dart';
-import '../core/constants/app_constants.dart';
-import '../core/utils/haptics.dart';
+
+import '../core/errors/app_failure.dart';
+import '../core/errors/failure_messages.dart';
 import '../core/logging/app_logger.dart';
+import '../core/storage/preferences.dart';
+import '../core/utils/haptics.dart';
+import '../data/repositories/account_repository.dart';
+import '../models/json_reader.dart';
+import '../services/auth_service.dart';
 
-enum AuthStatus { initial, loading, authenticated, unauthenticated, error }
+enum AuthStatus { initial, authenticated, unauthenticated }
 
+/// Who is signed in. Profile data lives in `profileProvider`.
 class AppAuthState {
-  final AuthStatus status;
-  final supabase.User? user;
-  final UserProfile? profile;
-  final String? errorMessage;
-  final bool isLoading;
-  final String themeMode;
-
   const AppAuthState({
     this.status = AuthStatus.initial,
     this.user,
-    this.profile,
-    this.errorMessage,
+    this.failure,
     this.isLoading = false,
-    this.themeMode = 'system',
   });
+
+  final AuthStatus status;
+  final supabase.User? user;
+
+  /// The last action's failure, shown inline on the auth screens.
+  final AppFailure? failure;
+  final bool isLoading;
+
+  /// Friendly copy for [failure]; never a raw exception string.
+  String? get errorMessage =>
+      failure == null ? null : friendlyMessage(failure!);
 
   bool get isAuthenticated =>
       status == AuthStatus.authenticated && user != null;
 
   bool get isEmailVerified {
-    if (user == null) return false;
-    return user!.emailConfirmedAt != null && user!.emailConfirmedAt!.isNotEmpty;
+    final confirmed = user?.emailConfirmedAt;
+    return confirmed != null && confirmed.isNotEmpty;
   }
 
   AppAuthState copyWith({
     AuthStatus? status,
-    supabase.User? user,
-    UserProfile? profile,
-    Object? errorMessage = const Object(),
+    Object? user = unset,
+    Object? failure = unset,
     bool? isLoading,
-    String? themeMode,
   }) {
     return AppAuthState(
       status: status ?? this.status,
-      user: user ?? this.user,
-      profile: profile ?? this.profile,
-      errorMessage: errorMessage == const Object()
-          ? this.errorMessage
-          : errorMessage as String?,
+      user: pick<supabase.User?>(user, this.user),
+      failure: pick<AppFailure?>(failure, this.failure),
       isLoading: isLoading ?? this.isLoading,
-      themeMode: themeMode ?? this.themeMode,
     );
-  }
-}
-
-class AuthNotifier extends StateNotifier<AppAuthState> {
-  final AuthService _authService;
-  final SupabaseService _supabaseService;
-  StreamSubscription<supabase.AuthState>? _authSub;
-
-  AuthNotifier(this._authService, this._supabaseService)
-    : super(const AppAuthState()) {
-    unawaited(_init());
-  }
-
-  Future<void> _init() async {
-    state = state.copyWith(isLoading: true);
-
-    String cachedCurrency = AppConstants.defaultCurrency;
-    String cachedTheme = 'system';
-    bool cachedHaptics = true;
-    bool cachedAiConsent = false;
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      cachedCurrency =
-          prefs.getString(AppConstants.keyCurrency) ??
-          AppConstants.defaultCurrency;
-      cachedTheme = prefs.getString(AppConstants.keyThemeMode) ?? 'system';
-      cachedHaptics = prefs.getBool(AppConstants.keyHapticsEnabled) ?? true;
-      cachedAiConsent = prefs.getBool(AppConstants.keyAiConsent) ?? false;
-    } catch (e) {
-      AppLogger.warn('AuthNotifier: Failed to load preferences', e);
-    }
-
-    AppHaptics.isEnabled = cachedHaptics;
-
-    final currentUser = _authService.currentUser;
-    if (currentUser != null) {
-      final profile = await _supabaseService.fetchProfile(currentUser.id);
-      state = state.copyWith(
-        status: AuthStatus.authenticated,
-        user: currentUser,
-        themeMode: cachedTheme,
-        profile: profile?.copyWith(
-          currency: cachedCurrency,
-          themeMode: cachedTheme,
-          hapticsEnabled: cachedHaptics,
-          aiConsent: cachedAiConsent,
-        ),
-        isLoading: false,
-      );
-    } else {
-      state = state.copyWith(
-        status: AuthStatus.unauthenticated,
-        themeMode: cachedTheme,
-        isLoading: false,
-      );
-    }
-
-    _authSub = _authService.authStateChanges.listen((data) async {
-      final user = data.session?.user;
-      final event = data.event;
-
-      if (event == supabase.AuthChangeEvent.signedOut) {
-        state = state.copyWith(
-          status: AuthStatus.unauthenticated,
-          user: null,
-          profile: null,
-          isLoading: false,
-        );
-      } else if (user != null) {
-        if (state.user?.id != user.id || state.profile == null) {
-          final profile = await _supabaseService.fetchProfile(user.id);
-          state = state.copyWith(
-            status: AuthStatus.authenticated,
-            user: user,
-            profile: profile,
-            isLoading: false,
-          );
-        } else {
-          state = state.copyWith(
-            status: AuthStatus.authenticated,
-            user: user,
-            isLoading: false,
-          );
-        }
-      } else if (event == supabase.AuthChangeEvent.initialSession) {
-        state = state.copyWith(
-          status: AuthStatus.unauthenticated,
-          user: null,
-          profile: null,
-          isLoading: false,
-        );
-      }
-    });
-  }
-
-  // ---------------------------------------------------------------------------
-  // AUTH ACTIONS
-  // ---------------------------------------------------------------------------
-
-  Future<void> signInWithEmail(String email, String password) async {
-    try {
-      state = state.copyWith(isLoading: true, errorMessage: null);
-      AppHaptics.light();
-      final res = await _authService.signInWithEmail(
-        email: email,
-        password: password,
-      );
-      final user = res.user;
-      if (user != null) {
-        final profile = await _supabaseService.fetchProfile(user.id);
-        state = state.copyWith(
-          status: AuthStatus.authenticated,
-          user: user,
-          profile: profile,
-          isLoading: false,
-        );
-        AppHaptics.success();
-      }
-    } catch (e) {
-      if (DemoBackend.active) {
-        _signInOfflineDemo(email);
-        return;
-      }
-      state = state.copyWith(
-        status: AuthStatus.unauthenticated,
-        errorMessage: e
-            .toString()
-            .replaceAll('Exception:', '')
-            .replaceAll('AuthException:', '')
-            .trim(),
-        isLoading: false,
-      );
-      AppHaptics.error();
-    }
-  }
-
-  Future<void> signUpWithEmail(
-    String email,
-    String password,
-    String displayName,
-  ) async {
-    try {
-      state = state.copyWith(isLoading: true, errorMessage: null);
-      AppHaptics.light();
-      final res = await _authService.signUpWithEmail(
-        email: email,
-        password: password,
-        displayName: displayName,
-      );
-      final user = res.user;
-      if (user != null) {
-        final profile = await _supabaseService.fetchProfile(user.id);
-        final effectiveName = displayName.trim().isNotEmpty
-            ? displayName.trim()
-            : email.split('@').first;
-        state = state.copyWith(
-          status: AuthStatus.authenticated,
-          user: user,
-          profile:
-              (profile ??
-                      UserProfile(
-                        id: user.id,
-                        displayName: effectiveName,
-                        email: email.trim(),
-                        createdAt: DateTime.now(),
-                        updatedAt: DateTime.now(),
-                      ))
-                  .copyWith(displayName: effectiveName),
-          isLoading: false,
-        );
-        AppHaptics.success();
-      }
-    } catch (e) {
-      if (DemoBackend.active) {
-        _signInOfflineDemo(email, displayName: displayName, isVerified: false);
-        return;
-      }
-      state = state.copyWith(
-        status: AuthStatus.unauthenticated,
-        errorMessage: e
-            .toString()
-            .replaceAll('Exception:', '')
-            .replaceAll('AuthException:', '')
-            .trim(),
-        isLoading: false,
-      );
-      AppHaptics.error();
-    }
-  }
-
-  Future<void> signInWithGoogle() async {
-    try {
-      state = state.copyWith(isLoading: true, errorMessage: null);
-      AppHaptics.light();
-      final res = await _authService.signInWithGoogle();
-      if (res == null) {
-        // The user closed the Google account picker: nothing to report.
-        state = state.copyWith(isLoading: false);
-        return;
-      }
-      final user = res.user;
-      if (user != null) {
-        final profile = await _supabaseService.fetchProfile(user.id);
-        state = state.copyWith(
-          status: AuthStatus.authenticated,
-          user: user,
-          profile: profile,
-          isLoading: false,
-        );
-        AppHaptics.success();
-      }
-    } on GoogleSignInUnavailableException catch (e) {
-      state = state.copyWith(isLoading: false, errorMessage: e.toString());
-      AppHaptics.error();
-    } catch (e) {
-      AppLogger.warn('AuthNotifier: Google sign-in error', e);
-      if (DemoBackend.active) {
-        _signInOfflineDemo(
-          'google.user@demo.invalid',
-          displayName: 'Google User',
-        );
-        return;
-      }
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage:
-            'Google Sign-In failed: ${e.toString().replaceAll('Exception:', '').trim()}',
-      );
-      AppHaptics.error();
-    }
-  }
-
-  Future<void> signInWithApple() async {
-    try {
-      state = state.copyWith(isLoading: true, errorMessage: null);
-      AppHaptics.light();
-      final res = await _authService.signInWithApple();
-      final user = res.user;
-      if (user != null) {
-        final profile = await _supabaseService.fetchProfile(user.id);
-        state = state.copyWith(
-          status: AuthStatus.authenticated,
-          user: user,
-          profile: profile,
-          isLoading: false,
-        );
-        AppHaptics.success();
-      }
-    } catch (e) {
-      AppLogger.warn('AuthNotifier: Apple sign-in error', e);
-      if (DemoBackend.active) {
-        _signInOfflineDemo(
-          'apple.user@demo.invalid',
-          displayName: 'Apple User',
-        );
-        return;
-      }
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage:
-            'Apple Sign-In failed: ${e.toString().replaceAll('Exception:', '').trim()}',
-      );
-      AppHaptics.error();
-    }
-  }
-
-  Future<void> sendPasswordReset(String email) async {
-    try {
-      state = state.copyWith(isLoading: true, errorMessage: null);
-      AppHaptics.light();
-      await _authService.sendPasswordResetEmail(email);
-      state = state.copyWith(isLoading: false);
-      AppHaptics.success();
-    } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage: e.toString().replaceAll('Exception:', '').trim(),
-      );
-      AppHaptics.error();
-    }
-  }
-
-  Future<void> updatePassword(String newPassword) async {
-    try {
-      state = state.copyWith(isLoading: true, errorMessage: null);
-      AppHaptics.light();
-      await _authService.updatePassword(newPassword);
-      state = state.copyWith(isLoading: false);
-      AppHaptics.success();
-    } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage: e.toString().replaceAll('Exception:', '').trim(),
-      );
-      AppHaptics.error();
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // PROFILE & PREFERENCE MUTATIONS
-  // ---------------------------------------------------------------------------
-
-  Future<void> updateProfile(UserProfile updated) async {
-    state = state.copyWith(profile: updated);
-    await _supabaseService.updateProfile(updated);
-  }
-
-  Future<void> setActiveGroupId(String? groupId) async {
-    if (state.profile != null) {
-      final updated = state.profile!.copyWith(groupId: groupId);
-      state = state.copyWith(profile: updated);
-      await _supabaseService.switchActiveGroup(groupId);
-    }
-  }
-
-  Future<void> refreshProfile() async {
-    final uid = state.user?.id;
-    if (uid != null) {
-      final p = await _supabaseService.fetchProfile(uid);
-      if (p != null) {
-        state = state.copyWith(profile: p);
-      }
-    }
-  }
-
-  Future<void> setThemeMode(String mode) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(AppConstants.keyThemeMode, mode);
-    state = state.copyWith(themeMode: mode);
-    if (state.profile != null) {
-      final updated = state.profile!.copyWith(themeMode: mode);
-      await updateProfile(updated);
-    }
-  }
-
-  Future<void> setCurrency(String currency) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(AppConstants.keyCurrency, currency);
-    if (state.profile != null) {
-      final updated = state.profile!.copyWith(currency: currency);
-      await updateProfile(updated);
-    }
-  }
-
-  Future<void> setHapticsEnabled(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(AppConstants.keyHapticsEnabled, enabled);
-    AppHaptics.isEnabled = enabled;
-    if (state.profile != null) {
-      final updated = state.profile!.copyWith(hapticsEnabled: enabled);
-      await updateProfile(updated);
-    }
-  }
-
-  Future<void> setAiConsent(bool consent) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(AppConstants.keyAiConsent, consent);
-    if (state.profile != null) {
-      final updated = state.profile!.copyWith(aiConsent: consent);
-      await updateProfile(updated);
-    }
-  }
-
-  Future<void> deleteAccount() async {
-    state = state.copyWith(isLoading: true);
-    await _supabaseService.deleteUserAccount();
-    state = const AppAuthState(status: AuthStatus.unauthenticated);
-  }
-
-  Future<void> signOut() async {
-    state = state.copyWith(isLoading: true);
-    await _authService.signOut();
-    state = const AppAuthState(status: AuthStatus.unauthenticated);
-  }
-
-  Future<void> resendVerificationEmail() async {
-    final email = state.user?.email;
-    if (email == null || email.isEmpty) return;
-
-    try {
-      state = state.copyWith(isLoading: true, errorMessage: null);
-      AppHaptics.light();
-      await _authService.resendVerificationEmail(email);
-      state = state.copyWith(isLoading: false);
-      AppHaptics.success();
-    } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage: e.toString().replaceAll('Exception:', '').trim(),
-      );
-      AppHaptics.error();
-    }
-  }
-
-  Future<bool> refreshEmailVerificationStatus() async {
-    state = state.copyWith(isLoading: true, errorMessage: null);
-    try {
-      final res = await _authService.refreshSession();
-      final refreshedUser = res.user ?? _authService.currentUser;
-      if (refreshedUser != null) {
-        state = state.copyWith(user: refreshedUser, isLoading: false);
-        if (state.isEmailVerified) {
-          AppHaptics.success();
-          return true;
-        }
-      }
-    } catch (e) {
-      AppLogger.warn('AuthNotifier: refreshSession fallback', e);
-      // Offline demo only: treat an explicit refresh as verification.
-      if (DemoBackend.active && state.user != null) {
-        final verifiedUser = DemoSession.markVerified(state.user!);
-        state = state.copyWith(user: verifiedUser, isLoading: false);
-        AppHaptics.success();
-        return true;
-      }
-    }
-    state = state.copyWith(isLoading: false);
-    return state.isEmailVerified;
-  }
-
-  /// Offline demo only (see `demo_mode.dart`); compiled out of release.
-  void _signInOfflineDemo(
-    String email, {
-    String? displayName,
-    bool isVerified = true,
-  }) {
-    final demo = DemoSession.create(
-      email: email,
-      displayName: displayName,
-      isVerified: isVerified,
-    );
-    state = state.copyWith(
-      status: AuthStatus.authenticated,
-      user: demo.user,
-      profile: demo.profile,
-      isLoading: false,
-      errorMessage: null,
-    );
-    AppHaptics.success();
-  }
-
-  @override
-  void dispose() {
-    unawaited(_authSub?.cancel());
-    super.dispose();
   }
 }
 
 final authServiceProvider = Provider<AuthService>(
   (ref) => AuthService.instance,
 );
-final supabaseServiceProvider = Provider<SupabaseService>(
-  (ref) => SupabaseService.instance,
+
+/// Auth state. The Supabase auth stream is the source of truth for who is
+/// signed in; actions only add loading and failure information (and the
+/// user returned by a sign-up that has no session yet).
+class AuthNotifier extends Notifier<AppAuthState> {
+  AuthService get _service => ref.read(authServiceProvider);
+
+  @override
+  AppAuthState build() {
+    final service = ref.watch(authServiceProvider);
+
+    final sub = service.authStateChanges.listen(
+      _onAuthEvent,
+      onError: (Object error, StackTrace stackTrace) {
+        AppLogger.warn('Auth stream error', ErrorMapper.map(error, stackTrace));
+      },
+    );
+    ref.onDispose(sub.cancel);
+
+    // When a user leaves (sign-out, deletion, switch), wipe their
+    // per-user device data. The theme is device-wide and stays.
+    listenSelf((previous, next) {
+      final left = previous?.user?.id;
+      if (left != null && left != next.user?.id) {
+        unawaited(_clearUserData(left));
+      }
+    });
+
+    final user = service.currentUser;
+    return AppAuthState(
+      status: user == null
+          ? AuthStatus.unauthenticated
+          : AuthStatus.authenticated,
+      user: user,
+    );
+  }
+
+  void _onAuthEvent(supabase.AuthState data) {
+    if (!ref.mounted) return;
+    final user = data.session?.user;
+    switch (data.event) {
+      case supabase.AuthChangeEvent.signedOut:
+        _setSignedOut();
+      default:
+        if (user != null) {
+          state = state.copyWith(status: AuthStatus.authenticated, user: user);
+        } else if (data.event == supabase.AuthChangeEvent.initialSession &&
+            state.user == null) {
+          state = state.copyWith(status: AuthStatus.unauthenticated);
+        }
+    }
+  }
+
+  void _setSignedOut() {
+    state = const AppAuthState(status: AuthStatus.unauthenticated);
+  }
+
+  Future<void> _clearUserData(String userId) async {
+    AppHaptics.isEnabled = true;
+    try {
+      await UserPrefs.clearUser(ref.read(sharedPreferencesProvider), userId);
+    } on Object catch (e) {
+      AppLogger.warn('Could not clear user preferences', e.runtimeType);
+    }
+  }
+
+  /// Runs [action] with loading and failure handling. Returns the failure,
+  /// or null on success.
+  Future<AppFailure?> _run(Future<void> Function() action) async {
+    state = state.copyWith(isLoading: true, failure: null);
+    AppHaptics.light();
+    try {
+      await action();
+      if (ref.mounted) state = state.copyWith(isLoading: false);
+      AppHaptics.success();
+      return null;
+    } catch (error, stackTrace) {
+      final failure = error is GoogleSignInUnavailableException
+          ? const AppFailure.business('google_unavailable')
+          : ErrorMapper.map(error, stackTrace);
+      if (ref.mounted) {
+        state = state.copyWith(isLoading: false, failure: failure);
+      }
+      AppHaptics.error();
+      return failure;
+    }
+  }
+
+  void _signedIn(supabase.User? user) {
+    if (user == null || !ref.mounted) return;
+    state = state.copyWith(status: AuthStatus.authenticated, user: user);
+  }
+
+  void clearError() {
+    if (state.failure != null) state = state.copyWith(failure: null);
+  }
+
+  Future<AppFailure?> signInWithEmail(String email, String password) => _run(
+    () async => _signedIn(
+      (await _service.signInWithEmail(email: email, password: password)).user,
+    ),
+  );
+
+  Future<AppFailure?> signUpWithEmail(
+    String email,
+    String password,
+    String displayName,
+  ) => _run(
+    () async => _signedIn(
+      (await _service.signUpWithEmail(
+        email: email,
+        password: password,
+        displayName: displayName,
+      )).user,
+    ),
+  );
+
+  Future<AppFailure?> signInWithGoogle() => _run(() async {
+    final response = await _service.signInWithGoogle();
+    // Null means the user closed the account picker: nothing to report.
+    _signedIn(response?.user);
+  });
+
+  Future<AppFailure?> signInWithApple() =>
+      _run(() async => _signedIn((await _service.signInWithApple()).user));
+
+  Future<AppFailure?> sendPasswordReset(String email) =>
+      _run(() => _service.sendPasswordResetEmail(email));
+
+  Future<AppFailure?> updatePassword(String newPassword) =>
+      _run(() async => _service.updatePassword(newPassword));
+
+  Future<AppFailure?> resendVerificationEmail() async {
+    final email = state.user?.email;
+    if (email == null || email.isEmpty) return null;
+    return _run(() => _service.resendVerificationEmail(email));
+  }
+
+  /// Re-reads the user to see whether the email is confirmed now.
+  Future<bool> refreshEmailVerificationStatus() async {
+    await _run(() async {
+      final response = await _service.refreshSession();
+      _signedIn(response.user ?? _service.currentUser);
+    });
+    return ref.mounted && state.isEmailVerified;
+  }
+
+  /// Signs out locally even when the server call fails.
+  Future<void> signOut() async {
+    state = state.copyWith(isLoading: true, failure: null);
+    try {
+      await _service.signOut();
+    } finally {
+      if (ref.mounted) _setSignedOut();
+    }
+  }
+
+  /// Deletes the account on the server, then signs out. On failure the
+  /// session is kept and the failure is returned.
+  Future<AppFailure?> deleteAccount() async {
+    state = state.copyWith(isLoading: true, failure: null);
+    try {
+      await ref.read(accountRepositoryProvider).deleteAccount();
+    } on AppFailure catch (failure) {
+      if (ref.mounted) state = state.copyWith(isLoading: false);
+      return failure;
+    }
+    await signOut();
+    return null;
+  }
+}
+
+final authNotifierProvider = NotifierProvider<AuthNotifier, AppAuthState>(
+  AuthNotifier.new,
 );
 
-final authNotifierProvider = StateNotifierProvider<AuthNotifier, AppAuthState>((
-  ref,
-) {
-  final authService = ref.watch(authServiceProvider);
-  final supabaseService = ref.watch(supabaseServiceProvider);
-  return AuthNotifier(authService, supabaseService);
-});
-
-final userProfileProvider = Provider<UserProfile?>((ref) {
-  return ref.watch(authNotifierProvider).profile;
+/// The signed-in, verified user's id, or null. Every user-scoped provider
+/// watches this, so a sign-out or user switch rebuilds them with no data
+/// from the previous user.
+final currentUserIdProvider = Provider<String?>((ref) {
+  final auth = ref.watch(authNotifierProvider);
+  return auth.isAuthenticated && auth.isEmailVerified ? auth.user!.id : null;
 });

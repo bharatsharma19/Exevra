@@ -9,7 +9,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/date_helpers.dart';
 import '../../../core/utils/haptics.dart';
-import '../../../providers/auth_provider.dart';
+import '../../../providers/profile_provider.dart';
 import '../../../providers/chat_provider.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
@@ -54,9 +54,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final chatState = ref.watch(chatProvider);
-    final authState = ref.watch(authNotifierProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final aiConsent = authState.profile?.aiConsent ?? false;
+    final aiConsent = ref.watch(userProfileProvider)?.aiConsent ?? false;
 
     return Scaffold(
       appBar: AppBar(
@@ -153,7 +152,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   onChanged: (val) {
                     AppHaptics.selection();
                     unawaited(
-                      ref.read(authNotifierProvider.notifier).setAiConsent(val),
+                      ref.read(profileProvider.notifier).setAiConsent(val),
                     );
                   },
                 ),

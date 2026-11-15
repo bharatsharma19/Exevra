@@ -2,13 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_constants.dart';
-import '../../../core/utils/currency_formatter.dart';
+import '../../../core/errors/failure_messages.dart';
 import '../../../core/utils/date_helpers.dart';
-import '../../../core/utils/validators.dart';
 import '../../../core/utils/haptics.dart';
-import '../../../models/expense_model.dart';
-import '../../../providers/auth_provider.dart';
+import '../../../core/utils/money_format.dart';
+import '../../../core/utils/money_parser.dart';
+import '../../../core/utils/validators.dart';
+import '../../../models/expense.dart';
+import '../../../models/group.dart';
 import '../../../providers/expense_provider.dart';
+import '../../../providers/groups_provider.dart';
+import '../../../providers/profile_provider.dart';
 
 class AddEditExpenseSheet extends ConsumerStatefulWidget {
   final Expense? existingExpense;
@@ -46,12 +50,15 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
     final expense = widget.existingExpense;
     _titleController = TextEditingController(text: expense?.title ?? '');
     _amountController = TextEditingController(
-      text: expense != null ? expense.amount.toStringAsFixed(2) : '',
+      text: expense != null ? MoneyFormat.forInput(expense.amount) : '',
     );
-    _notesController = TextEditingController(text: expense?.notes ?? '');
+    _notesController = TextEditingController(text: expense?.note ?? '');
     _selectedCategory = expense?.category ?? AppConstants.categories.first.name;
-    _selectedDate = expense?.date ?? DateTime.now();
-    _isGroupExpense = expense != null ? !expense.isPersonal : false;
+    // Pickers work in local wall-clock time; the instant is sent as UTC.
+    _selectedDate = expense?.spentAt.toLocal() ?? DateTime.now();
+    _isGroupExpense = expense != null
+        ? expense.isGroup
+        : (ref.read(activeGroupProvider)?.canAddExpenses ?? false);
   }
 
   @override
@@ -88,27 +95,45 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
     }
   }
 
+  /// Currency of the expense being entered: the expense's own when
+  /// editing, the group's for a group expense, else the user's.
+  String _currency(Group? group) {
+    final existing = widget.existingExpense;
+    if (existing != null) return existing.amount.currency;
+    if (_isGroupExpense && group != null) return group.currency;
+    return ref.read(preferredCurrencyProvider);
+  }
+
+  String? get _note {
+    final text = _notesController.text.trim();
+    return text.isEmpty ? null : text;
+  }
+
   Future<void> _submit() async {
+    if (_isSubmitting) return;
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    final amount = CurrencyFormatter.parseAmount(_amountController.text);
-    if (amount == null || amount <= 0) return;
+    final group = ref.read(activeGroupProvider);
+    final parsed = MoneyParser.parse(
+      _amountController.text,
+      currency: _currency(group),
+    );
+    if (parsed is! MoneyParsed) return;
+    final key = ref.read(scopeExpenseKeyProvider);
+    final existing = widget.existingExpense;
 
-    final authState = ref.read(authNotifierProvider);
-    final expenseState = ref.read(expenseProvider);
-    final currentUserId = authState.user?.id;
-
-    if (_isGroupExpense &&
-        !expenseState.canUserAddGroupExpenses(currentUserId)) {
-      setState(() => _isSubmitting = false);
+    if (existing == null &&
+        _isGroupExpense &&
+        !(group?.canAddExpenses ?? false)) {
       AppHaptics.error();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Pending Admin Review: You have view-only access until the Group Admin approves your membership to record expenses.',
-          ),
-          backgroundColor: AppColors.primaryRose,
-        ),
+        SnackBar(content: Text(friendlyMessageForKey('viewer_cannot_add'))),
+      );
+      return;
+    }
+    if (key == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(friendlyMessageForKey('group_not_ready'))),
       );
       return;
     }
@@ -116,56 +141,45 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
     setState(() => _isSubmitting = true);
     AppHaptics.light();
 
-    final expenseNotifier = ref.read(expenseProvider.notifier);
+    final notifier = ref.read(expenseListProvider(key).notifier);
+    final failure = existing == null
+        ? await notifier.add(
+            ExpenseDraft(
+              title: _titleController.text,
+              amount: parsed.value,
+              category: _selectedCategory,
+              spentAt: _selectedDate.toUtc(),
+              groupId: _isGroupExpense ? group?.id : null,
+              note: _note,
+            ),
+          )
+        : await notifier.edit(
+            existing.copyWith(
+              title: _titleController.text.trim(),
+              amount: parsed.value,
+              category: _selectedCategory,
+              spentAt: _selectedDate.toUtc(),
+              note: _note,
+            ),
+          );
 
-    bool success;
-    if (widget.existingExpense == null) {
-      success = await expenseNotifier.createExpense(
-        title: _titleController.text.trim(),
-        amount: amount,
-        category: _selectedCategory,
-        date: _selectedDate,
-        notes: _notesController.text.trim().isEmpty
-            ? null
-            : _notesController.text.trim(),
-        isGroup: _isGroupExpense,
-      );
-    } else {
-      final updated = widget.existingExpense!.copyWith(
-        title: _titleController.text.trim(),
-        amount: amount,
-        category: _selectedCategory,
-        date: _selectedDate,
-        notes: _notesController.text.trim().isEmpty
-            ? null
-            : _notesController.text.trim(),
-        groupId: _isGroupExpense
-            ? (widget.existingExpense!.groupId ??
-                  ref.read(authNotifierProvider).profile?.groupId)
-            : null,
-        isPersonal: !_isGroupExpense,
-      );
-      success = await expenseNotifier.updateExpense(updated);
-    }
-
-    if (mounted) {
-      setState(() => _isSubmitting = false);
-      if (success) {
-        Navigator.of(context).pop();
-      }
-    }
+    if (!mounted) return;
+    setState(() => _isSubmitting = false);
+    // A failure is shown once by the shell and the sheet stays open.
+    if (failure == null) Navigator.of(context).pop();
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final auth = ref.watch(authNotifierProvider);
-    final currency = auth.profile?.currency ?? AppConstants.defaultCurrency;
-    final symbol = AppConstants.currencies[currency] ?? '₹';
-    final expenseState = ref.watch(expenseProvider);
-    final hasGroup = expenseState.currentGroup != null;
-    final currentUserId = auth.user?.id;
-    final isViewer = expenseState.isUserViewerOnly(currentUserId);
+    final group = ref.watch(activeGroupProvider);
+    // Keeps the list this sheet writes to alive while it is open.
+    final listKey = ref.watch(scopeExpenseKeyProvider);
+    if (listKey != null) ref.watch(expenseListProvider(listKey));
+    final currency = _currency(group);
+    final symbol = MoneyFormat.symbolOf(currency);
+    final hasGroup = group != null;
+    final isViewer = group != null && !group.canAddExpenses;
     final isEditing = widget.existingExpense != null;
 
     return Container(
@@ -263,7 +277,11 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                           keyboardType: const TextInputType.numberWithOptions(
                             decimal: true,
                           ),
-                          validator: Validators.validateAmount,
+                          validator: (value) => MoneyParser.validate(
+                            value,
+                            currency: currency,
+                            describe: friendlyMessage,
+                          ),
                           style: TextStyle(
                             fontSize: 34,
                             fontWeight: FontWeight.w800,
@@ -271,7 +289,7 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                             color: isDark ? Colors.white : Colors.black,
                           ),
                           decoration: const InputDecoration(
-                            hintText: '0.00',
+                            hintText: '0',
                             border: InputBorder.none,
                             enabledBorder: InputBorder.none,
                             focusedBorder: InputBorder.none,
@@ -307,6 +325,9 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                     Expanded(
                       child: GestureDetector(
                         onTap: () {
+                          // An expense cannot move between personal and a
+                          // group once saved.
+                          if (isEditing) return;
                           AppHaptics.selection();
                           setState(() => _isGroupExpense = false);
                         },
@@ -357,6 +378,7 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                     Expanded(
                       child: GestureDetector(
                         onTap: () {
+                          if (isEditing) return;
                           if (!hasGroup) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(

@@ -41,6 +41,10 @@ String friendlyMessage(AppFailure failure) {
   };
 }
 
+/// Copy for a message [key] (for checks made before calling the server).
+String friendlyMessageForKey(String key) =>
+    friendlyMessage(AppFailure.business(key));
+
 const Map<String, String> _byKey = {
   // Invitations
   'invite_expired':
@@ -68,6 +72,7 @@ const Map<String, String> _byKey = {
   'cannot_change_own_role': "You can't change your own role.",
   'membership_rpc_only': "You don't have permission to do that.",
   'invalid_code': "That invite code isn't valid. Check it and try again.",
+  'group_not_ready': 'Your groups are still loading. Try again in a moment.',
   'code_expired':
       'That invite code has expired. Ask the group admin for a new one.',
   // Input
@@ -97,6 +102,8 @@ const Map<String, String> _byKey = {
   'expense_group_immutable':
       "An expense can't be moved between personal and a group.",
   'no_split_members': 'This group has no members who can share expenses.',
+  'expense_not_saved_yet': 'This expense is still saving. Try again shortly.',
+  'viewer_cannot_add': 'Viewers can see group expenses but cannot add them.',
   // Settlements
   'settlement_exceeds_debt': "That's more than you currently owe this person.",
   'settlement_not_pending': 'This payment is no longer pending.',
@@ -117,5 +124,6 @@ const Map<String, String> _byKey = {
       'again.',
   'unavailable':
       'This service is temporarily unavailable. Please try again later.',
+  'google_unavailable': "Google sign-in isn't available in this version.",
   'signup_disabled': "New sign-ups aren't available right now.",
 };

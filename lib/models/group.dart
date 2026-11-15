@@ -58,7 +58,11 @@ class Group {
   /// The invite code grouped for display: `XXXX-XXXX-XXXX-XXXX`.
   String? get displayInviteCode {
     final code = inviteCode;
-    if (code == null) return null;
+    return code == null ? null : formatInviteCode(code);
+  }
+
+  /// `XXXX-XXXX-XXXX-XXXX` grouping of a raw invite code.
+  static String formatInviteCode(String code) {
     final parts = <String>[];
     for (var i = 0; i < code.length; i += 4) {
       parts.add(code.substring(i, i + 4 > code.length ? code.length : i + 4));

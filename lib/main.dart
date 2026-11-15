@@ -1,17 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'core/config/app_config.dart';
-import 'core/config/demo_mode.dart';
 import 'core/constants/app_constants.dart';
 import 'core/logging/app_logger.dart';
 import 'core/router/app_router.dart';
+import 'core/storage/preferences.dart';
 import 'core/theme/app_theme.dart';
+import 'core/utils/app_locale.dart';
 import 'features/auth/screens/app_lock_screen.dart';
 import 'features/startup/service_unavailable_app.dart';
+import 'models/profile.dart';
 import 'providers/app_lock_provider.dart';
 import 'providers/auth_provider.dart';
+import 'providers/profile_provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,24 +38,25 @@ Future<void> main() async {
   );
 
   // 3. Validate the compile-time configuration. An invalid configuration
-  // stops here; only a non-release DEMO build may continue offline.
+  // stops here; there is no offline or demo fallback.
   const config = AppConfig.environment;
   final problems = config.problems;
-  final useDemoBackend = kDemoMode && problems.isNotEmpty;
-  if (problems.isNotEmpty && !useDemoBackend) {
+  if (problems.isNotEmpty) {
     AppLogger.error('Invalid build configuration: ${problems.join(' ')}');
     runApp(ServiceUnavailableApp(problems: problems));
     return;
   }
-  if (useDemoBackend) DemoBackend.activate();
 
-  // 4. Initialize the Supabase client (PKCE auth flow).
+  // Number and date formatting follow the device locale (en_IN fallback).
+  AppLocale.initFromDevice();
+
+  // 4. Initialize the Supabase client (PKCE auth flow) and preferences.
+  final SharedPreferences prefs;
   try {
+    prefs = await SharedPreferences.getInstance();
     await Supabase.initialize(
-      url: useDemoBackend ? kDemoSupabaseUrl : config.supabaseUrl,
-      publishableKey: useDemoBackend
-          ? kDemoSupabaseAnonKey
-          : config.supabaseAnonKey,
+      url: config.supabaseUrl,
+      publishableKey: config.supabaseAnonKey,
       authOptions: const FlutterAuthClientOptions(
         authFlowType: AuthFlowType.pkce,
       ),
@@ -64,6 +70,7 @@ Future<void> main() async {
   // 5. Launch Application with Riverpod State Container
   runApp(
     ProviderScope(
+      overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
       // Failed providers surface their error instead of retrying silently.
       retry: (_, _) => null,
       child: const ExevraApp(),
@@ -109,19 +116,11 @@ class _ExevraAppState extends ConsumerState<ExevraApp>
     final authState = ref.watch(authNotifierProvider);
     final appLockState = ref.watch(appLockProvider);
 
-    // Dynamic Theme Mode Selection
-    ThemeMode themeMode;
-    final activeTheme = authState.profile?.themeMode ?? authState.themeMode;
-    switch (activeTheme) {
-      case 'light':
-        themeMode = ThemeMode.light;
-        break;
-      case 'dark':
-        themeMode = ThemeMode.dark;
-        break;
-      default:
-        themeMode = ThemeMode.system;
-    }
+    final themeMode = switch (ref.watch(themePreferenceProvider)) {
+      ThemePreference.light => ThemeMode.light,
+      ThemePreference.dark => ThemeMode.dark,
+      ThemePreference.system => ThemeMode.system,
+    };
 
     return MaterialApp.router(
       title: AppConstants.appName,

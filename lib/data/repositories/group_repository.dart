@@ -20,6 +20,9 @@ class InviteCode {
 
   final String code;
   final DateTime expiresAt;
+
+  /// The code grouped for display: `XXXX-XXXX-XXXX-XXXX`.
+  String get display => Group.formatInviteCode(code);
 }
 
 /// Groups and membership. Every write goes through a server RPC that

@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_riverpod/legacy.dart';
+
 import '../core/logging/app_logger.dart';
-import '../services/ai_chat_service.dart';
 import '../core/utils/haptics.dart';
+import '../services/ai_chat_service.dart';
+import 'auth_provider.dart';
 
 class ChatMessage {
   final String id;
@@ -71,19 +72,25 @@ class ChatState {
   }
 }
 
-class ChatNotifier extends StateNotifier<ChatState> {
-  final AiChatService _aiService;
+/// The assistant conversation of the signed-in user. It lives in memory
+/// only and starts over when the user changes, so no conversation is ever
+/// shown to another account.
+class ChatNotifier extends Notifier<ChatState> {
+  AiChatService get _aiService => ref.read(aiChatServiceProvider);
 
-  ChatNotifier(this._aiService) : super(const ChatState()) {
-    _initWelcomeMessage();
+  @override
+  ChatState build() {
+    ref.watch(currentUserIdProvider);
+    ref.watch(aiChatServiceProvider);
+    return ChatState(messages: [_welcome()]);
   }
 
   static const String assistantName = 'Exevra Assistant';
   static const String genericFailureMessage =
       'Something went wrong. Please try again.';
 
-  void _initWelcomeMessage() {
-    final welcome = ChatMessage(
+  static ChatMessage _welcome() {
+    return ChatMessage(
       id: 'msg-welcome',
       text:
           '👋 **Welcome to the Exevra Assistant**\n\n'
@@ -94,12 +101,12 @@ class ChatNotifier extends StateNotifier<ChatState> {
       modelUsed: assistantName,
       isStreaming: false,
     );
-    state = state.copyWith(messages: [welcome]);
   }
 
   Future<void> sendMessage(String text) async {
     final query = text.trim();
     if (query.isEmpty || state.isGenerating) return;
+    final owner = ref.read(currentUserIdProvider);
 
     AppHaptics.light();
 
@@ -141,7 +148,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
       failureMessage = genericFailureMessage;
     }
 
-    if (!mounted) return;
+    // The user changed while waiting: this reply is not theirs.
+    if (!ref.mounted || ref.read(currentUserIdProvider) != owner) return;
     state = state.copyWith(
       messages: state.messages.map((m) {
         if (m.id == assistantMsgId) {
@@ -160,7 +168,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
   void clearChat() {
     AppHaptics.medium();
-    _initWelcomeMessage();
+    state = ChatState(messages: [_welcome()]);
   }
 }
 
@@ -168,7 +176,6 @@ final aiChatServiceProvider = Provider<AiChatService>(
   (ref) => const UnavailableAiChatService(),
 );
 
-final chatProvider = StateNotifierProvider<ChatNotifier, ChatState>((ref) {
-  final aiService = ref.watch(aiChatServiceProvider);
-  return ChatNotifier(aiService);
-});
+final chatProvider = NotifierProvider<ChatNotifier, ChatState>(
+  ChatNotifier.new,
+);
