@@ -135,6 +135,17 @@ abstract interface class ExpenseRepository {
   /// Deletes the expense. Throws [AppFailure] when nothing was deleted.
   Future<void> delete(String expenseId);
 
+  /// Moves the expense to the group [groupId], or to the payer's personal
+  /// expenses when it is null, in one server transaction
+  /// (`move_expense_scope`). The server replaces the row: the moved
+  /// expense it returns has a new id. Throws [AppFailure]; on failure the
+  /// expense is unchanged.
+  Future<Expense> moveScope(String expenseId, {required String? groupId});
+
+  /// The users who share the group expense [expenseId] (its split rows; a
+  /// null entry is a deleted account). Empty for a personal expense.
+  Future<List<String?>> fetchParticipants(String expenseId);
+
   /// Changes to a group's expenses, members and settlements, pushed by
   /// realtime, plus expense deletions (see [GroupChange.expenseDeleted]).
   /// Listening opens the channel; cancelling closes it.
@@ -243,6 +254,33 @@ class SupabaseExpenseRepository implements ExpenseRepository {
           .select('id')
           .timeout(writeTimeout);
       requireRows(rows);
+    });
+  }
+
+  @override
+  Future<Expense> moveScope(String expenseId, {required String? groupId}) {
+    return ErrorMapper.guard(() async {
+      final data = await _client
+          .rpc<Object?>(
+            'move_expense_scope',
+            params: {'p_expense_id': expenseId, 'p_group_id': groupId},
+          )
+          .timeout(writeTimeout);
+      return Expense.fromJson(singleResult(data));
+    });
+  }
+
+  @override
+  Future<List<String?>> fetchParticipants(String expenseId) {
+    return ErrorMapper.guard(() async {
+      final rows = await _client
+          .from('expense_splits')
+          .select('user_id')
+          .eq('expense_id', expenseId);
+      return [
+        for (final row in rows)
+          JsonReader.of(row, 'Split').optString('user_id'),
+      ];
     });
   }
 

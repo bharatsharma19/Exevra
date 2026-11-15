@@ -1,5 +1,6 @@
 import 'package:expense_manager/core/errors/app_failure.dart';
 import 'package:expense_manager/core/errors/failure_messages.dart';
+import 'package:expense_manager/core/widgets/app_snackbar.dart';
 import 'package:expense_manager/features/expenses/screens/add_edit_expense_sheet.dart';
 import 'package:expense_manager/models/expense.dart';
 import 'package:expense_manager/models/group.dart';
@@ -36,6 +37,8 @@ Future<(TestBackend, ProviderContainer)> _pump(
   bool withGroup = true,
   Expense? expense,
   List<Expense> rows = const [],
+  void Function(TestBackend backend)? setUp,
+  bool rootMessenger = false,
 }) async {
   tester.view.physicalSize = const Size(1080, 2400);
   tester.view.devicePixelRatio = 3;
@@ -57,13 +60,17 @@ Future<(TestBackend, ProviderContainer)> _pump(
     ];
   }
   backend.expenses.rows.addAll(rows);
+  setUp?.call(backend);
   final container = await backend.container();
   addTearDown(container.dispose);
 
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
-      child: MaterialApp(home: _Host(expense: expense)),
+      child: MaterialApp(
+        scaffoldMessengerKey: rootMessenger ? rootScaffoldMessengerKey : null,
+        home: _Host(expense: expense),
+      ),
     ),
   );
   await tester.pumpAndSettle();
@@ -182,6 +189,119 @@ void main() {
     expect(moved.groupId, 'g1');
     expect(moved.amount, Money(4000, 'EUR'));
     expect(moved.title, original.title);
+  });
+
+  testWidgets('a move is one server call and Undo moves it back', (
+    tester,
+  ) async {
+    final original = expenseOf(
+      'e1',
+      userId: 'u1',
+    ).copyWith(amount: Money(4000, 'EUR'));
+    final (backend, _) = await _pump(
+      tester,
+      expense: original,
+      rows: [original],
+      rootMessenger: true,
+    );
+
+    await tester.tap(find.text('Group Expense'));
+    await tester.pump();
+    await _save(tester);
+
+    expect(backend.expenses.moves, [('e1', 'g1')]);
+    expect(backend.expenses.deleted, isEmpty);
+    final movedId = backend.expenses.rows.single.id;
+    expect(find.textContaining('Moved "${original.title}"'), findsOneWidget);
+
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+
+    expect(backend.expenses.moves, [('e1', 'g1'), (movedId, null)]);
+    expect(backend.expenses.rows.single.isPersonal, isTrue);
+    rootScaffoldMessengerKey.currentState?.clearSnackBars();
+  });
+
+  group('locked group expense', () {
+    final shared = expenseOf(
+      'ge',
+      userId: 'u1',
+      groupId: 'g1',
+    ).copyWith(amount: Money(3000, 'EUR'));
+
+    testWidgets('someone who shares it left: amount and group are locked', (
+      tester,
+    ) async {
+      final (backend, _) = await _pump(
+        tester,
+        expense: shared,
+        rows: [shared],
+        setUp: (b) {
+          b.groups.membersByGroup['g1'] = [memberOf('u1')];
+          b.expenses.participants['ge'] = ['u1', 'u-left'];
+        },
+      );
+
+      expect(find.byKey(const Key('expense-locked')), findsOneWidget);
+      expect(
+        find.textContaining('someone in it has left the group'),
+        findsOneWidget,
+      );
+      final amount = tester.widget<TextField>(
+        find.descendant(
+          of: find.byKey(const Key('expense-amount')),
+          matching: find.byType(TextField),
+        ),
+      );
+      expect(amount.enabled, isFalse);
+
+      // Moving to personal is refused with the same reason.
+      await tester.tap(find.text('Personal'));
+      await tester.pump();
+      expect(backend.expenses.moves, isEmpty);
+
+      await tester.enterText(find.byKey(const Key('expense-title')), 'Dinner');
+      await _save(tester);
+      final saved = backend.expenses.rows.single;
+      expect(saved.title, 'Dinner');
+      expect(saved.amount, Money(3000, 'EUR'));
+      expect(saved.groupId, 'g1');
+    });
+
+    testWidgets('a lock reported by the server restores the amount', (
+      tester,
+    ) async {
+      final (backend, _) = await _pump(
+        tester,
+        expense: shared,
+        rows: [shared],
+        setUp: (b) => b.groups.membersByGroup['g1'] = [memberOf('u1')],
+      );
+      expect(find.byKey(const Key('expense-locked')), findsNothing);
+
+      backend.expenses.failWrites = const AppFailure.business(
+        'expense_locked_member_left',
+      );
+      await tester.enterText(find.byKey(const Key('expense-amount')), '45');
+      await _save(tester);
+
+      expect(find.byType(AddEditExpenseSheet), findsOneWidget);
+      expect(
+        find.text(
+          "This expense can't be changed because someone in it has left the "
+          'group.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('expense-locked')), findsOneWidget);
+      expect(find.text('30.00'), findsOneWidget);
+
+      backend.expenses.failWrites = null;
+      await tester.enterText(find.byKey(const Key('expense-title')), 'Dinner');
+      await _save(tester);
+      expect(backend.expenses.rows.single.amount, Money(3000, 'EUR'));
+      expect(backend.expenses.rows.single.title, 'Dinner');
+    });
   });
 
   testWidgets('asks before discarding unsaved changes', (tester) async {

@@ -7,6 +7,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/date_helpers.dart';
+import '../../../core/errors/failure_messages.dart';
 import '../../../core/utils/haptics.dart';
 import '../../../core/utils/money_format.dart';
 import '../../../models/expense.dart';
@@ -87,6 +88,16 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
     }
     final key = ref.read(filteredExpenseKeyProvider);
     if (key == null) return;
+    if (await _isLocked(expense)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(friendlyMessageForKey('expense_locked_member_left')),
+        ),
+      );
+      return;
+    }
+    if (!mounted) return;
     final userId = ref.read(currentUserIdProvider);
     // Undo re-creates the expense as the current user, so it is offered
     // only to the payer (an admin deleting someone else's cannot undo).
@@ -139,6 +150,24 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
             : null,
       ),
     );
+  }
+
+  /// Whether [expense] is a group expense locked because someone who
+  /// shares it left the group (the server would refuse the delete).
+  Future<bool> _isLocked(Expense expense) async {
+    final lockKey = expenseLockKeyOf(expense);
+    if (lockKey == null) return false;
+    final check = ref.listenManual(
+      expenseLockedProvider(lockKey).future,
+      (_, _) {},
+    );
+    try {
+      return await check.read();
+    } on Object {
+      return false;
+    } finally {
+      check.close();
+    }
   }
 
   /// Saves the deleted expense again (with a new id).

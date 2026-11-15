@@ -157,6 +157,48 @@ void main() {
       );
     });
 
+    test('moveScope is one move_expense_scope call', () async {
+      server.respond = (_) =>
+          json({...expenseRow, 'id': 'e7', 'group_id': 'g1'});
+      final repo = SupabaseExpenseRepository(server.client());
+      final moved = await repo.moveScope('e1', groupId: 'g1');
+      expect(server.requests, hasLength(1));
+      expect(server.last.method, 'POST');
+      expect(server.last.url.path, '/rest/v1/rpc/move_expense_scope');
+      expect(server.lastJsonBody, {'p_expense_id': 'e1', 'p_group_id': 'g1'});
+      expect(moved.id, 'e7');
+      expect(moved.groupId, 'g1');
+    });
+
+    test('moveScope to personal sends a null group', () async {
+      server.respond = (_) => json([expenseRow]);
+      final repo = SupabaseExpenseRepository(server.client());
+      final moved = await repo.moveScope('e9', groupId: null);
+      expect(server.lastJsonBody, {'p_expense_id': 'e9', 'p_group_id': null});
+      expect(moved.isPersonal, isTrue);
+    });
+
+    test('a locked expense refuses the move with its key', () async {
+      server.respond = (_) =>
+          json({'code': 'P0001', 'message': 'expense_locked_member_left'}, 400);
+      final repo = SupabaseExpenseRepository(server.client());
+      await expectLater(
+        repo.moveScope('e1', groupId: null),
+        throwsA(const AppFailure.business('expense_locked_member_left')),
+      );
+    });
+
+    test('fetchParticipants reads the split rows', () async {
+      server.respond = (_) => json([
+        {'user_id': 'u1'},
+        {'user_id': null},
+      ]);
+      final repo = SupabaseExpenseRepository(server.client());
+      expect(await repo.fetchParticipants('e1'), ['u1', null]);
+      expect(server.last.url.path, '/rest/v1/expense_splits');
+      expect(server.last.url.queryParameters['expense_id'], 'eq.e1');
+    });
+
     test('server errors become AppFailure', () async {
       server.respond = (_) => json({
         'code': '42501',

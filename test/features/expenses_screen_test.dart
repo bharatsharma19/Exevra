@@ -16,6 +16,7 @@ Future<(TestBackend, ProviderContainer)> _pump(
   List<Expense> rows = const [],
   Group? group,
   AppFailure? failReads,
+  void Function(TestBackend backend)? setUp,
 }) async {
   tester.view.physicalSize = const Size(1080, 2400);
   tester.view.devicePixelRatio = 3;
@@ -26,6 +27,7 @@ Future<(TestBackend, ProviderContainer)> _pump(
   if (group != null) backend.groups.groupsByUser['u1'] = [group];
   backend.expenses.rows.addAll(rows);
   backend.expenses.failReads = failReads;
+  setUp?.call(backend);
   final container = await backend.container();
   addTearDown(container.dispose);
 
@@ -179,5 +181,36 @@ void main() {
 
     expect(backend.expenses.rows, isEmpty);
     expect(find.text('Undo'), findsNothing);
+  });
+
+  testWidgets('a group expense shared with someone who left is not deleted', (
+    tester,
+  ) async {
+    final group = groupOf('g1', adminId: 'u1');
+    final (backend, _) = await _pump(
+      tester,
+      group: group,
+      rows: [expenseOf('ge', userId: 'u1', groupId: 'g1', title: 'Shared')],
+      setUp: (b) {
+        b.groups.membersByGroup['g1'] = [memberOf('u1')];
+        b.expenses.participants['ge'] = ['u1', 'u-left'];
+      },
+    );
+
+    await tester.tap(find.byTooltip('Expense actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete expense?'), findsNothing);
+    expect(
+      find.text(
+        "This expense can't be changed because someone in it has left the "
+        'group.',
+      ),
+      findsOneWidget,
+    );
+    expect(backend.expenses.rows, hasLength(1));
+    expect(backend.expenses.deleted, isEmpty);
   });
 }

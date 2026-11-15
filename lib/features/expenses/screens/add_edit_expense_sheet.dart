@@ -5,11 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_constants.dart';
+import '../../../core/errors/app_failure.dart';
 import '../../../core/errors/failure_messages.dart';
 import '../../../core/utils/date_helpers.dart';
 import '../../../core/utils/haptics.dart';
 import '../../../core/utils/money_format.dart';
 import '../../../core/utils/money_parser.dart';
+import '../../../core/widgets/app_snackbar.dart';
 import '../../../models/currency_info.dart';
 import '../../../models/expense.dart';
 import '../../../models/group.dart';
@@ -24,7 +26,10 @@ import '../../../providers/profile_provider.dart';
 ///   a group expense always uses the group currency; a personal one any
 ///   supported currency (the profile currency by default).
 /// * An expense can be moved between personal and the active group by its
-///   payer (the server re-creates it; `group_id` never changes in place).
+///   payer, in one server call (`move_expense_scope`, which gives it a new
+///   id); a snack bar then offers Undo, which moves it back the same way.
+/// * A group expense shared with someone who left the group is locked: its
+///   amount and group cannot change (title, category, date and note can).
 /// * Errors are shown inside the sheet; nothing is reported under the
 ///   modal barrier. Leaving with unsaved changes asks first.
 class AddEditExpenseSheet extends ConsumerStatefulWidget {
@@ -131,6 +136,14 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
   /// Why the Group option is unavailable, after the user tapped it.
   String? _scopeHint;
 
+  /// The server refused a change because the expense is locked (someone
+  /// who shares it left the group), even if the check on opening missed it.
+  bool _lockedByServer = false;
+
+  /// Whether the edited expense is locked (see [expenseLockedProvider]);
+  /// updated on every build.
+  bool _locked = false;
+
   Expense? get _existing => widget.existingExpense;
   bool get _isEditing => _existing != null;
 
@@ -222,6 +235,9 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
     final existing = _existing;
     if (existing != null && existing.userId != userId) {
       return 'Only the person who paid can move this expense.';
+    }
+    if (existing != null && existing.isGroup && _locked) {
+      return friendlyMessageForKey('expense_locked_member_left');
     }
     if (group == null) {
       return 'Create or join a group in Profile to add group expenses.';
@@ -328,9 +344,11 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
       return;
     }
 
+    final existing = _existing;
     final draft = ExpenseDraft(
       title: _titleController.text,
-      amount: parsed.value,
+      // A locked expense keeps its amount (the field is read-only).
+      amount: _locked && existing != null ? existing.amount : parsed.value,
       category: _category,
       spentAt: _spentAt.toUtc(),
       groupId: _isGroup ? group?.id : null,
@@ -340,32 +358,78 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
     setState(() => _isSubmitting = true);
     AppHaptics.light();
     final notifier = ref.read(expenseListProvider(key).notifier);
-    final existing = _existing;
-    final failure = existing == null
-        ? await notifier.add(draft, report: false)
-        : existing.groupId != draft.groupId
-        ? await notifier.convert(existing, draft, report: false)
-        : await notifier.edit(
-            existing.copyWith(
-              title: draft.title.trim(),
-              amount: draft.amount,
-              category: draft.category,
-              spentAt: draft.spentAt,
-              note: draft.note,
-            ),
-            report: false,
-          );
+    final AppFailure? failure;
+    Expense? moved;
+    if (existing == null) {
+      failure = await notifier.add(draft, report: false);
+    } else if (existing.groupId != draft.groupId) {
+      final result = await notifier.move(existing, draft, report: false);
+      failure = result.failure;
+      moved = result.moved;
+    } else {
+      failure = await notifier.edit(
+        existing.copyWith(
+          title: draft.title.trim(),
+          amount: draft.amount,
+          category: draft.category,
+          spentAt: draft.spentAt,
+          note: draft.note,
+        ),
+        report: false,
+      );
+    }
 
     if (!mounted) return;
     if (failure != null) {
+      final locked = failure.key == 'expense_locked_member_left';
       setState(() {
         _isSubmitting = false;
-        _formError = friendlyMessage(failure);
+        _formError = friendlyMessage(failure!);
+        if (locked && existing != null) {
+          // Keep only the changes the server still accepts.
+          _lockedByServer = true;
+          _isGroup = existing.isGroup;
+          _amountController.text = MoneyFormat.forInput(existing.amount);
+        }
       });
       return;
     }
+    if (existing != null && moved != null) {
+      unawaited(
+        _offerUndoMove(
+          ProviderScope.containerOf(context, listen: false),
+          key,
+          moved,
+          backTo: existing.groupId,
+          message: moved.isGroup
+              ? 'Moved "${moved.title}" to ${group?.name ?? 'the group'}.'
+              : 'Moved "${moved.title}" to your personal expenses.',
+        ),
+      );
+    }
     _allowPop = true;
     Navigator.of(context).pop(true);
+  }
+
+  /// Shows [message] with Undo; Undo moves [moved] back to [backTo] with
+  /// the same single server call. The sheet is gone by then, so the list is
+  /// kept alive through [container] while the move runs; a failure is
+  /// reported (and shown once by the shell).
+  static Future<void> _offerUndoMove(
+    ProviderContainer container,
+    ExpenseListKey key,
+    Expense moved, {
+    required String? backTo,
+    required String message,
+  }) async {
+    final undo = await AppSnackbar.showUndo(message);
+    if (!undo) return;
+    final list = container.listen(expenseListProvider(key).notifier, (_, _) {});
+    try {
+      await list.read().moveTo(moved, groupId: backTo);
+    } finally {
+      list.close();
+    }
   }
 
   Future<void> _confirmDiscard() async {
@@ -402,6 +466,12 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
     final scheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
     final userId = ref.watch(currentUserIdProvider);
+    final existing = _existing;
+    final lockKey = existing == null ? null : expenseLockKeyOf(existing);
+    _locked =
+        _lockedByServer ||
+        (lockKey != null &&
+            (ref.watch(expenseLockedProvider(lockKey)).value ?? false));
     final group = _targetGroup();
     // Keeps the list this sheet writes to alive while it is open.
     final listKey = widget.listKey ?? ref.watch(scopeExpenseKeyProvider);
@@ -454,6 +524,18 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                   _header(scheme),
                   const SizedBox(height: 16),
                   _amountCard(scheme, isDark, currency, group),
+                  if (_locked) ...[
+                    const SizedBox(height: 10),
+                    KeyedSubtree(
+                      key: const Key('expense-locked'),
+                      child: _hint(
+                        scheme,
+                        '${friendlyMessageForKey('expense_locked_member_left')} '
+                        'You can still change the title, category, date and '
+                        'note.',
+                      ),
+                    ),
+                  ],
                   if (currencyChanged) ...[
                     const SizedBox(height: 6),
                     Text(
@@ -488,7 +570,8 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                   ),
                   const SizedBox(height: 18),
                   _scopeToggle(scheme, isDark, reason, canSwitch),
-                  if (_scopeHint != null || (!canSwitch && _isGroup)) ...[
+                  if (_scopeHint != null ||
+                      (!canSwitch && _isGroup && !_locked)) ...[
                     const SizedBox(height: 10),
                     _hint(scheme, _scopeHint ?? reason!),
                   ],
@@ -628,6 +711,9 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
             child: TextFormField(
               key: const Key('expense-amount'),
               controller: _amountController,
+              // Locked: someone who shares it left the group.
+              readOnly: _locked,
+              enabled: !_locked,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),

@@ -385,22 +385,28 @@ void main() {
       expectBUntouched();
     });
 
-    test('a move of A does not delete the original as B', () async {
+    test('a move of A is not sent as B after its edit', () async {
       final list = await listOfA();
       final original = backend.expenses.rows.single;
-      backend.expenses.holdCreateAnswer = Completer<void>();
-      final moving = list.convert(
+      backend.expenses.holdWrites = Completer<void>();
+      final moving = list.move(
         original,
-        ExpenseDraft.fromExpense(original, groupId: 'gS'),
+        ExpenseDraft(
+          title: 'Edited first',
+          amount: original.amount,
+          category: original.category,
+          spentAt: original.spentAt,
+          groupId: 'gS',
+        ),
       );
       await settle();
 
       await signOutAndIn('B');
-      backend.expenses.holdCreateAnswer!.complete();
-      expect(await moving, SessionGuard.dropped);
+      backend.expenses.holdWrites!.complete();
+      expect((await moving).failure, SessionGuard.dropped);
       await settle();
 
-      expect(backend.expenses.deleted, isEmpty);
+      expect(backend.expenses.moves, isEmpty);
       expectBUntouched();
     });
   });

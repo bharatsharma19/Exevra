@@ -265,41 +265,131 @@ void main() {
     });
   });
 
-  group('convert', () {
-    test('moves a personal expense into a group in one step', () async {
-      backend.groups.groupsByUser['u1'] = [groupOf('g1', adminId: 'u1')];
+  group('move', () {
+    test(
+      'moves a personal expense into a group with one server call',
+      () async {
+        backend.groups.groupsByUser['u1'] = [groupOf('g1', adminId: 'u1')];
+        final notifier = await load();
+        final original = backend.expenses.rows.firstWhere((e) => e.id == 'e2');
+
+        final result = await notifier.move(
+          original,
+          ExpenseDraft.fromExpense(original, groupId: 'g1'),
+        );
+
+        expect(result.failure, isNull);
+        expect(backend.expenses.moves, [('e2', 'g1')]);
+        // No create + delete pair.
+        expect(backend.expenses.deleted, isEmpty);
+        expect(backend.expenses.rows.where((e) => e.id == 'e2'), isEmpty);
+        final moved = backend.expenses.rows.where((e) => e.groupId == 'g1');
+        expect(moved, hasLength(1));
+        expect(moved.single.amount, original.amount);
+        expect(result.moved?.id, moved.single.id);
+        // The personal list no longer shows it.
+        expect(ids(), ['e1']);
+      },
+    );
+
+    test('changed fields are saved before the move', () async {
       final notifier = await load();
       final original = backend.expenses.rows.firstWhere((e) => e.id == 'e2');
-
-      final failure = await notifier.convert(
-        original,
-        ExpenseDraft.fromExpense(original, groupId: 'g1'),
+      final target = ExpenseDraft(
+        title: 'Shared taxi',
+        amount: Money(9000, 'INR'),
+        category: original.category,
+        spentAt: original.spentAt,
+        groupId: 'g1',
       );
 
-      expect(failure, isNull);
-      expect(backend.expenses.rows.where((e) => e.id == 'e2'), isEmpty);
-      final moved = backend.expenses.rows.where((e) => e.groupId == 'g1');
-      expect(moved, hasLength(1));
-      expect(moved.single.amount, original.amount);
-      // The personal list no longer shows it.
-      expect(ids(), ['e1']);
+      final result = await notifier.move(original, target);
+
+      expect(result.failure, isNull);
+      expect(result.moved?.title, 'Shared taxi');
+      expect(result.moved?.amount, Money(9000, 'INR'));
+      expect(result.moved?.groupId, 'g1');
     });
 
-    test('when the original cannot be removed the copy is undone', () async {
+    test('a refused move rolls back and shows the friendly reason', () async {
+      const key = ExpenseListKey(
+        'u1',
+        ExpenseQuery(scope: ExpenseScope.personalAndGroup('g1')),
+      );
+      final grouped = expenseOf(
+        'ge',
+        userId: 'u1',
+        groupId: 'g1',
+        spentAt: DateTime.utc(2026, 11, 5),
+      );
+      backend.expenses.rows.add(grouped);
+      final notifier = await load(key);
+      backend.expenses.failMoves = const AppFailure.business(
+        'expense_locked_member_left',
+      );
+
+      final result = await notifier.move(
+        grouped,
+        ExpenseDraft.fromExpense(grouped, groupId: null),
+      );
+
+      expect(result.moved, isNull);
+      expect(result.failure?.key, 'expense_locked_member_left');
+      expect(ids(key).first, 'ge');
+      final shown = container
+          .read(expenseListProvider(key))
+          .value!
+          .items
+          .firstWhere((e) => e.id == 'ge');
+      expect(shown.groupId, 'g1');
+      expect(shown.isSyncing, isFalse);
+      expect(container.read(failureReporterProvider)?.failure, result.failure);
+    });
+
+    test('already in that scope is explained as such', () async {
       final notifier = await load();
       final original = backend.expenses.rows.firstWhere((e) => e.id == 'e2');
-      backend.expenses.failDeleteIds.add('e2');
+      backend.expenses.failMoves = const AppFailure.validation(
+        key: 'invalid_target',
+      );
+      final result = await notifier.moveTo(original, groupId: 'g1');
+      expect(
+        result.failure,
+        const AppFailure.validation(key: 'expense_scope_unchanged'),
+      );
+      expect(ids(), ['e2', 'e1']);
+    });
 
-      final failure = await notifier.convert(
+    test('undo moves the expense back with the same call', () async {
+      final notifier = await load();
+      final original = backend.expenses.rows.firstWhere((e) => e.id == 'e2');
+      final there = await notifier.move(
         original,
         ExpenseDraft.fromExpense(original, groupId: 'g1'),
       );
+      expect(ids(), ['e1']);
 
-      expect(failure, isA<PermissionDeniedFailure>());
-      expect(backend.expenses.rows.where((e) => e.groupId == 'g1'), isEmpty);
-      expect(backend.expenses.rows.where((e) => e.id == 'e2'), hasLength(1));
-      expect(ids(), ['e2', 'e1']);
-      expect(container.read(failureReporterProvider)?.failure, failure);
+      final back = await notifier.moveTo(there.moved!, groupId: null);
+
+      expect(back.failure, isNull);
+      expect(backend.expenses.moves, [('e2', 'g1'), (there.moved!.id, null)]);
+      expect(back.moved?.isPersonal, isTrue);
+      expect(ids(), [back.moved!.id, 'e1']);
+    });
+
+    test('an answer lost in transit reloads instead of guessing', () async {
+      final notifier = await load();
+      final original = backend.expenses.rows.firstWhere((e) => e.id == 'e2');
+      backend.expenses.failMoves = const AppFailure.network();
+      final revision = container.read(dataRevisionProvider).expenses;
+
+      final result = await notifier.moveTo(original, groupId: 'g1');
+
+      expect(
+        result.failure,
+        const AppFailure.network(key: 'expense_unconfirmed'),
+      );
+      expect(container.read(dataRevisionProvider).expenses, revision + 1);
     });
 
     test('report: false returns the failure without reporting it', () async {
@@ -522,6 +612,67 @@ void main() {
       state = container.read(expenseListProvider(personal)).value!;
       expect(state.loadMoreFailure, isNull);
       expect(state.items, hasLength(40));
+    });
+  });
+
+  group('locked group expenses', () {
+    GroupMember member(
+      String id, {
+      MemberStatus status = MemberStatus.approved,
+    }) => memberOf(id, status: status);
+
+    test('unlocked while everyone who shares it is an approved member', () {
+      expect(
+        isExpenseLocked(
+          payerId: 'u1',
+          participants: ['u1', 'u2'],
+          members: [
+            member('u1'),
+            memberOf('u2', role: GroupRole.viewer),
+          ],
+        ),
+        isFalse,
+      );
+    });
+
+    test('locked when a participant left, is pending or was deleted', () {
+      final members = [
+        member('u1'),
+        member('u3', status: MemberStatus.pending),
+      ];
+      for (final participants in [
+        ['u1', 'u2'],
+        ['u1', 'u3'],
+        ['u1', null],
+      ]) {
+        expect(
+          isExpenseLocked(
+            payerId: 'u1',
+            participants: participants,
+            members: members,
+          ),
+          isTrue,
+          reason: '$participants',
+        );
+      }
+      expect(
+        isExpenseLocked(payerId: null, participants: [], members: members),
+        isTrue,
+      );
+    });
+
+    test('the provider checks the splits against the members', () async {
+      backend.groups.membersByGroup['g1'] = [memberOf('u1'), memberOf('u2')];
+      backend.expenses.participants['left'] = ['u1', 'u-left'];
+      backend.expenses.participants['all-here'] = ['u1', 'u2'];
+      Future<bool> locked(String id) => container.read(
+        expenseLockedProvider(
+          expenseLockKeyOf(expenseOf(id, userId: 'u1', groupId: 'g1'))!,
+        ).future,
+      );
+      expect(await locked('left'), isTrue);
+      expect(await locked('all-here'), isFalse);
+      expect(expenseLockKeyOf(expenseOf('p', userId: 'u1')), isNull);
     });
   });
 }

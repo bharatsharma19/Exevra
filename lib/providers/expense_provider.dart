@@ -6,6 +6,7 @@ import '../core/errors/app_failure.dart';
 import '../core/logging/app_logger.dart';
 import '../core/utils/haptics.dart';
 import '../data/repositories/expense_repository.dart';
+import '../data/repositories/group_repository.dart';
 import '../models/expense.dart';
 import '../models/group.dart';
 import '../models/json_reader.dart';
@@ -199,6 +200,10 @@ final expenseListRegistryProvider = Provider<ExpenseListRegistry>(
   (ref) => ExpenseListRegistry(),
 );
 
+/// The outcome of [ExpenseListNotifier.move]: the moved expense (with its
+/// new server id) or the failure.
+typedef MoveResult = ({Expense? moved, AppFailure? failure});
+
 /// One expense list (keyset-paged) with optimistic writes.
 ///
 /// * Every load carries a generation number; a result that arrives after
@@ -216,8 +221,8 @@ final expenseListRegistryProvider = Provider<ExpenseListRegistry>(
 /// * Other lists, balances and insights reload through [dataRevisionProvider].
 /// * Every action captures the session it starts in (see [SessionGuard]);
 ///   when that session ended meanwhile its result is dropped: no state
-///   change, no follow-up call (a convert's delete would run with the next
-///   user's token) and no report.
+///   change, no follow-up call (a move after a saved edit would run with the
+///   next user's token) and no report.
 class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
   ExpenseListNotifier(this.key);
 
@@ -525,43 +530,87 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
     }
   }
 
-  /// Moves [original] between personal and a group by creating [target]
-  /// (the same expense with the other `groupId`) and then deleting the
-  /// original; the server never changes `group_id` in place.
+  /// Saves [target] for [original] when it belongs to another scope
+  /// (personal <-> group, or another group). Changed fields are saved
+  /// first, then the expense is moved with one server call
+  /// (`move_expense_scope`), so it is never counted twice or lost.
   ///
-  /// When the original cannot be deleted, the new copy is deleted again so
-  /// the expense is never counted twice. Returns the failure, or null when
-  /// both writes succeeded.
-  Future<AppFailure?> convert(
+  /// Shows the result at once and rolls back on failure. Returns the moved
+  /// expense (the server gives it a new id) or the failure. When the edit
+  /// was saved but the move failed, the edit stays.
+  Future<MoveResult> move(
     Expense original,
     ExpenseDraft target, {
     bool report = true,
   }) async {
     if (original.id.startsWith(Expense.localIdPrefix)) {
-      return const AppFailure.business('expense_not_saved_yet');
-    }
-    if (original.groupId == target.groupId) {
-      return edit(
-        original.copyWith(
-          title: target.title.trim(),
-          amount: target.amount,
-          category: target.category,
-          spentAt: target.spentAt.toUtc(),
-          note: target.note,
-        ),
-        report: report,
+      return const (
+        moved: null,
+        failure: AppFailure.business('expense_not_saved_yet'),
       );
     }
+    final edited = original.copyWith(
+      title: target.title.trim(),
+      amount: target.amount,
+      category: target.category,
+      spentAt: target.spentAt.toUtc(),
+      note: target.note,
+      isSyncing: false,
+    );
+    if (original.groupId == target.groupId) {
+      return (moved: null, failure: await edit(edited, report: report));
+    }
     final invalid = target.validate();
-    if (invalid != null) return AppFailure.validation(key: invalid);
+    if (invalid != null) {
+      return (moved: null, failure: AppFailure.validation(key: invalid));
+    }
+    return _move(
+      original,
+      groupId: target.groupId,
+      edited: _sameFields(edited, original) ? null : edited,
+      report: report,
+    );
+  }
+
+  /// Moves [expense] to the group [groupId] (null = personal) as it is, for
+  /// example to undo a move. See [move].
+  Future<MoveResult> moveTo(
+    Expense expense, {
+    required String? groupId,
+    bool report = true,
+  }) async {
+    if (expense.id.startsWith(Expense.localIdPrefix)) {
+      return const (
+        moved: null,
+        failure: AppFailure.business('expense_not_saved_yet'),
+      );
+    }
+    if (expense.groupId == groupId) {
+      return (
+        moved: null,
+        failure: const AppFailure.validation(key: 'expense_scope_unchanged'),
+      );
+    }
+    return _move(expense, groupId: groupId, report: report);
+  }
+
+  Future<MoveResult> _move(
+    Expense original, {
+    required String? groupId,
+    Expense? edited,
+    required bool report,
+  }) async {
     const action = 'an expense move';
     final session = _session();
-    if (!_holds(session, action)) return SessionGuard.dropped;
+    if (!_holds(session, action)) {
+      return (moved: null, failure: SessionGuard.dropped);
+    }
     final before = _find(original.id) ?? original;
-    final localId = '${Expense.localIdPrefix}${++_localIds}';
-    final optimistic = target.toOptimistic(
-      localId: localId,
-      userId: key.userId,
+    // Shown in its new scope until the server answers (the list drops it
+    // when it does not show that scope).
+    final optimistic = (edited ?? original).copyWith(
+      groupId: groupId,
+      isSyncing: true,
     );
     _update(
       (items) => _insertSorted(
@@ -569,64 +618,67 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
         optimistic,
       ),
     );
-    Expense? created;
+    Expense? savedEdit;
     try {
-      created = await _repo.create(key.userId, target);
-      // The delete would run with the next user's token. The copy and the
-      // original then both stay; the user sees both after signing in.
-      if (!_holds(session, action)) return SessionGuard.dropped;
+      if (edited != null) {
+        savedEdit = await _repo.update(edited);
+        if (!_holds(session, action)) {
+          return (moved: null, failure: SessionGuard.dropped);
+        }
+        _confirmed++;
+      }
+      final moved = await _repo.moveScope(original.id, groupId: groupId);
+      if (!_holds(session, action)) {
+        return (moved: null, failure: SessionGuard.dropped);
+      }
       _confirmed++;
-      await _repo.delete(original.id);
-      if (!_holds(session, action)) return SessionGuard.dropped;
       _deleted.add(original.id);
-      final saved = created;
       _update(
         (items) => _insertSorted(
-          items
-              .where(
-                (e) =>
-                    e.id != localId && e.id != saved.id && e.id != original.id,
-              )
-              .toList(),
-          saved,
+          items.where((e) => e.id != original.id && e.id != moved.id).toList(),
+          moved,
         ),
       );
       _changed();
       AppHaptics.success();
-      return null;
+      return (moved: moved, failure: null);
     } on AppFailure catch (failure) {
-      if (!_holds(session, action)) return SessionGuard.dropped;
-      final copy = created;
-      final unsure = _inTransit(failure);
-      // After a failure in transit the original may already be gone, so
-      // the copy is kept (a reload shows what exists) rather than risking
-      // losing the expense.
-      if (copy != null && !unsure) {
-        try {
-          await _repo.delete(copy.id);
-          if (!_holds(session, action)) return SessionGuard.dropped;
-          _deleted.add(copy.id);
-          _confirmed++;
-        } on AppFailure catch (undoFailure) {
-          if (!_holds(session, action)) return SessionGuard.dropped;
-          // Both rows exist now; a reload shows them so nothing is hidden.
-          AppLogger.warn('Could not remove the converted copy', undoFailure);
-          _reloadAll();
-        }
+      if (!_holds(session, action)) {
+        return (moved: null, failure: SessionGuard.dropped);
       }
-      _update((items) {
-        final rest = items
-            .where((e) => e.id != localId && e.id != original.id)
-            .toList();
-        return _insertSorted(rest, before);
-      });
-      return session.fail(
-        unsure ? _unconfirmed() : failure,
-        action,
-        report: report,
+      final unsure = _inTransit(failure);
+      _update(
+        (items) => _insertSorted(
+          items.where((e) => e.id != original.id).toList(),
+          savedEdit ?? before,
+        ),
+      );
+      // A saved edit changed the data even though the move failed.
+      if (savedEdit != null && !unsure) _changed();
+      return (
+        moved: null,
+        failure: session.fail(
+          unsure ? _unconfirmed() : _moveFailure(failure),
+          action,
+          report: report,
+        ),
       );
     }
   }
+
+  /// `invalid_target` from a move means the expense is already there.
+  static AppFailure _moveFailure(AppFailure failure) =>
+      failure.key == 'invalid_target'
+      ? const AppFailure.validation(key: 'expense_scope_unchanged')
+      : failure;
+
+  /// Whether [a] and [b] hold the same editable fields.
+  static bool _sameFields(Expense a, Expense b) =>
+      a.title == b.title &&
+      a.amount == b.amount &&
+      a.category == b.category &&
+      a.spentAt.isAtSameMomentAs(b.spentAt) &&
+      a.note == b.note;
 
   Expense? _find(String id) {
     for (final e in state.value?.items ?? const <Expense>[]) {
@@ -760,3 +812,68 @@ final expenseListProvider = AsyncNotifierProvider.autoDispose
     .family<ExpenseListNotifier, ExpenseListState, ExpenseListKey>(
       ExpenseListNotifier.new,
     );
+
+/// Identifies a group expense for [expenseLockedProvider].
+typedef ExpenseLockKey = ({String expenseId, String groupId, String? payerId});
+
+/// The [ExpenseLockKey] of [expense], or null for a personal expense
+/// (which is never locked) or one that is not saved yet.
+ExpenseLockKey? expenseLockKeyOf(Expense expense) {
+  final groupId = expense.groupId;
+  if (groupId == null || expense.id.startsWith(Expense.localIdPrefix)) {
+    return null;
+  }
+  return (expenseId: expense.id, groupId: groupId, payerId: expense.userId);
+}
+
+/// Whether a group expense is locked because someone who shares it (the
+/// payer or anyone in its split) is no longer an approved member of the
+/// group. The server then refuses amount and payer changes, deletion and
+/// moves (`expense_locked_member_left`); title, category, note and date
+/// stay editable.
+///
+/// False while signed out and when the check itself fails: the server
+/// still enforces the rule, and its error is shown then.
+final expenseLockedProvider = FutureProvider.autoDispose
+    .family<bool, ExpenseLockKey>((ref, key) async {
+      if (ref.watch(currentUserIdProvider) == null) return false;
+      // Joins, leaves and removals change the answer.
+      ref.watch(dataRevisionProvider.select((r) => r.members));
+      try {
+        final participants = await ref
+            .watch(expenseRepositoryProvider)
+            .fetchParticipants(key.expenseId);
+        final members = await ref
+            .watch(groupRepositoryProvider)
+            .fetchMembers(key.groupId);
+        // No visible members: the caller cannot tell (for example after
+        // leaving); the server decides.
+        if (members.isEmpty) return false;
+        return isExpenseLocked(
+          payerId: key.payerId,
+          participants: participants,
+          members: members,
+        );
+      } on AppFailure catch (failure) {
+        AppLogger.warn('Could not check whether an expense is locked', failure);
+        return false;
+      }
+    });
+
+/// The rule behind [expenseLockedProvider]: locked when the payer or any
+/// participant is a deleted account (null) or not an approved member.
+/// Viewers still count as members.
+bool isExpenseLocked({
+  required String? payerId,
+  required List<String?> participants,
+  required List<GroupMember> members,
+}) {
+  final approved = {
+    for (final m in members)
+      if (m.status == MemberStatus.approved) m.userId,
+  };
+  return [
+    payerId,
+    ...participants,
+  ].any((id) => id == null || !approved.contains(id));
+}

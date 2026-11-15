@@ -723,6 +723,56 @@ class FakeExpenseRepository implements ExpenseRepository {
     rows.removeWhere((e) => e.id == expenseId);
   }
 
+  /// Moves made through [moveScope]: (expense id, target group id).
+  final List<(String, String?)> moves = [];
+
+  /// When set, [moveScope] throws it (after [failWrites]).
+  AppFailure? failMoves;
+
+  /// Split participants per expense id, for the lock check.
+  final Map<String, List<String?>> participants = {};
+  int participantFetches = 0;
+
+  @override
+  Future<Expense> moveScope(
+    String expenseId, {
+    required String? groupId,
+  }) async {
+    await Future<void>.delayed(Duration.zero);
+    await holdWrites?.future;
+    final failure = failWrites ?? failMoves;
+    if (failure != null) throw failure;
+    final index = rows.indexWhere((e) => e.id == expenseId);
+    if (index < 0) {
+      throw const AppFailure.notFound(key: 'expense_not_found');
+    }
+    final old = rows[index];
+    if (old.groupId == groupId) {
+      throw const AppFailure.validation(key: 'invalid_target');
+    }
+    moves.add((expenseId, groupId));
+    final now = DateTime.now().toUtc();
+    final moved = old.copyWith(
+      id: 'srv-${++_ids}',
+      groupId: groupId,
+      createdAt: now,
+      updatedAt: now,
+      isSyncing: false,
+    );
+    rows
+      ..removeAt(index)
+      ..add(moved);
+    return moved;
+  }
+
+  @override
+  Future<List<String?>> fetchParticipants(String expenseId) async {
+    participantFetches++;
+    final failure = failReads;
+    if (failure != null) throw failure;
+    return participants[expenseId] ?? const [];
+  }
+
   /// Realtime changes pushed by the test (per group).
   final StreamController<GroupChange> realtime =
       StreamController<GroupChange>.broadcast();
