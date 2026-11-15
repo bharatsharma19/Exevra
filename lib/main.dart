@@ -124,6 +124,18 @@ class _ExevraAppState extends ConsumerState<ExevraApp>
     ref.read(appLockProvider.notifier).onLifecycleChanged(state);
   }
 
+  /// System Back while the lock screen (or the privacy cover) shows never
+  /// navigates the app below it. Like Back on the first screen, it moves
+  /// the app to the background. This observer is registered before the
+  /// router's, so it sees Back first.
+  @override
+  Future<bool> didPopRoute() async {
+    final lock = ref.read(appLockProvider);
+    if (!lock.showLockScreen && !lock.coverVisible) return false;
+    await SystemNavigator.pop();
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);

@@ -80,10 +80,40 @@ final localAuthProvider = Provider<LocalAuthentication>(
   (ref) => LocalAuthentication(),
 );
 
+/// Time for the background timeout.
+///
+/// [elapsed] is monotonic: it never moves when the device clock is changed,
+/// so turning the clock back cannot keep the app unlocked. It may stand
+/// still while the device sleeps, so the wall clock ([now]) also counts:
+/// the app locks when either says the time away was long enough (a wall
+/// clock moved forward can only lock sooner).
+class AppLockClock {
+  AppLockClock({Duration Function()? elapsed, DateTime Function()? now})
+    : elapsed = elapsed ?? _stopwatch(),
+      now = now ?? DateTime.now;
+
+  static Duration Function() _stopwatch() {
+    final stopwatch = Stopwatch()..start();
+    return () => stopwatch.elapsed;
+  }
+
+  final Duration Function() elapsed;
+  final DateTime Function() now;
+
+  /// The current moment on both clocks.
+  LockInstant mark() => (elapsed: elapsed(), wall: now());
+
+  /// Whether at least [limit] passed since [since].
+  bool hasPassed(LockInstant since, Duration limit) =>
+      elapsed() - since.elapsed >= limit ||
+      now().difference(since.wall) >= limit;
+}
+
+/// A moment on the monotonic and the wall clock.
+typedef LockInstant = ({Duration elapsed, DateTime wall});
+
 /// Clock used for the background timeout (replaced in tests).
-final appLockClockProvider = Provider<DateTime Function()>(
-  (ref) => DateTime.now,
-);
+final appLockClockProvider = Provider<AppLockClock>((ref) => AppLockClock());
 
 /// App Lock for the signed-in user.
 ///
@@ -101,7 +131,7 @@ class AppLockController extends Notifier<AppLockState> {
   static const Duration relockAfter = Duration(seconds: 30);
   static const String unlockReason = 'Unlock Exevra';
 
-  DateTime? _backgroundedAt;
+  LockInstant? _backgroundedAt;
 
   /// The last life-cycle state reported (null before the first).
   AppLifecycleState? _lifecycle;
@@ -282,14 +312,14 @@ class AppLockController extends Notifier<AppLockState> {
   void onLifecycleChanged(AppLifecycleState lifecycle) {
     _lifecycle = lifecycle;
     if (_userId == null || !state.enabled) return;
-    final now = ref.read(appLockClockProvider)();
+    final clock = ref.read(appLockClockProvider);
     if (state.isAuthenticating) {
       // The system prompt itself makes the app inactive; that is not
       // leaving the app. Time in the background still counts, and is
       // judged when the prompt ends (see [_afterPrompt]).
       if (lifecycle == AppLifecycleState.hidden ||
           lifecycle == AppLifecycleState.paused) {
-        _backgroundedAt ??= now;
+        _backgroundedAt ??= clock.mark();
       }
       return;
     }
@@ -297,12 +327,12 @@ class AppLockController extends Notifier<AppLockState> {
       case AppLifecycleState.inactive:
         state = state.copyWith(coverVisible: true);
       case AppLifecycleState.hidden || AppLifecycleState.paused:
-        _backgroundedAt ??= now;
+        _backgroundedAt ??= clock.mark();
         state = state.copyWith(coverVisible: true);
       case AppLifecycleState.resumed:
         final since = _backgroundedAt;
         _backgroundedAt = null;
-        final relock = since != null && now.difference(since) >= relockAfter;
+        final relock = since != null && clock.hasPassed(since, relockAfter);
         state = state.copyWith(
           coverVisible: false,
           locked: state.locked || relock,
@@ -327,8 +357,7 @@ class AppLockController extends Notifier<AppLockState> {
     final since = _backgroundedAt;
     _backgroundedAt = null;
     if (since == null || !state.enabled) return;
-    final now = ref.read(appLockClockProvider)();
-    if (now.difference(since) >= relockAfter) {
+    if (ref.read(appLockClockProvider).hasPassed(since, relockAfter)) {
       state = state.copyWith(locked: true, coverVisible: false);
     }
   }

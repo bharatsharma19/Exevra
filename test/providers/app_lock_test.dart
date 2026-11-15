@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:expense_manager/core/platform/secure_window.dart';
+import 'package:expense_manager/core/router/app_router.dart';
 import 'package:expense_manager/core/storage/preferences.dart';
 import 'package:expense_manager/features/auth/screens/app_lock_screen.dart';
 import 'package:expense_manager/features/auth/screens/login_screen.dart';
@@ -54,12 +55,22 @@ void main() {
 
   late TestBackend backend;
   late FakeLocalAuth localAuth;
+  // The wall clock and the monotonic clock of the background timeout.
   late DateTime now;
+  late Duration elapsed;
+
+  /// Time passes on both clocks.
+  void advance(Duration d) {
+    now = now.add(d);
+    elapsed += d;
+  }
+
   final secureCalls = <bool>[];
 
   setUp(() {
     localAuth = FakeLocalAuth();
     now = DateTime(2026, 11, 15, 10);
+    elapsed = Duration.zero;
     secureCalls.clear();
     SecureWindow.resetForTest();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -87,7 +98,9 @@ void main() {
       },
       extraOverrides: [
         localAuthProvider.overrideWithValue(localAuth),
-        appLockClockProvider.overrideWithValue(() => now),
+        appLockClockProvider.overrideWithValue(
+          AppLockClock(elapsed: () => elapsed, now: () => now),
+        ),
       ],
     );
     addTearDown(container.dispose);
@@ -141,7 +154,7 @@ void main() {
       ]) {
         lockOf(c).onLifecycleChanged(s);
       }
-      now = now.add(away);
+      advance(away);
       for (final s in [
         AppLifecycleState.hidden,
         AppLifecycleState.inactive,
@@ -264,15 +277,57 @@ void main() {
     lock
       ..onLifecycleChanged(AppLifecycleState.hidden)
       ..onLifecycleChanged(AppLifecycleState.paused);
-    now = now.add(const Duration(seconds: 10));
+    advance(const Duration(seconds: 10));
     lock.onLifecycleChanged(AppLifecycleState.resumed);
     expect(c.read(appLockProvider).coverVisible, isFalse);
     expect(c.read(appLockProvider).showLockScreen, isFalse);
 
     lock.onLifecycleChanged(AppLifecycleState.paused);
-    now = now.add(const Duration(seconds: 31));
+    advance(const Duration(seconds: 31));
     lock.onLifecycleChanged(AppLifecycleState.resumed);
     expect(c.read(appLockProvider).showLockScreen, isTrue);
+  });
+
+  group('the background timeout', () {
+    Future<ProviderContainer> away() async {
+      final c = await start(signedInAs: 'A');
+      await lockOf(c).setEnabled(true);
+      lockOf(c)
+        ..onLifecycleChanged(AppLifecycleState.inactive)
+        ..onLifecycleChanged(AppLifecycleState.paused);
+      return c;
+    }
+
+    bool returnLocked(ProviderContainer c) {
+      lockOf(c).onLifecycleChanged(AppLifecycleState.resumed);
+      return c.read(appLockProvider).showLockScreen;
+    }
+
+    test('setting the device clock back does not skip the lock', () async {
+      final c = await away();
+      elapsed += const Duration(minutes: 2);
+      now = now.subtract(const Duration(hours: 1));
+      expect(returnLocked(c), isTrue);
+    });
+
+    test('setting the device clock forward alone locks no later', () async {
+      final c = await away();
+      elapsed += const Duration(seconds: 5);
+      now = now.add(const Duration(minutes: 5));
+      expect(returnLocked(c), isTrue);
+    });
+
+    test('a short time away on both clocks stays unlocked', () async {
+      final c = await away();
+      advance(const Duration(seconds: 29));
+      expect(returnLocked(c), isFalse);
+    });
+
+    test('the default clock is monotonic', () {
+      final clock = AppLockClock();
+      final first = clock.elapsed();
+      expect(clock.elapsed() >= first, isTrue);
+    });
   });
 
   test('signing out keeps the flag, so signing back in is locked', () async {
@@ -428,6 +483,8 @@ void main() {
       }
     }
 
+    final platformCalls = <String>[];
+
     Future<ProviderContainer> pumpApp(
       WidgetTester tester, {
       bool lockOn = false,
@@ -435,11 +492,12 @@ void main() {
       tester.view.physicalSize = const Size(1800, 4800);
       tester.view.devicePixelRatio = 3;
       addTearDown(tester.view.reset);
+      platformCalls.clear();
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(
-            SystemChannels.platform,
-            (call) async => null,
-          );
+          .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+            platformCalls.add(call.method);
+            return null;
+          });
       final c = (await tester.runAsync(
         () => start(signedInAs: 'A', lockOn: lockOn),
       ))!;
@@ -473,12 +531,60 @@ void main() {
         const LocalAuthException(code: LocalAuthExceptionCode.userCanceled),
       );
       lockOf(c).onLifecycleChanged(AppLifecycleState.paused);
-      now = now.add(const Duration(minutes: 1));
+      advance(const Duration(minutes: 1));
       lockOf(c).onLifecycleChanged(AppLifecycleState.resumed);
       await frames(tester);
 
       expect(find.byType(AppLockScreen), findsOneWidget);
       expect(find.text(secret), findsNothing);
+    });
+
+    testWidgets('Back while locked leaves the app, not the screen below', (
+      tester,
+    ) async {
+      final c = await pumpApp(tester, lockOn: true);
+      const question = 'Delete this expense?';
+      var closed = false;
+      unawaited(
+        showDialog<void>(
+          context: c
+              .read(routerProvider)
+              .routerDelegate
+              .navigatorKey
+              .currentContext!,
+          builder: (_) => const AlertDialog(content: Text(question)),
+        ).then((_) => closed = true),
+      );
+      await frames(tester);
+      expect(find.text(question), findsOneWidget);
+
+      localAuth.answers.add(
+        const LocalAuthException(code: LocalAuthExceptionCode.userCanceled),
+      );
+      lockOf(c).onLifecycleChanged(AppLifecycleState.paused);
+      advance(const Duration(minutes: 1));
+      lockOf(c).onLifecycleChanged(AppLifecycleState.resumed);
+      await frames(tester);
+      expect(find.byType(AppLockScreen), findsOneWidget);
+
+      platformCalls.clear();
+      expect(await tester.binding.handlePopRoute(), isTrue);
+      await frames(tester);
+
+      expect(closed, isFalse);
+      expect(find.text(question), findsOneWidget);
+      expect(find.byType(AppLockScreen), findsOneWidget);
+      expect(platformCalls, contains('SystemNavigator.pop'));
+
+      // Unlocked, Back navigates as usual.
+      expect(await lockOf(c).unlock(), isTrue);
+      await frames(tester);
+      platformCalls.clear();
+      expect(await tester.binding.handlePopRoute(), isTrue);
+      await frames(tester);
+      expect(closed, isTrue);
+      expect(find.text(question), findsNothing);
+      expect(platformCalls, isNot(contains('SystemNavigator.pop')));
     });
 
     testWidgets('no snack bar of A survives sign-out or reaches B', (
