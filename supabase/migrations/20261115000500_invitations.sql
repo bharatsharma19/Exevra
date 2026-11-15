@@ -124,7 +124,7 @@ DROP POLICY IF EXISTS group_invitations_select_admin_pending ON public.group_inv
 
 CREATE POLICY group_invitations_select_admin_pending ON public.group_invitations
     FOR SELECT TO authenticated
-    USING (status = 'pending' AND expires_at > now() AND public.is_group_admin(group_id));
+    USING (status = 'pending' AND expires_at > now() AND group_id IN (SELECT public.get_auth_user_admin_groups()));
 
 -- -----------------------------------------------------------------------------
 -- Internal helpers

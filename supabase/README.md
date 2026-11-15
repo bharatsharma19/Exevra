@@ -114,6 +114,13 @@ supabase db push --remote --dry-run         # lists the migrations after the bas
 supabase db push --remote
 ```
 
+Default privileges: from the second migration on, tables, sequences and functions created by
+`postgres` in `public` grant nothing to `anon` or `authenticated`, and functions `postgres` creates in
+any schema are not executable by `PUBLIC`. Every privilege the app needs is granted explicitly in the
+migration that creates the object, so a new table or function in a later migration needs its own
+`GRANT`. (`supabase_admin`'s default privileges cannot be changed by `postgres` on the hosted project;
+only platform operations create objects as that role.)
+
 After pushing, run the Security and Performance Advisors in the dashboard and confirm that client
 roles cannot create temporary objects (both values must be `false`):
 

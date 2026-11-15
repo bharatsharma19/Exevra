@@ -17,8 +17,33 @@
 -- this file never reverts newer function versions.
 -- =============================================================================
 
--- New functions created by `postgres` in `public` must not be executable by `anon` by default.
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM anon;
+-- -----------------------------------------------------------------------------
+-- Default privileges: objects created from here on need explicit grants
+--
+-- Tables, sequences and functions that postgres creates in public grant NOTHING to anon or
+-- authenticated, and functions postgres creates in any schema are not executable by PUBLIC (a
+-- per-schema entry cannot take away the built-in PUBLIC EXECUTE, so that revoke is global). Every
+-- privilege the app needs is therefore granted explicitly by the migration that creates the object.
+-- supabase_admin's defaults in public (which grant to anon and authenticated) are changed too when the
+-- migration role is allowed to; on the hosted project postgres is not a member of supabase_admin, and
+-- only platform operations create objects as supabase_admin.
+-- -----------------------------------------------------------------------------
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM anon, authenticated, PUBLIC;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'supabase_admin')
+       AND pg_catalog.pg_has_role(current_user, 'supabase_admin', 'USAGE') THEN
+        ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;
+        ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon, authenticated;
+        ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM anon, authenticated, PUBLIC;
+    ELSE
+        RAISE NOTICE 'default privileges of supabase_admin left unchanged (% is not a member of supabase_admin)', current_user;
+    END IF;
+END;
+$$;
 
 -- -----------------------------------------------------------------------------
 -- Trigger functions

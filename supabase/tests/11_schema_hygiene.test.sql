@@ -207,7 +207,7 @@ as $$ select s.id from tests.settlements as s where s.name = p_name $$;
 
 grant execute on all functions in schema tests to anon, authenticated;
 
-select plan(25);
+select plan(33);
 
 -- ===========================================================================
 -- Row level security and policies
@@ -321,6 +321,48 @@ select throws_ok($$ create domain pg_temp.text as pg_catalog.text $$, '42501', n
 select throws_ok($$ create temporary table t_probe (x int) $$, '42501', null,
                  'an authenticated session cannot create temporary tables');
 reset role;
+
+-- ===========================================================================
+-- Policy performance: membership helpers are uncorrelated subqueries, never per-row calls
+-- ===========================================================================
+select is((select array_agg(tablename || '.' || policyname order by 1) from pg_policies
+           where schemaname = 'public'
+             and (coalesce(qual, '') || ' ' || coalesce(with_check, '')) ~ '(is_group_admin|group_role)\('),
+          null, 'no policy calls is_group_admin() or group_role() once per row');
+select is((select array_agg(tablename || '.' || policyname order by 1) from pg_policies
+           where schemaname = 'public'
+             and regexp_count(coalesce(qual, '') || ' ' || coalesce(with_check, ''), 'get_auth_user_\w+\(\)')
+                 <> regexp_count(coalesce(qual, '') || ' ' || coalesce(with_check, ''), 'SELECT get_auth_user_\w+\(\)')),
+          null, 'every membership helper in a policy is wrapped in a subquery (evaluated once per statement)');
+
+-- ===========================================================================
+-- Default privileges: objects created later grant nothing to client roles until granted explicitly
+-- ===========================================================================
+select is((select array_agg(d.defaclobjtype::text || ':' || a.grantee::regrole::text order by 1)
+           from pg_default_acl as d
+           cross join lateral aclexplode(d.defaclacl) as a
+           where d.defaclrole = 'postgres'::regrole and d.defaclnamespace = 'public'::regnamespace
+             and a.grantee in ('anon'::regrole, 'authenticated'::regrole)),
+          null, 'postgres'' default privileges in public grant nothing to anon or authenticated');
+select ok(exists (select 1 from pg_default_acl as d
+                  where d.defaclrole = 'postgres'::regrole and d.defaclnamespace = 0 and d.defaclobjtype = 'f'
+                    and not exists (select 1 from aclexplode(d.defaclacl) as a where a.grantee = 0)),
+          'functions postgres creates are not executable by PUBLIC by default');
+create table public.zz_probe_table (id int);
+create sequence public.zz_probe_seq;
+create function public.zz_probe_fn() returns int language sql as 'select 1';
+select ok(not (has_table_privilege('anon', 'public.zz_probe_table', 'select') or has_table_privilege('authenticated', 'public.zz_probe_table', 'select')
+               or has_table_privilege('authenticated', 'public.zz_probe_table', 'insert') or has_table_privilege('authenticated', 'public.zz_probe_table', 'delete')),
+          'a new table grants nothing to client roles');
+select ok(not (has_sequence_privilege('anon', 'public.zz_probe_seq', 'usage') or has_sequence_privilege('authenticated', 'public.zz_probe_seq', 'usage')),
+          'a new sequence grants nothing to client roles');
+select ok(not (has_function_privilege('anon', 'public.zz_probe_fn()', 'execute') or has_function_privilege('authenticated', 'public.zz_probe_fn()', 'execute')),
+          'a new function is not executable by client roles until granted');
+select ok(has_table_privilege('service_role', 'public.zz_probe_table', 'select') and has_function_privilege('service_role', 'public.zz_probe_fn()', 'execute'),
+          'service_role keeps its default privileges');
+drop function public.zz_probe_fn();
+drop sequence public.zz_probe_seq;
+drop table public.zz_probe_table;
 
 -- ===========================================================================
 -- Membership freeze still lets a foreign-key action clear invited_by

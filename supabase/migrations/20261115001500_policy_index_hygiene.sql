@@ -1,12 +1,14 @@
 -- =============================================================================
 -- Policy, privilege, index and Realtime hygiene (final pass over the whole public schema)
 --
--- * Every policy is scoped TO authenticated, one command per policy, and uses (select auth.uid()).
+-- * Every policy is scoped TO authenticated, one command per policy, and uses (select auth.uid());
+--   membership helpers appear only as uncorrelated subqueries (group_id IN (SELECT ...)), never as a
+--   per-row call such as is_group_admin(group_id).
 --   The last exception (invite_code_attempts, FOR ALL to anon and authenticated) is replaced by a
 --   deny-all SELECT policy for authenticated; the table has no client privileges at all.
--- * anon holds no privileges on any public table, sequence or function, now or for objects created
---   later by postgres. authenticated holds no privileges on public sequences (no client inserts into a
---   table with an identity column), now or later.
+-- * anon holds no privileges on any public table, sequence or function. authenticated holds no
+--   privileges on public sequences (no client inserts into a table with an identity column).
+-- * Objects created later grant nothing to client roles by default (see 20261115000100).
 -- * Client roles (anon, authenticated, and authenticator, which switches to them) cannot create
 --   temporary objects. Every SECURITY DEFINER function pins search_path = '', but PostgreSQL still
 --   resolves unqualified type and relation names in pg_temp first; without TEMP a session cannot
@@ -43,17 +45,16 @@ BEGIN
     END LOOP;
 END;
 $$;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON TABLES FROM anon;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM anon, PUBLIC;
 REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM anon;
+
+-- Default privileges (future objects grant nothing to client roles) are set at the start of the
+-- series, in 20261115000100_function_hardening.sql.
 
 -- -----------------------------------------------------------------------------
 -- Sequences: no client access (the only one, invite_code_attempts_id_seq, is written by
 -- join_group_by_code as its owner).
 -- -----------------------------------------------------------------------------
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon, authenticated;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON SEQUENCES FROM authenticated;
 
 -- -----------------------------------------------------------------------------
 -- Temporary objects: none for client roles. TEMPORARY is granted to PUBLIC by default, so it is

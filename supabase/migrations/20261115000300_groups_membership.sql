@@ -246,6 +246,18 @@ AS $$
     );
 $$;
 
+-- Groups the caller administers. Policies use it as `group_id IN (SELECT ...)`: an uncorrelated
+-- subquery evaluated once per statement, instead of one is_group_admin() call per row.
+CREATE OR REPLACE FUNCTION public.get_auth_user_admin_groups()
+RETURNS SETOF uuid
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+    SELECT g.id FROM public.groups AS g WHERE g.admin_id = auth.uid();
+$$;
+
 -- Successor rule shared by leave_group and account deletion: the longest-standing other approved
 -- member (ties broken by user_id). NULL when there is none.
 CREATE OR REPLACE FUNCTION public.pick_successor_admin(p_group_id uuid, p_excluding uuid)
@@ -267,10 +279,12 @@ $$;
 REVOKE ALL ON FUNCTION public.get_auth_user_groups() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.group_role(uuid) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.is_group_admin(uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.get_auth_user_admin_groups() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.pick_successor_admin(uuid, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_auth_user_groups() TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.group_role(uuid) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.is_group_admin(uuid) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.get_auth_user_admin_groups() TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.pick_successor_admin(uuid, uuid) TO service_role;
 
 -- -----------------------------------------------------------------------------
@@ -404,14 +418,14 @@ CREATE POLICY group_members_select ON public.group_members
     USING (
         user_id = (SELECT auth.uid())
         OR (status = 'approved' AND group_id IN (SELECT public.get_auth_user_groups()))
-        OR public.is_group_admin(group_id)
+        OR group_id IN (SELECT public.get_auth_user_admin_groups())
     );
 
 -- group_bans: visible to the group admin only.
 DROP POLICY IF EXISTS group_bans_select_admin ON public.group_bans;
 CREATE POLICY group_bans_select_admin ON public.group_bans
     FOR SELECT TO authenticated
-    USING (public.is_group_admin(group_id));
+    USING (group_id IN (SELECT public.get_auth_user_admin_groups()));
 
 -- -----------------------------------------------------------------------------
 -- RPCs

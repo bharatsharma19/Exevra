@@ -347,7 +347,7 @@ CREATE POLICY expenses_delete ON public.expenses
     FOR DELETE TO authenticated
     USING (
         (group_id IS NULL AND user_id = (SELECT auth.uid()))
-        OR (group_id IS NOT NULL AND public.is_group_admin(group_id))
+        OR group_id IN (SELECT public.get_auth_user_admin_groups())
         OR (user_id = (SELECT auth.uid()) AND group_id IN (SELECT public.get_auth_user_writable_groups()))
     );
 
