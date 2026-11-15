@@ -204,12 +204,12 @@ select is((select extnamespace::regnamespace::text from pg_extension where extna
 select tests.create_user('hygiene_admin');
 select tests.create_group_as('hygiene_admin', 'Hygiene');
 select tests.authenticate_as('hygiene_admin');
-create temporary table search_path_before as select current_setting('search_path') as value;
+select set_config('tests.search_path_before', current_setting('search_path'), true);
 select lives_ok(
     $$ select public.create_group_invitation(tests.gid('Hygiene'), 'friend@example.test', 'member') $$,
     'create_group_invitation runs with pgcrypto in the extensions schema'
 );
-select is(current_setting('search_path'), (select value from search_path_before),
+select is(current_setting('search_path'), current_setting('tests.search_path_before'),
           'calling a definer function does not change the session search_path');
 
 reset role;

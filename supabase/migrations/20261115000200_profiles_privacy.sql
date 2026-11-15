@@ -84,6 +84,17 @@ CREATE INDEX IF NOT EXISTS idx_profiles_group_id ON public.profiles (group_id);
 ALTER TABLE public.profiles ALTER COLUMN created_at SET DEFAULT now();
 ALTER TABLE public.profiles ALTER COLUMN updated_at SET DEFAULT now();
 
+-- The legacy clean-up below is not a user edit: pause the old updated_at trigger so existing rows keep
+-- their updated_at. Resumed after the clean-up.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_trigger
+               WHERE tgrelid = 'public.profiles'::regclass AND tgname = 'trigger_profiles_updated_at') THEN
+        ALTER TABLE public.profiles DISABLE TRIGGER trigger_profiles_updated_at;
+    END IF;
+END;
+$$;
+
 -- Legacy consent has no timestamp: use the last profile update as the best available value.
 UPDATE public.profiles SET ai_consent_at = updated_at WHERE ai_consent AND ai_consent_at IS NULL;
 
@@ -244,6 +255,16 @@ UPDATE public.profiles AS p
 SET email = u.email
 FROM auth.users AS u
 WHERE u.id = p.id AND p.email IS DISTINCT FROM u.email;
+
+-- Clean-up done: resume the updated_at trigger.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_trigger
+               WHERE tgrelid = 'public.profiles'::regclass AND tgname = 'trigger_profiles_updated_at') THEN
+        ALTER TABLE public.profiles ENABLE TRIGGER trigger_profiles_updated_at;
+    END IF;
+END;
+$$;
 
 -- -----------------------------------------------------------------------------
 -- Privileges and RLS

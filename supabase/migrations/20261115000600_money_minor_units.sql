@@ -9,9 +9,13 @@
 --   supported currency.
 --
 -- Legacy rows: the currency of a group expense becomes the group currency, a personal expense gets
--- the owner's profile currency (or INR), and amount_minor = round(amount * 10^minor_units) (at least
--- one minor unit). The NUMERIC column is dropped once converted, together with the old insights RPC
--- that read it (replaced by get_expense_insights(text, uuid, text, text, timestamptz) later).
+-- the owner's profile currency (or INR), and amount_minor = round(amount * 10^minor_units) (half away
+-- from zero, e.g. 10.005 -> 1001). Values are never clamped: if any amount would convert to less than
+-- one minor unit or more than 100,000,000,000 minor units, the migration stops with
+-- legacy_amount_out_of_range and lists the expense ids, so the owner can correct them deliberately
+-- (README: pre-flight query). created_at and updated_at of existing rows are kept. The NUMERIC column
+-- is dropped once converted, together with the old insights RPC that read it (replaced by
+-- get_expense_insights(text, uuid, text, text, timestamptz) later).
 -- Idempotent: the conversion only runs while the old column exists.
 -- =============================================================================
 
@@ -44,7 +48,20 @@ ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS amount_minor bigint;
 -- The old insights RPC reads expenses.amount; it is replaced later in this series.
 DROP FUNCTION IF EXISTS public.get_expense_insights(text, uuid);
 
+-- The legacy clean-up below is not a user edit: pause the old updated_at trigger so that
+-- existing rows keep their updated_at. Resumed at the end of the clean-up.
 DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_trigger
+               WHERE tgrelid = 'public.expenses'::regclass AND tgname = 'trigger_expenses_updated_at') THEN
+        ALTER TABLE public.expenses DISABLE TRIGGER trigger_expenses_updated_at;
+    END IF;
+END;
+$$;
+
+DO $$
+DECLARE
+    v_bad text;
 BEGIN
     IF EXISTS (
         SELECT 1 FROM information_schema.columns
@@ -66,12 +83,29 @@ BEGIN
         WHERE e.group_id IS NULL
           AND (e.currency IS NULL OR NOT public.is_supported_currency(e.currency::text));
 
+        -- Amounts that cannot be stored exactly stop the upgrade instead of being changed.
+        EXECUTE $sql$
+            SELECT string_agg(id::text, ', ' ORDER BY id)
+            FROM (
+                SELECT id FROM public.expenses
+                WHERE amount_minor IS NULL
+                  AND round(amount * (10::numeric ^ public.currency_minor_units(currency::text)))
+                      NOT BETWEEN 1 AND 100000000000
+                ORDER BY id
+                LIMIT 50
+            ) AS bad
+        $sql$ INTO v_bad;
+        IF v_bad IS NOT NULL THEN
+            RAISE EXCEPTION 'legacy_amount_out_of_range'
+                USING ERRCODE = '22003',
+                      DETAIL = 'public.expenses ids: ' || v_bad,
+                      HINT = 'Each amount must convert to 1 .. 100000000000 minor units of its currency. '
+                          || 'Correct or delete these rows, then apply the migrations again.';
+        END IF;
+
         EXECUTE $sql$
             UPDATE public.expenses
-            SET amount_minor = LEAST(
-                    100000000000::bigint,
-                    GREATEST(1::bigint,
-                             round(amount * (10::numeric ^ public.currency_minor_units(currency::text)))::bigint))
+            SET amount_minor = round(amount * (10::numeric ^ public.currency_minor_units(currency::text)))::bigint
             WHERE amount_minor IS NULL
         $sql$;
 
@@ -88,6 +122,16 @@ SET currency = COALESCE(
      WHERE p.id = e.user_id AND public.is_supported_currency(p.currency::text)),
     'INR')
 WHERE e.currency IS NULL;
+
+-- Resume the updated_at trigger paused above.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_trigger
+               WHERE tgrelid = 'public.expenses'::regclass AND tgname = 'trigger_expenses_updated_at') THEN
+        ALTER TABLE public.expenses ENABLE TRIGGER trigger_expenses_updated_at;
+    END IF;
+END;
+$$;
 
 ALTER TABLE public.expenses ALTER COLUMN currency SET NOT NULL;
 ALTER TABLE public.expenses ALTER COLUMN amount_minor SET NOT NULL;

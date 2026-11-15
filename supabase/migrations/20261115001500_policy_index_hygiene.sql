@@ -5,7 +5,12 @@
 --   The last exception (invite_code_attempts, FOR ALL to anon and authenticated) is replaced by a
 --   deny-all SELECT policy for authenticated; the table has no client privileges at all.
 -- * anon holds no privileges on any public table, sequence or function, now or for objects created
---   later by postgres.
+--   later by postgres. authenticated holds no privileges on public sequences (no client inserts into a
+--   table with an identity column), now or later.
+-- * Client roles (anon, authenticated, and authenticator, which switches to them) cannot create
+--   temporary objects. Every SECURITY DEFINER function pins search_path = '', but PostgreSQL still
+--   resolves unqualified type and relation names in pg_temp first; without TEMP a session cannot
+--   place objects there. PostgREST never needs temporary objects. Every other role keeps TEMP.
 -- * Indexes: every foreign key has a covering index; keyset pagination indexes on expenses exist;
 --   indexes superseded by those are dropped (re-checked here so a hosted database that still has
 --   them is cleaned up).
@@ -42,6 +47,35 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON TABLES
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM anon, PUBLIC;
 REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM anon;
+
+-- -----------------------------------------------------------------------------
+-- Sequences: no client access (the only one, invite_code_attempts_id_seq, is written by
+-- join_group_by_code as its owner).
+-- -----------------------------------------------------------------------------
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON SEQUENCES FROM authenticated;
+
+-- -----------------------------------------------------------------------------
+-- Temporary objects: none for client roles. TEMPORARY is granted to PUBLIC by default, so it is
+-- revoked from PUBLIC and granted back to every other role.
+-- -----------------------------------------------------------------------------
+DO $$
+DECLARE
+    v_role text;
+BEGIN
+    EXECUTE pg_catalog.format('REVOKE TEMPORARY ON DATABASE %I FROM PUBLIC', pg_catalog.current_database());
+    FOR v_role IN
+        SELECT r.rolname FROM pg_catalog.pg_roles AS r
+        WHERE r.rolname NOT IN ('anon', 'authenticated', 'authenticator')
+          AND r.rolname !~ '^pg_'
+        ORDER BY r.rolname
+    LOOP
+        EXECUTE pg_catalog.format('GRANT TEMPORARY ON DATABASE %I TO %I', pg_catalog.current_database(), v_role);
+    END LOOP;
+    EXECUTE pg_catalog.format('REVOKE TEMPORARY ON DATABASE %I FROM anon, authenticated, authenticator',
+                              pg_catalog.current_database());
+END;
+$$;
 
 -- -----------------------------------------------------------------------------
 -- Indexes

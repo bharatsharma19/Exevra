@@ -207,7 +207,7 @@ as $$ select s.id from tests.settlements as s where s.name = p_name $$;
 
 grant execute on all functions in schema tests to anon, authenticated;
 
-select plan(20);
+select plan(25);
 
 -- ===========================================================================
 -- Row level security and policies
@@ -261,6 +261,19 @@ select is((select array_agg(p.oid::regprocedure::text order by 1) from pg_proc a
                                'pick_successor_admin', 'group_balance_rows', 'group_split_member_ids')
              and (has_function_privilege('authenticated', p.oid, 'execute') or not has_function_privilege('service_role', p.oid, 'execute'))),
           null, 'maintenance and internal functions are service_role only');
+select is((select array_agg(c.oid::regclass::text order by 1) from pg_class as c
+           where c.relnamespace = 'public'::regnamespace and c.relkind = 'S'
+             and (has_sequence_privilege('authenticated', c.oid, 'usage') or has_sequence_privilege('authenticated', c.oid, 'update')
+                  or has_sequence_privilege('authenticated', c.oid, 'select') or has_sequence_privilege('anon', c.oid, 'usage')
+                  or has_sequence_privilege('anon', c.oid, 'update') or has_sequence_privilege('anon', c.oid, 'select'))),
+          null, 'client roles have no privileges on public sequences (e.g. cannot advance a throttle sequence)');
+select ok(not has_database_privilege('authenticated', current_database(), 'TEMP')
+          and not has_database_privilege('anon', current_database(), 'TEMP')
+          and not has_database_privilege('authenticator', current_database(), 'TEMP'),
+          'client roles cannot create temporary objects (no pg_temp shadowing inside definer functions)');
+select ok(has_database_privilege('postgres', current_database(), 'TEMP')
+          and has_database_privilege('service_role', current_database(), 'TEMP'),
+          'server roles keep the TEMP privilege');
 
 -- ===========================================================================
 -- Indexes
@@ -299,6 +312,15 @@ select ok(exists (select 1 from pg_indexes where schemaname = 'public' and table
 select is((select array_agg(tablename::text order by tablename) from pg_publication_tables
            where pubname = 'supabase_realtime' and schemaname = 'public'),
           array['expenses', 'group_members', 'settlements'], 'expenses, members and settlements are published for realtime');
+
+-- Without TEMP, a client session cannot place a type in pg_temp to shadow the unqualified types used
+-- inside definer functions.
+set local role authenticated;
+select throws_ok($$ create domain pg_temp.text as pg_catalog.text $$, '42501', null,
+                 'an authenticated session cannot create objects in pg_temp');
+select throws_ok($$ create temporary table t_probe (x int) $$, '42501', null,
+                 'an authenticated session cannot create temporary tables');
+reset role;
 
 -- ===========================================================================
 -- Membership freeze still lets a foreign-key action clear invited_by

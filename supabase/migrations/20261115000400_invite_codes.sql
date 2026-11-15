@@ -56,6 +56,17 @@ GRANT EXECUTE ON FUNCTION public.normalize_invite_code(text) TO authenticated, s
 -- -----------------------------------------------------------------------------
 -- Columns, legacy rotation, constraints
 -- -----------------------------------------------------------------------------
+-- Replacing legacy codes below is not a user edit: pause the old updated_at trigger so that
+-- existing rows keep their updated_at. Resumed after the replacement.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_trigger
+               WHERE tgrelid = 'public.groups'::regclass AND tgname = 'trigger_groups_updated_at') THEN
+        ALTER TABLE public.groups DISABLE TRIGGER trigger_groups_updated_at;
+    END IF;
+END;
+$$;
+
 ALTER TABLE public.groups ADD COLUMN IF NOT EXISTS invite_code_expires_at timestamptz;
 UPDATE public.groups SET invite_code_expires_at = now() + interval '30 days' WHERE invite_code_expires_at IS NULL;
 ALTER TABLE public.groups ALTER COLUMN invite_code_expires_at SET DEFAULT now() + interval '30 days';
@@ -66,6 +77,16 @@ UPDATE public.groups
 SET invite_code = public.generate_invite_code(),
     invite_code_expires_at = now() + interval '30 days'
 WHERE invite_code !~ '^[0-9A-HJKMNP-TV-Z]{16}$';
+
+-- Resume the updated_at trigger paused above.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_trigger
+               WHERE tgrelid = 'public.groups'::regclass AND tgname = 'trigger_groups_updated_at') THEN
+        ALTER TABLE public.groups ENABLE TRIGGER trigger_groups_updated_at;
+    END IF;
+END;
+$$;
 
 ALTER TABLE public.groups ALTER COLUMN invite_code SET DEFAULT public.generate_invite_code();
 ALTER TABLE public.groups DROP CONSTRAINT IF EXISTS groups_invite_code_format;

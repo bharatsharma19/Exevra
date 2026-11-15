@@ -108,7 +108,7 @@ $$;
 
 grant execute on all functions in schema tests to anon, authenticated;
 
-select plan(72);
+select plan(80);
 
 -- Stores raw tokens returned by the RPC for later steps (test-only).
 create table tests.tokens (label text primary key, token text not null, invitation_id uuid not null);
@@ -360,12 +360,25 @@ select is((public.accept_group_invitation(tests.token('after_removal'))) ->> 'ro
 -- Rate limits
 -- ---------------------------------------------------------------------------
 reset role;
-select tests.invite('admin', 'House', 'popular@example.test', 'member', 'p' || i) from generate_series(1, 4) as i;
+select tests.invite('admin', 'House', 'popular@example.test', 'member', 'p' || i) from generate_series(1, 5) as i;
+select tests.authenticate_as('admin');
+select throws_ok($$ select * from public.create_group_invitation(tests.gid('House'), 'popular@example.test', 'viewer') $$,
+                 'P0001', 'rate_limited', 'an inviter can send at most five invitations to the same address per day');
+-- One account's invitations do not use up the address's allowance for other groups.
 select tests.authenticate_as('other_admin');
 select lives_ok($$ select * from public.create_group_invitation(tests.gid('Other'), 'popular@example.test', 'member') $$,
-                'five invitations per recipient per day are allowed (across groups)');
-select throws_ok($$ select * from public.create_group_invitation(tests.gid('Other'), 'popular@example.test', 'viewer') $$,
-                 'P0001', 'rate_limited', 'the sixth invitation to the same address in a day is refused');
+                'another admin can still invite an address that one inviter has reached the limit for');
+-- At most ten different inviters per address per day.
+reset role;
+select tests.create_user('inviter' || i) from generate_series(1, 9) as i;
+select tests.create_group_as('inviter' || i, 'Inviter group ' || i) from generate_series(1, 9) as i;
+select tests.invite('inviter' || i, 'Inviter group ' || i, 'popular@example.test', 'member', 'q' || i) from generate_series(1, 8) as i;
+select tests.authenticate_as('inviter9');
+select throws_ok($$ select * from public.create_group_invitation(tests.gid('Inviter group 9'), 'popular@example.test', 'member') $$,
+                 'P0001', 'rate_limited', 'an address can be invited by at most ten different inviters per day');
+select tests.authenticate_as('other_admin');
+select lives_ok($$ select * from public.create_group_invitation(tests.gid('Other'), 'popular@example.test', 'viewer') $$,
+                'an inviter already counted for the address is limited only by their own allowance');
 
 reset role;
 select tests.create_user('busy');
@@ -390,6 +403,46 @@ select is((select count(*) from public.group_invitations where id = tests.invita
           'answered invitations older than 90 days are deleted');
 select is((select status from public.group_invitations where id = tests.invitation('stale_pending')), 'expired',
           'past-due pending invitations are marked expired');
+
+-- ---------------------------------------------------------------------------
+-- An invitation is valid only while its inviter is the group admin
+-- ---------------------------------------------------------------------------
+reset role;
+select tests.create_user('heir');
+select tests.create_user('guest_a');
+select tests.create_user('guest_b');
+select tests.create_user('founder');
+select tests.create_group_as('founder', 'Handover');
+select tests.add_member(tests.gid('Handover'), 'heir', 'member');
+select tests.invite('founder', 'Handover', 'guest_a@example.test', 'member', 'handover_a');
+select tests.authenticate_as('founder');
+select public.transfer_admin(tests.gid('Handover'), tests.uid('heir'));
+reset role;
+select is((select status from public.group_invitations where id = tests.invitation('handover_a')), 'revoked',
+          'transferring the admin role revokes the outgoing admin''s pending invitations');
+select tests.authenticate_as('guest_a');
+select throws_ok(format('select public.accept_group_invitation(%L)', tests.token('handover_a')), 'P0001', 'invite_revoked',
+                 'an invitation from a former admin cannot be accepted');
+
+-- The new admin invites, then leaves; admin passes on and the invitation is withdrawn.
+select tests.invite('heir', 'Handover', 'guest_b@example.test', 'viewer', 'handover_b');
+select tests.authenticate_as('heir');
+select is((public.leave_group(tests.gid('Handover')))->>'new_admin_id', tests.uid('founder')::text,
+          'the admin leaves and the role passes on');
+reset role;
+select is((select status from public.group_invitations where id = tests.invitation('handover_b')), 'revoked',
+          'an admin leaving the group revokes their pending invitations');
+
+-- A pending invitation whose inviter is not the admin (for example one created before the upgrade,
+-- when members could invite) is treated as revoked.
+insert into public.group_invitations (group_id, inviter_id, email, role, token_hash)
+values (tests.gid('House'), tests.uid('member'), 'guest_b@example.test', 'member',
+        public.hash_invitation_token('member-sent-token'));
+select tests.authenticate_as('guest_b');
+select is((public.get_invitation_details('member-sent-token'))->>'status', 'revoked',
+          'details report an invitation not sent by the admin as revoked');
+select throws_ok($$ select public.accept_group_invitation('member-sent-token') $$, 'P0001', 'invite_revoked',
+                 'an invitation not sent by the group admin cannot be accepted');
 
 select * from finish();
 rollback;

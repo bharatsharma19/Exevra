@@ -22,7 +22,10 @@
 --   record_settlement(group, to_user, amount_minor, note)  caller pays; both approved members;
 --        amount <= min(caller's projected debt, payee's projected credit), else P0001
 --        settlement_exceeds_debt; creates a pending settlement
---   confirm_settlement(id)               only the payee (to_user), only while pending
+--   confirm_settlement(id)               only the payee (to_user), only while pending. The debt limit
+--        is NOT re-checked: confirming records money that actually changed hands, even if expenses
+--        changed after the settlement was recorded and the payment now exceeds the debt (balances
+--        then show the payee owing the difference back). A payment that did not happen is voided.
 --   void_settlement(id, reason)          payer, payee or group admin; not already voided
 -- Every write appends a row to settlement_events.
 -- =============================================================================

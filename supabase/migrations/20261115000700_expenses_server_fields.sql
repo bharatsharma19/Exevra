@@ -22,7 +22,7 @@
 -- * Keyset-pagination indexes (group_id, spent_at DESC, id DESC) and (user_id, spent_at DESC, id DESC);
 --   redundant indexes dropped. expenses joins the supabase_realtime publication.
 -- Legacy rows: titles trimmed and cut to 120 characters, notes cut to 500, unknown categories mapped to
--- 'Other', non-https receipt URLs cleared.
+-- 'Other', non-https receipt URLs cleared; created_at and updated_at are kept.
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -63,6 +63,17 @@ BEGIN
 END;
 $$;
 
+-- The legacy clean-up below is not a user edit: pause the old updated_at trigger so that
+-- existing rows keep their updated_at. Resumed at the end of the clean-up.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_trigger
+               WHERE tgrelid = 'public.expenses'::regclass AND tgname = 'trigger_expenses_updated_at') THEN
+        ALTER TABLE public.expenses DISABLE TRIGGER trigger_expenses_updated_at;
+    END IF;
+END;
+$$;
+
 ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS spent_at timestamptz;
 ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS note text;
 ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS receipt_url text;
@@ -93,6 +104,16 @@ WHERE NOT (e.category = ANY (public.expense_categories()));
 UPDATE public.expenses
 SET receipt_url = NULL
 WHERE receipt_url IS NOT NULL AND NOT (receipt_url ~ '^https://' AND char_length(receipt_url) <= 2048);
+
+-- Resume the updated_at trigger paused above.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_trigger
+               WHERE tgrelid = 'public.expenses'::regclass AND tgname = 'trigger_expenses_updated_at') THEN
+        ALTER TABLE public.expenses ENABLE TRIGGER trigger_expenses_updated_at;
+    END IF;
+END;
+$$;
 
 -- -----------------------------------------------------------------------------
 -- Constraints

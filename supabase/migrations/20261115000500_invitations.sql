@@ -6,11 +6,18 @@
 -- * Details, accept and decline are bound to the caller's confirmed account email.
 -- * Clients have no direct INSERT/UPDATE/DELETE on group_invitations; admins can list the group's
 --   pending, unexpired invitations (without the hash).
--- * Rate limits: 20 invitations per inviter per hour, 5 per recipient email per day (all groups).
+-- * An invitation is valid only while its inviter is the group admin: transfer_admin and leave_group
+--   revoke the outgoing admin's pending invitations, and accept/details treat any other pending
+--   invitation as revoked.
+-- * Rate limits (P0001 rate_limited): 20 invitations per inviter per hour; 5 per inviter and recipient
+--   email per day; and an address can be invited by at most 10 different inviters per day. Counting
+--   distinct inviters (rather than all invitations to an address) means no single account can use
+--   up an address's allowance and keep other groups from inviting it.
 -- * purge_old_invitations() removes answered/expired invitations after 90 days.
 --
 -- Idempotent and safe on a database that already holds user data: legacy tokens are hashed, legacy
--- admin invitations become member invitations, malformed emails are removed.
+-- admin invitations become member invitations, malformed emails are removed, and pending invitations
+-- that were not sent by the group's admin (the old policy let members invite) are revoked.
 -- =============================================================================
 
 -- Functions whose signature or return type changes are dropped first.
@@ -84,6 +91,12 @@ WHERE gi.status = 'pending'
 CREATE UNIQUE INDEX IF NOT EXISTS uq_group_invitations_pending_email
     ON public.group_invitations (group_id, email) WHERE status = 'pending';
 
+-- Only the admin may invite (groups.admin_id was made consistent by the membership migration).
+UPDATE public.group_invitations AS gi
+SET status = 'revoked'
+WHERE gi.status = 'pending'
+  AND NOT EXISTS (SELECT 1 FROM public.groups AS g WHERE g.id = gi.group_id AND g.admin_id = gi.inviter_id);
+
 UPDATE public.group_invitations SET responded_at = COALESCE(responded_at, created_at)
 WHERE status IN ('accepted', 'declined') AND responded_at IS NULL;
 
@@ -156,7 +169,8 @@ SET search_path = ''
 AS $$
 DECLARE
     c_per_inviter_per_hour constant int := 20;
-    c_per_email_per_day constant int := 5;
+    c_per_inviter_email_per_day constant int := 5;
+    c_inviters_per_email_per_day constant int := 10;
     v_uid uuid := auth.uid();
     v_email text := lower(btrim(p_email));
     v_token text;
@@ -187,13 +201,19 @@ BEGIN
         RAISE EXCEPTION 'already_member' USING ERRCODE = '23505';
     END IF;
 
-    -- Serialise per inviter so the hourly limit holds under concurrency.
+    -- Serialise per inviter and per address so the limits hold under concurrency (always in this
+    -- order: inviter, then address).
     PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('create_group_invitation:' || v_uid::text, 0));
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('create_group_invitation_email:' || v_email, 0));
 
     IF (SELECT count(*) FROM public.group_invitations AS gi
         WHERE gi.inviter_id = v_uid AND gi.created_at > now() - interval '1 hour') >= c_per_inviter_per_hour
     OR (SELECT count(*) FROM public.group_invitations AS gi
-        WHERE gi.email = v_email AND gi.created_at > now() - interval '1 day') >= c_per_email_per_day THEN
+        WHERE gi.inviter_id = v_uid AND gi.email = v_email
+          AND gi.created_at > now() - interval '1 day') >= c_per_inviter_email_per_day
+    OR (SELECT count(DISTINCT gi.inviter_id) FROM public.group_invitations AS gi
+        WHERE gi.email = v_email AND gi.inviter_id <> v_uid
+          AND gi.created_at > now() - interval '1 day') >= c_inviters_per_email_per_day THEN
         RAISE EXCEPTION 'rate_limited' USING ERRCODE = 'P0001';
     END IF;
 
@@ -231,6 +251,7 @@ DECLARE
     v_email text;
     v_inv public.group_invitations%ROWTYPE;
     v_group_name text;
+    v_admin_id uuid;
     v_inviter_name text;
 BEGIN
     IF auth.uid() IS NULL THEN
@@ -250,7 +271,7 @@ BEGIN
         RAISE EXCEPTION 'invite_email_mismatch' USING ERRCODE = '42501';
     END IF;
 
-    SELECT g.name INTO v_group_name FROM public.groups AS g WHERE g.id = v_inv.group_id;
+    SELECT g.name, g.admin_id INTO v_group_name, v_admin_id FROM public.groups AS g WHERE g.id = v_inv.group_id;
     SELECT p.display_name INTO v_inviter_name FROM public.profiles AS p WHERE p.id = v_inv.inviter_id;
 
     RETURN jsonb_build_object(
@@ -259,7 +280,11 @@ BEGIN
         'group_name', v_group_name,
         'inviter_name', v_inviter_name,
         'role', v_inv.role,
-        'status', CASE WHEN v_inv.status = 'pending' AND v_inv.expires_at <= now() THEN 'expired' ELSE v_inv.status END,
+        'status', CASE
+                      WHEN v_inv.status = 'pending' AND v_inv.inviter_id IS DISTINCT FROM v_admin_id THEN 'revoked'
+                      WHEN v_inv.status = 'pending' AND v_inv.expires_at <= now() THEN 'expired'
+                      ELSE v_inv.status
+                  END,
         'expires_at', v_inv.expires_at
     );
 END;
@@ -310,6 +335,11 @@ BEGIN
     SELECT * INTO v_group FROM public.groups AS g WHERE g.id = v_inv.group_id FOR UPDATE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'group_not_found' USING ERRCODE = 'P0002';
+    END IF;
+    -- An invitation carries the authority of the admin who sent it.
+    IF v_inv.inviter_id IS DISTINCT FROM v_group.admin_id THEN
+        RAISE EXCEPTION 'invite_revoked' USING ERRCODE = 'P0001',
+            DETAIL = 'The inviter is no longer the group admin.';
     END IF;
 
     IF EXISTS (SELECT 1 FROM public.group_bans AS b WHERE b.group_id = v_inv.group_id AND b.user_id = v_uid) THEN

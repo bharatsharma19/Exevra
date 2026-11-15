@@ -7,6 +7,7 @@ idempotent and safe to apply to a database that already holds user data.
 |---|---|
 | `migrations/` | Ordered SQL migrations (`YYYYMMDDHHMMSS_name.sql`). Never edit one that has been applied to the hosted project; add a new one. |
 | `tests/` | pgTAP tests (access control, money, splits, balances, settlements, insights, AI, account deletion, schema-wide checks), run with `supabase test db`. |
+| `upgrade_check/` | Upgrade-path check: legacy data on the baseline schema, then every later migration (`upgrade_check/run.sh`, local only). |
 | `config.toml` | Local stack configuration (Supabase CLI v3). Hosted auth settings are configured in the dashboard. |
 | `email_templates/` | Auth email templates (confirmation, password recovery code, email change). |
 | `seed.sql` | Local-only seed data (applied by `supabase db reset`). |
@@ -21,6 +22,7 @@ supabase start -x studio,imgproxy,logflare,vector,supavisor,storage-api
 supabase db reset     # drop the local database and apply every migration from scratch
 supabase test db      # run the pgTAP tests in supabase/tests/
 supabase db advisors  # security and performance advisors against the local database
+supabase/upgrade_check/run.sh  # upgrade path from the baseline with legacy data (ends with a clean reset)
 supabase stop
 ```
 
@@ -30,20 +32,80 @@ CLI v3 commands target the local stack unless `--remote` is given.
 
 The hosted database was originally built by running the old `schema.sql` by hand. The first
 migration (`20261115000000_baseline.sql`) reproduces that file exactly, so the hosted project only
-needs to record it as applied before the remaining migrations are pushed:
+needs to record it as applied before the remaining migrations are pushed.
+
+### 1. Plan the release order (old app builds stop working)
+
+The migrations change the API the app uses: amounts become `amount_minor` integers, membership,
+settlement and invitation writes go through RPCs only, and `groups` is readable by listed columns
+only. No app build works against both schemas. As soon as the push finishes, builds released before
+this change fail on expense and group writes (for example an insert with `amount` fails because the
+column no longer exists, and `select('*')` on `groups` is refused). Treat the push as a cutover:
+
+1. Have the new build approved in Play Console and ready to roll out (staged rollout held, or
+   internal track promoted at the cutover time); prepare a forced-update prompt for older versions.
+2. Pick a quiet window, take a backup (or confirm PITR is on).
+3. Push the migrations (steps 2 to 4 below).
+4. Roll the new build out to everyone and enable the forced update immediately afterwards.
+
+### 2. Check for drift (read-only)
+
+Compare the hosted `public` schema with the baseline. These commands do not write to the hosted
+migration history. (Do not use `supabase db pull` for this: in CLI v3 it writes a migration with the
+difference to the local migrations and records it in the hosted history.)
 
 ```sh
 supabase link --project-ref <project-ref>
-supabase db pull --remote --schema public   # writes the hosted schema as a new migration file
-# Compare that file with migrations/20261115000000_baseline.sql and resolve any drift, then delete
-# the pulled file (it must not be pushed).
+supabase db dump --remote --schema public -f /tmp/hosted_public.sql
+supabase db reset --version 20261115000000 --no-seed   # local database = baseline only
+supabase db dump --schema public -f /tmp/baseline_public.sql
+diff -u /tmp/baseline_public.sql /tmp/hosted_public.sql
+supabase db reset                                       # back to the full local schema
+```
+
+Known drift from older `schema.sql` versions (`group_members` foreign keys to `auth.users`, a
+`'viewer'` role default) is normalised by the migrations. Resolve anything else before pushing.
+
+### 3. Pre-flight data check
+
+Amounts are converted to minor units without clamping; an amount that would become less than one
+minor unit or more than 100,000,000,000 stops the push with `legacy_amount_out_of_range` (listing the
+row ids). Find such rows first in the SQL editor and correct or delete them deliberately:
+
+```sql
+with conv as (
+    select 'expenses' as source, e.id, e.amount,
+           upper(btrim(coalesce(case when e.group_id is null then po.currency else pa.currency end, 'INR'))) as currency
+    from public.expenses as e
+    left join public.profiles as po on po.id = e.user_id
+    left join public.groups as g on g.id = e.group_id
+    left join public.profiles as pa on pa.id = g.admin_id
+    union all
+    select 'settlements', s.id, s.amount, upper(btrim(coalesce(pa.currency, 'INR')))
+    from public.settlements as s
+    join public.groups as g on g.id = s.group_id
+    left join public.profiles as pa on pa.id = g.admin_id
+)
+select source, id, amount, currency
+from conv
+where round(amount * case when currency in ('JPY', 'KRW') then 1 else 100 end) not between 1 and 100000000000;
+```
+
+### 4. Record the baseline and push
+
+```sh
 supabase migration repair --remote --status applied 20261115000000
 supabase db push --remote --dry-run         # lists the migrations after the baseline
 supabase db push --remote
 ```
 
-Take a backup (or enable PITR) before pushing. After pushing, run the Security and Performance
-Advisors in the dashboard.
+After pushing, run the Security and Performance Advisors in the dashboard and confirm that client
+roles cannot create temporary objects (both values must be `false`):
+
+```sql
+select has_database_privilege('authenticated', current_database(), 'TEMP'),
+       has_database_privilege('anon', current_database(), 'TEMP');
+```
 
 ### Scheduled cleanup
 

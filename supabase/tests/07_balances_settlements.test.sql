@@ -208,7 +208,7 @@ as $$ select s.id from tests.settlements as s where s.name = p_name $$;
 
 grant execute on all functions in schema tests to anon, authenticated;
 
-select plan(106);
+select plan(120);
 
 select tests.create_user('alice');
 select tests.create_user('bob');
@@ -518,10 +518,80 @@ select is((select count(*) from public.settlement_events where group_id = tests.
 select is((select count(*) from public.settlement_events where group_id = tests.gid('House') and actor is null), 5::bigint,
           'the deleted account is no longer named as actor');
 select tests.authenticate_as('alice');
-select lives_ok($$ delete from public.groups where id = tests.gid('House') $$, 'the admin can delete the group');
+select throws_ok($$ delete from public.groups where id = tests.gid('House') $$, '42501', null,
+                 'the admin cannot delete the group (and its audit trail) with a direct table write');
 reset role;
-select is((select count(*) from public.settlement_events where group_id = tests.gid('House')), 0::bigint,
-          'deleting the group removes its audit trail');
+select is((select count(*) from public.settlement_events where group_id = tests.gid('House')), 10::bigint,
+          'the audit trail is intact');
+
+-- ===========================================================================
+-- Leaving and removal need a settled balance, so the remaining members can always settle up
+-- ===========================================================================
+select tests.create_user('lena');
+select tests.create_user('mo');
+select tests.create_user('nia');
+select tests.create_group_as('lena', 'Flat', 'INR');
+select tests.add_member(tests.gid('Flat'), 'mo', 'member');
+select tests.add_member(tests.gid('Flat'), 'nia', 'member');
+select tests.add_expense('lena', 'Flat', 'Flat groceries', 300);
+select tests.authenticate_as('mo');
+select throws_ok($$ select public.leave_group(tests.gid('Flat')) $$, 'P0001', 'outstanding_balance',
+                 'a member who owes money cannot leave');
+select tests.authenticate_as('lena');
+select throws_ok($$ select public.remove_member(tests.gid('Flat'), tests.uid('nia')) $$, 'P0001', 'outstanding_balance',
+                 'the admin cannot remove a member with a balance unless forced');
+reset role;
+select tests.settle('flat1', 'mo', 'Flat', 'lena', 100);
+select tests.authenticate_as('mo');
+select throws_ok($$ select public.leave_group(tests.gid('Flat')) $$, 'P0001', 'outstanding_balance',
+                 'a member with a pending settlement cannot leave');
+select tests.authenticate_as('lena');
+select public.confirm_settlement(tests.sid('flat1'));
+select tests.authenticate_as('mo');
+select is((public.leave_group(tests.gid('Flat')))->>'left', 'true', 'a settled member can leave');
+select tests.authenticate_as('lena');
+select throws_ok($$ select public.leave_group(tests.gid('Flat')) $$, 'P0001', 'outstanding_balance',
+                 'a member who is owed money cannot leave either');
+select is((public.remove_member(tests.gid('Flat'), tests.uid('nia'), true))->>'net_minor', '-100',
+          'a forced removal reports the balance left behind');
+select is(tests.net('Flat', 'nia'), -100::bigint, 'the removed member''s balance stays in the group balances');
+select is((public.leave_group(tests.gid('Flat')))->>'group_deleted', 'true',
+          'the last approved member can always leave; the group is deleted');
+reset role;
+
+-- ===========================================================================
+-- The group currency is fixed once the group has expenses or settlements
+-- ===========================================================================
+select set_config('tests.trip_id', tests.gid('Trip')::text, true);
+set local role service_role;
+select throws_ok($$ update public.groups set currency = 'USD' where id = current_setting('tests.trip_id')::uuid $$,
+                 '22023', 'group_currency_immutable', 'the service role cannot change the currency of a group with expenses');
+reset role;
+select throws_ok($$ update public.groups set currency = 'USD' where id = tests.gid('Trip') $$,
+                 '22023', 'group_currency_immutable', 'neither can the table owner');
+select tests.create_group_as('outsider', 'Fresh', 'INR');
+select lives_ok($$ update public.groups set currency = 'USD' where id = tests.gid('Fresh') $$,
+                'the currency of a group without expenses or settlements can still be corrected');
+
+-- ===========================================================================
+-- Confirming records the transfer even if the debt shrank after it was recorded
+-- ===========================================================================
+select tests.create_user('ola');
+select tests.create_user('pia');
+select tests.create_user('quin');
+select tests.create_group_as('ola', 'Cabin', 'INR');
+select tests.add_member(tests.gid('Cabin'), 'pia', 'member');
+select tests.add_member(tests.gid('Cabin'), 'quin', 'member');
+select tests.add_expense('ola', 'Cabin', 'Firewood', 300);
+select tests.settle('cabin1', 'quin', 'Cabin', 'ola', 100);
+update public.expenses set amount_minor = 3 where id = tests.eid('Firewood');
+select tests.authenticate_as('ola');
+select lives_ok($$ select public.confirm_settlement(tests.sid('cabin1')) $$,
+                'the payee confirms a payment that now exceeds the debt (no re-check on confirm)');
+reset role;
+select is(tests.net('Cabin', 'quin'), 99::bigint, 'the over-payment shows as the payee owing the difference back');
+select is((select sum(net_minor) from public.group_balance_rows(tests.gid('Cabin'))), 0::numeric,
+          'balances still sum to zero');
 
 -- ===========================================================================
 -- Hygiene

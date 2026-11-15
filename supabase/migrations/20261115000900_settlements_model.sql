@@ -17,7 +17,8 @@
 --
 -- Clients cannot write settlements directly (the old INSERT policy and RPC are removed); only
 -- confirmed settlements count towards balances.
--- Legacy rows: amounts converted with the group currency's exponent, status 'confirmed'
+-- Legacy rows: amounts converted with the group currency's exponent (never clamped: an amount outside
+-- 1 .. 100,000,000,000 minor units stops the migration with legacy_amount_out_of_range), status 'confirmed'
 -- (confirmed_at = the old settlement date), created_by = from_user, notes cut to 200; a recorded
 -- and a confirmed audit event are added for each.
 -- =============================================================================
@@ -62,6 +63,8 @@ ALTER TABLE public.settlements ADD COLUMN IF NOT EXISTS void_reason text;
 -- Legacy conversion (only while the NUMERIC column exists)
 -- -----------------------------------------------------------------------------
 DO $$
+DECLARE
+    v_bad text;
 BEGIN
     IF EXISTS (SELECT 1 FROM information_schema.columns
                WHERE table_schema = 'public' AND table_name = 'settlements' AND column_name = 'amount') THEN
@@ -71,11 +74,27 @@ BEGIN
         WHERE g.id = s.group_id AND s.currency IS DISTINCT FROM g.currency;
 
         EXECUTE $sql$
+            SELECT string_agg(id::text, ', ' ORDER BY id)
+            FROM (
+                SELECT id FROM public.settlements
+                WHERE amount_minor IS NULL
+                  AND round(amount * (10::numeric ^ public.currency_minor_units(currency::text)))
+                      NOT BETWEEN 1 AND 100000000000
+                ORDER BY id
+                LIMIT 50
+            ) AS bad
+        $sql$ INTO v_bad;
+        IF v_bad IS NOT NULL THEN
+            RAISE EXCEPTION 'legacy_amount_out_of_range'
+                USING ERRCODE = '22003',
+                      DETAIL = 'public.settlements ids: ' || v_bad,
+                      HINT = 'Each amount must convert to 1 .. 100000000000 minor units of its currency. '
+                          || 'Correct or delete these rows, then apply the migrations again.';
+        END IF;
+
+        EXECUTE $sql$
             UPDATE public.settlements
-            SET amount_minor = LEAST(
-                    100000000000::bigint,
-                    GREATEST(1::bigint,
-                             round(amount * (10::numeric ^ public.currency_minor_units(currency::text)))::bigint)),
+            SET amount_minor = round(amount * (10::numeric ^ public.currency_minor_units(currency::text)))::bigint,
                 status = COALESCE(status, 'confirmed'),
                 confirmed_at = COALESCE(confirmed_at, date, created_at),
                 created_by = COALESCE(created_by, from_user)

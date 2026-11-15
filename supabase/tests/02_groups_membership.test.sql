@@ -108,7 +108,7 @@ $$;
 
 grant execute on all functions in schema tests to anon, authenticated;
 
-select plan(84);
+select plan(90);
 
 -- Invariant check used throughout: exactly one approved admin row per group, equal to groups.admin_id.
 create or replace function tests.admin_consistent()
@@ -316,7 +316,8 @@ select is((select count(*) from public.group_members where group_id = tests.gid(
 -- leave_group
 -- ---------------------------------------------------------------------------
 select tests.authenticate_as('erin');
-select throws_ok($$ select public.leave_group(tests.gid('Trip')) $$, 'P0002', 'not_group_member', 'a non-member cannot leave');
+select throws_ok($$ select public.leave_group(tests.gid('Trip')) $$, '42501', 'not_group_member',
+                 'a non-member cannot leave (permission error, like every other not_group_member)');
 select throws_ok($$ select public.leave_group(gen_random_uuid()) $$, 'P0002', 'group_not_found', 'leaving an unknown group raises');
 
 -- A member leaving: their active group moves to their next approved membership or NULL.
@@ -348,18 +349,44 @@ select is((select count(*) from public.groups where id = tests.gid('Trip')), 0::
 select is((select count(*) from public.group_members where group_id = tests.gid('Trip')), 0::bigint, 'its memberships are gone');
 
 -- ---------------------------------------------------------------------------
--- Deleting a group directly (admin) cascades its memberships.
+-- Deleting a group: only through delete_group, only by the admin, only when no other approved
+-- member is left (shared history is never removed from under other members).
 -- ---------------------------------------------------------------------------
 select tests.add_member(tests.gid('Euro'), 'carol', 'member');
-select tests.authenticate_as('carol');
-delete from public.groups where id = tests.gid('Euro');
-reset role;
-select is((select count(*) from public.groups where id = tests.gid('Euro')), 1::bigint, 'a non-admin cannot delete the group');
+select tests.add_member(tests.gid('Euro'), 'dave', 'viewer', 'pending');
 select tests.authenticate_as('erin');
-select lives_ok($$ delete from public.groups where id = tests.gid('Euro') $$, 'the admin deletes the group');
+select throws_ok($$ delete from public.groups where id = tests.gid('Euro') $$, '42501', null,
+                 'the admin cannot delete the group with a direct table write');
+select tests.authenticate_as('carol');
+select throws_ok($$ select public.delete_group(tests.gid('Euro')) $$, '42501', 'not_group_admin',
+                 'a member cannot delete the group');
+select tests.authenticate_as('erin');
+select throws_ok($$ select public.delete_group(tests.gid('Euro')) $$, 'P0001', 'group_has_members',
+                 'the admin cannot delete a group that has other approved members');
+select throws_ok($$ select public.delete_group(gen_random_uuid()) $$, 'P0002', 'group_not_found',
+                 'deleting an unknown group raises not found');
+select tests.authenticate_as('carol');
+select public.leave_group(tests.gid('Euro'));
+select tests.authenticate_as('erin');
+select is((public.delete_group(tests.gid('Euro')))->>'deleted', 'true',
+          'the admin deletes the group once no other approved member is left (pending requests do not count)');
 reset role;
+select is((select count(*) from public.groups where id = tests.gid('Euro')), 0::bigint, 'the group is gone');
 select is((select count(*) from public.group_members where group_id = tests.gid('Euro')), 0::bigint,
-          'memberships are removed by the cascade');
+          'memberships, including the pending request, are removed with it');
+
+-- ---------------------------------------------------------------------------
+-- create_group rate limit: 10 new groups per user per rolling day.
+-- ---------------------------------------------------------------------------
+select tests.create_user('founder');
+select tests.create_group_as('founder', 'Founder ' || i) from generate_series(1, 10) as i;
+select tests.authenticate_as('founder');
+select throws_ok($$ select public.create_group('Founder 11', 'INR') $$, 'P0001', 'rate_limited',
+                 'the eleventh group in a day is refused');
+reset role;
+update public.groups set created_at = now() - interval '25 hours' where id = tests.gid('Founder 1');
+select tests.authenticate_as('founder');
+select lives_ok($$ select public.create_group('Founder 11', 'INR') $$, 'the limit is a rolling day');
 
 -- ---------------------------------------------------------------------------
 -- set_active_group and get_user_groups

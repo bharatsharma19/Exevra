@@ -10,9 +10,17 @@
 --   group_members unless the transaction-local setting exevra.membership_rpc = 'on' (set by the RPCs)
 --   or the row is removed by a foreign-key cascade (group or profile deleted). Direct table writes
 --   are also revoked from client roles.
--- * Groups are created only through create_group(); clients may rename a group they administer and
---   nothing else. The invite code is not readable through the table.
+-- * Groups are created only through create_group() (at most 10 per user per day) and deleted only
+--   through delete_group() or by the last approved member leaving; clients may rename a group they
+--   administer and nothing else. The invite code is not readable through the table.
+-- * groups.currency cannot change once the group has expenses or settlements.
+-- * Leaving (or being removed) with a non-zero balance or a pending settlement is refused
+--   (outstanding_balance), so the remaining members can always settle up with each other.
 -- * Read access (get_auth_user_groups and the policies built on it) is limited to APPROVED members.
+--
+-- Legacy data: the clean-up keeps existing updated_at values; group_members foreign keys and the role
+-- default are normalised to the current schema whatever schema.sql version the database started from;
+-- active-group pointers to groups the user is not an approved member of are cleared.
 --
 -- Idempotent and safe on a database that already holds user data.
 -- =============================================================================
@@ -20,6 +28,25 @@
 -- Allow the cleanup statements below to touch membership rows when re-run after the freeze trigger
 -- exists. Reset at the end of the migration.
 SELECT pg_catalog.set_config('exevra.membership_rpc', 'on', false);
+
+-- The legacy clean-up below is not a user edit: pause the old updated_at trigger so that
+-- existing rows keep their updated_at. Resumed at the end of the clean-up.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_trigger
+               WHERE tgrelid = 'public.groups'::regclass AND tgname = 'trigger_groups_updated_at') THEN
+        ALTER TABLE public.groups DISABLE TRIGGER trigger_groups_updated_at;
+    END IF;
+END;
+$$;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_trigger
+               WHERE tgrelid = 'public.profiles'::regclass AND tgname = 'trigger_profiles_updated_at') THEN
+        ALTER TABLE public.profiles DISABLE TRIGGER trigger_profiles_updated_at;
+    END IF;
+END;
+$$;
 
 -- -----------------------------------------------------------------------------
 -- groups: currency, name length, timestamps
@@ -63,6 +90,39 @@ ALTER TABLE public.group_members DROP CONSTRAINT IF EXISTS group_members_status_
 ALTER TABLE public.group_members ADD CONSTRAINT group_members_status_check
     CHECK (status IN ('pending', 'approved'));
 
+-- Databases first built from an older schema.sql reference auth.users here and default the role to
+-- 'viewer'. Normalise to the current schema: memberships of users without a profile cannot be valid
+-- and are removed; an inviter without a profile is cleared.
+ALTER TABLE public.group_members ALTER COLUMN role SET DEFAULT 'member';
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.group_members'::regclass AND conname = 'group_members_user_id_fkey'
+          AND confrelid = 'public.profiles'::regclass AND confdeltype = 'c'
+    ) THEN
+        DELETE FROM public.group_members AS gm
+        WHERE NOT EXISTS (SELECT 1 FROM public.profiles AS p WHERE p.id = gm.user_id);
+        ALTER TABLE public.group_members DROP CONSTRAINT IF EXISTS group_members_user_id_fkey;
+        ALTER TABLE public.group_members ADD CONSTRAINT group_members_user_id_fkey
+            FOREIGN KEY (user_id) REFERENCES public.profiles (id) ON DELETE CASCADE;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.group_members'::regclass AND conname = 'group_members_invited_by_fkey'
+          AND confrelid = 'public.profiles'::regclass AND confdeltype = 'n'
+    ) THEN
+        UPDATE public.group_members AS gm
+        SET invited_by = NULL
+        WHERE gm.invited_by IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM public.profiles AS p WHERE p.id = gm.invited_by);
+        ALTER TABLE public.group_members DROP CONSTRAINT IF EXISTS group_members_invited_by_fkey;
+        ALTER TABLE public.group_members ADD CONSTRAINT group_members_invited_by_fkey
+            FOREIGN KEY (invited_by) REFERENCES public.profiles (id) ON DELETE SET NULL;
+    END IF;
+END;
+$$;
+
 -- The group's admin_id always has an approved admin membership row ...
 INSERT INTO public.group_members (group_id, user_id, role, status, joined_at)
 SELECT g.id, g.admin_id, 'admin', 'approved', g.created_at
@@ -88,6 +148,33 @@ ALTER TABLE public.group_members ADD CONSTRAINT group_members_pending_is_viewer
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_group_members_one_admin
     ON public.group_members (group_id) WHERE role = 'admin';
+
+-- The active group must be one the user is an approved member of (legacy pointers may not be).
+UPDATE public.profiles AS p
+SET group_id = NULL
+WHERE p.group_id IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM public.group_members AS gm
+      WHERE gm.group_id = p.group_id AND gm.user_id = p.id AND gm.status = 'approved'
+  );
+
+-- Resume the updated_at trigger paused above.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_trigger
+               WHERE tgrelid = 'public.groups'::regclass AND tgname = 'trigger_groups_updated_at') THEN
+        ALTER TABLE public.groups ENABLE TRIGGER trigger_groups_updated_at;
+    END IF;
+END;
+$$;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_trigger
+               WHERE tgrelid = 'public.profiles'::regclass AND tgname = 'trigger_profiles_updated_at') THEN
+        ALTER TABLE public.profiles ENABLE TRIGGER trigger_profiles_updated_at;
+    END IF;
+END;
+$$;
 
 -- Indexes: (group_id, user_id) is covered by the unique constraint.
 DROP INDEX IF EXISTS public.idx_group_members_group;
@@ -206,6 +293,34 @@ CREATE TRIGGER trigger_group_members_freeze
     BEFORE INSERT OR UPDATE OR DELETE ON public.group_members
     FOR EACH ROW EXECUTE FUNCTION public.group_members_freeze();
 
+-- -----------------------------------------------------------------------------
+-- Group currency guard: expenses and settlements are stored in the group currency, so the currency
+-- cannot change once either exists (clients cannot update the column at all; this also covers
+-- service_role and the table owner).
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.groups_currency_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+    IF NEW.currency IS DISTINCT FROM OLD.currency
+       AND (EXISTS (SELECT 1 FROM public.expenses AS e WHERE e.group_id = OLD.id)
+            OR EXISTS (SELECT 1 FROM public.settlements AS s WHERE s.group_id = OLD.id)) THEN
+        RAISE EXCEPTION 'group_currency_immutable' USING ERRCODE = '22023',
+            DETAIL = 'The group already has expenses or settlements in its currency.';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.groups_currency_guard() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS trigger_groups_currency_guard ON public.groups;
+CREATE TRIGGER trigger_groups_currency_guard
+    BEFORE UPDATE OF currency ON public.groups
+    FOR EACH ROW EXECUTE FUNCTION public.groups_currency_guard();
+
 -- Active-group repointing only considers approved memberships.
 CREATE OR REPLACE FUNCTION public.handle_member_removal()
 RETURNS trigger
@@ -237,7 +352,6 @@ REVOKE ALL ON FUNCTION public.handle_member_removal() FROM PUBLIC, anon, authent
 REVOKE ALL ON TABLE public.groups FROM anon, authenticated;
 GRANT SELECT (id, name, admin_id, currency, created_at, updated_at) ON TABLE public.groups TO authenticated;
 GRANT UPDATE (name) ON TABLE public.groups TO authenticated;
-GRANT DELETE ON TABLE public.groups TO authenticated;
 GRANT ALL ON TABLE public.groups TO service_role;
 
 REVOKE ALL ON TABLE public.group_members FROM anon, authenticated;
@@ -266,9 +380,8 @@ CREATE POLICY groups_update_admin ON public.groups
     USING (admin_id = (SELECT auth.uid()))
     WITH CHECK (admin_id = (SELECT auth.uid()));
 
-CREATE POLICY groups_delete_admin ON public.groups
-    FOR DELETE TO authenticated
-    USING (admin_id = (SELECT auth.uid()));
+-- No DELETE policy: groups are deleted with delete_group() (or by the last member leaving), so one
+-- admin cannot remove other members' shared history.
 
 -- group_members: own rows; approved rows of groups the caller belongs to; pending rows for the admin.
 DROP POLICY IF EXISTS "Members can view group membership" ON public.group_members;
@@ -297,6 +410,7 @@ CREATE POLICY group_bans_select_admin ON public.group_bans
 -- -----------------------------------------------------------------------------
 
 -- Creates a group with the caller as its approved admin and makes it the caller's active group.
+-- Rate limit: 10 new groups per user per rolling day (P0001 rate_limited).
 CREATE OR REPLACE FUNCTION public.create_group(p_name text, p_currency text DEFAULT NULL)
 RETURNS public.groups
 LANGUAGE plpgsql
@@ -304,6 +418,7 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
+    c_groups_per_day constant int := 10;
     v_uid uuid := auth.uid();
     v_name text := btrim(p_name);
     v_currency text := upper(btrim(p_currency));
@@ -324,6 +439,14 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM public.profiles AS p WHERE p.id = v_uid) THEN
         RAISE EXCEPTION 'profile_not_found' USING ERRCODE = 'P0002';
+    END IF;
+
+    -- At most c_groups_per_day new groups per user in a rolling day (groups the caller still administers).
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('exevra.create_group:' || v_uid::text, 0));
+    IF (SELECT count(*) FROM public.groups AS g
+        WHERE g.admin_id = v_uid AND g.created_at > now() - interval '1 day') >= c_groups_per_day THEN
+        RAISE EXCEPTION 'rate_limited' USING ERRCODE = 'P0001',
+            DETAIL = pg_catalog.format('max_groups_per_day=%s', c_groups_per_day);
     END IF;
 
     INSERT INTO public.groups (name, admin_id, currency)
@@ -384,7 +507,11 @@ $$;
 
 -- Removes a member or rejects a pending request (admin only) and bans the user from rejoining with
 -- the group code. A later invitation from the admin lifts the ban.
-CREATE OR REPLACE FUNCTION public.remove_member(p_group_id uuid, p_user_id uuid)
+-- An approved member with a non-zero balance or a pending settlement is only removed with
+-- p_force => true (their balance then stays in the group's balances, see get_group_balances).
+-- group_balance_rows() is created in the balances migration (20261115001000).
+DROP FUNCTION IF EXISTS public.remove_member(uuid, uuid);
+CREATE OR REPLACE FUNCTION public.remove_member(p_group_id uuid, p_user_id uuid, p_force boolean DEFAULT false)
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -392,6 +519,9 @@ SET search_path = ''
 AS $$
 DECLARE
     v_uid uuid := auth.uid();
+    v_member public.group_members%ROWTYPE;
+    v_net bigint;
+    v_pending bigint;
 BEGIN
     IF v_uid IS NULL THEN
         RAISE EXCEPTION 'not_authenticated' USING ERRCODE = '42501';
@@ -403,11 +533,26 @@ BEGIN
         RAISE EXCEPTION 'cannot_remove_self' USING ERRCODE = 'P0001', HINT = 'Use leave_group.';
     END IF;
 
-    PERFORM pg_catalog.set_config('exevra.membership_rpc', 'on', true);
-    DELETE FROM public.group_members WHERE group_id = p_group_id AND user_id = p_user_id;
+    SELECT * INTO v_member FROM public.group_members AS gm
+    WHERE gm.group_id = p_group_id AND gm.user_id = p_user_id
+    FOR UPDATE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'member_not_found' USING ERRCODE = 'P0002';
     END IF;
+
+    SELECT b.net_minor, b.pending_out_minor + b.pending_in_minor INTO v_net, v_pending
+    FROM public.group_balance_rows(p_group_id) AS b
+    WHERE b.user_id = p_user_id;
+    v_net := COALESCE(v_net, 0);
+    v_pending := COALESCE(v_pending, 0);
+    IF (v_net <> 0 OR v_pending <> 0) AND NOT COALESCE(p_force, false) THEN
+        RAISE EXCEPTION 'outstanding_balance' USING ERRCODE = 'P0001',
+            DETAIL = pg_catalog.format('net_minor=%s pending_minor=%s', v_net, v_pending),
+            HINT = 'Settle up first, or pass p_force => true to remove the member anyway.';
+    END IF;
+
+    PERFORM pg_catalog.set_config('exevra.membership_rpc', 'on', true);
+    DELETE FROM public.group_members WHERE id = v_member.id;
     PERFORM pg_catalog.set_config('exevra.membership_rpc', 'off', true);
 
     INSERT INTO public.group_bans (group_id, user_id, banned_by)
@@ -416,19 +561,23 @@ BEGIN
 
     -- Pending invitations to the removed user for this group are withdrawn.
     UPDATE public.group_invitations AS gi
-    SET status = 'revoked'
+    SET status = 'revoked', responded_at = now()
     FROM auth.users AS u
     WHERE u.id = p_user_id
       AND gi.group_id = p_group_id
       AND gi.status = 'pending'
       AND gi.email = lower(u.email);
 
-    RETURN jsonb_build_object('group_id', p_group_id, 'user_id', p_user_id, 'removed', true);
+    RETURN jsonb_build_object('group_id', p_group_id, 'user_id', p_user_id, 'removed', true, 'net_minor', v_net);
 END;
 $$;
 
 -- Leaves a group. If the caller is the admin, admin passes to the longest-standing other approved
--- member; if there is none, the group and all its data are deleted.
+-- member; if there is none, the group and all its data are deleted. Otherwise the caller must be
+-- settled up: a non-zero balance or a pending settlement raises outstanding_balance (the remaining
+-- members could not settle with them afterwards). An admin's pending invitations are revoked when
+-- the admin role passes on.
+-- group_balance_rows() is created in the balances migration (20261115001000).
 CREATE OR REPLACE FUNCTION public.leave_group(p_group_id uuid)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -440,6 +589,8 @@ DECLARE
     v_group public.groups%ROWTYPE;
     v_member public.group_members%ROWTYPE;
     v_successor uuid;
+    v_net bigint;
+    v_pending bigint;
 BEGIN
     IF v_uid IS NULL THEN
         RAISE EXCEPTION 'not_authenticated' USING ERRCODE = '42501';
@@ -453,25 +604,38 @@ BEGIN
     SELECT * INTO v_member FROM public.group_members AS gm
     WHERE gm.group_id = p_group_id AND gm.user_id = v_uid;
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'not_group_member' USING ERRCODE = 'P0002';
+        RAISE EXCEPTION 'not_group_member' USING ERRCODE = '42501';
+    END IF;
+
+    IF v_group.admin_id = v_uid THEN
+        v_successor := public.pick_successor_admin(p_group_id, v_uid);
     END IF;
 
     PERFORM pg_catalog.set_config('exevra.membership_rpc', 'on', true);
 
-    IF v_group.admin_id = v_uid THEN
-        v_successor := public.pick_successor_admin(p_group_id, v_uid);
-        IF v_successor IS NULL THEN
-            DELETE FROM public.groups WHERE id = p_group_id;
-            PERFORM pg_catalog.set_config('exevra.membership_rpc', 'off', true);
-            RETURN jsonb_build_object('group_id', p_group_id, 'left', true, 'group_deleted', true, 'new_admin_id', NULL);
-        END IF;
+    IF v_group.admin_id = v_uid AND v_successor IS NULL THEN
+        DELETE FROM public.groups WHERE id = p_group_id;
+        PERFORM pg_catalog.set_config('exevra.membership_rpc', 'off', true);
+        RETURN jsonb_build_object('group_id', p_group_id, 'left', true, 'group_deleted', true, 'new_admin_id', NULL);
+    END IF;
 
-        DELETE FROM public.group_members WHERE id = v_member.id;
+    SELECT b.net_minor, b.pending_out_minor + b.pending_in_minor INTO v_net, v_pending
+    FROM public.group_balance_rows(p_group_id) AS b
+    WHERE b.user_id = v_uid;
+    IF COALESCE(v_net, 0) <> 0 OR COALESCE(v_pending, 0) <> 0 THEN
+        RAISE EXCEPTION 'outstanding_balance' USING ERRCODE = 'P0001',
+            DETAIL = pg_catalog.format('net_minor=%s pending_minor=%s', COALESCE(v_net, 0), COALESCE(v_pending, 0)),
+            HINT = 'Settle up before leaving the group.';
+    END IF;
+
+    DELETE FROM public.group_members WHERE id = v_member.id;
+    IF v_successor IS NOT NULL THEN
         UPDATE public.group_members SET role = 'admin'
         WHERE group_id = p_group_id AND user_id = v_successor;
         UPDATE public.groups SET admin_id = v_successor WHERE id = p_group_id;
-    ELSE
-        DELETE FROM public.group_members WHERE id = v_member.id;
+        UPDATE public.group_invitations AS gi
+        SET status = 'revoked', responded_at = now()
+        WHERE gi.group_id = p_group_id AND gi.inviter_id = v_uid AND gi.status = 'pending';
     END IF;
 
     PERFORM pg_catalog.set_config('exevra.membership_rpc', 'off', true);
@@ -479,7 +643,46 @@ BEGIN
 END;
 $$;
 
--- Hands the admin role to another approved member (admin only). The caller becomes a member.
+-- Deletes a group with all its data (admin only). Only allowed when no other approved member is
+-- left, so shared history is never removed from under other members; pending requests do not count.
+CREATE OR REPLACE FUNCTION public.delete_group(p_group_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    v_uid uuid := auth.uid();
+    v_group public.groups%ROWTYPE;
+BEGIN
+    IF v_uid IS NULL THEN
+        RAISE EXCEPTION 'not_authenticated' USING ERRCODE = '42501';
+    END IF;
+    SELECT * INTO v_group FROM public.groups AS g WHERE g.id = p_group_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'group_not_found' USING ERRCODE = 'P0002';
+    END IF;
+    IF v_group.admin_id IS DISTINCT FROM v_uid THEN
+        RAISE EXCEPTION 'not_group_admin' USING ERRCODE = '42501';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM public.group_members AS gm
+        WHERE gm.group_id = p_group_id AND gm.status = 'approved' AND gm.user_id <> v_uid
+    ) THEN
+        RAISE EXCEPTION 'group_has_members' USING ERRCODE = 'P0001',
+            HINT = 'Transfer the admin role and leave, or remove the other members first.';
+    END IF;
+
+    PERFORM pg_catalog.set_config('exevra.membership_rpc', 'on', true);
+    DELETE FROM public.groups WHERE id = p_group_id;
+    PERFORM pg_catalog.set_config('exevra.membership_rpc', 'off', true);
+
+    RETURN jsonb_build_object('group_id', p_group_id, 'deleted', true);
+END;
+$$;
+
+-- Hands the admin role to another approved member (admin only). The caller becomes a member and
+-- their pending invitations for the group are revoked.
 CREATE OR REPLACE FUNCTION public.transfer_admin(p_group_id uuid, p_new_admin uuid)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -517,6 +720,11 @@ BEGIN
     PERFORM pg_catalog.set_config('exevra.membership_rpc', 'off', true);
 
     UPDATE public.groups SET admin_id = p_new_admin WHERE id = p_group_id;
+
+    -- Invitations are sent on the admin's authority: the outgoing admin's pending ones are withdrawn.
+    UPDATE public.group_invitations AS gi
+    SET status = 'revoked', responded_at = now()
+    WHERE gi.group_id = p_group_id AND gi.inviter_id = v_uid AND gi.status = 'pending';
 
     RETURN jsonb_build_object('group_id', p_group_id, 'admin_id', p_new_admin);
 END;
@@ -638,8 +846,9 @@ BEGIN
     FOREACH v_sig IN ARRAY ARRAY[
         'public.create_group(text, text)',
         'public.approve_member(uuid, uuid, text)',
-        'public.remove_member(uuid, uuid)',
+        'public.remove_member(uuid, uuid, boolean)',
         'public.leave_group(uuid)',
+        'public.delete_group(uuid)',
         'public.transfer_admin(uuid, uuid)',
         'public.set_member_role(uuid, uuid, text)',
         'public.set_active_group(uuid)',
