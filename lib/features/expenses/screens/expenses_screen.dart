@@ -13,6 +13,7 @@ import '../../../models/expense.dart';
 import '../../../models/group.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/expense_provider.dart';
+import '../../../providers/failure_reporter.dart';
 import '../../../providers/group_detail_providers.dart';
 import '../../../providers/groups_provider.dart';
 import '../../shared/failure_retry.dart';
@@ -70,7 +71,7 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
     );
   }
 
-  void _confirmDelete(Expense expense) {
+  Future<void> _confirmDelete(Expense expense) async {
     AppHaptics.heavy();
     if (!_canDelete(expense)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -86,35 +87,79 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
     }
     final key = ref.read(filteredExpenseKeyProvider);
     if (key == null) return;
+    final userId = ref.read(currentUserIdProvider);
+    // Undo re-creates the expense as the current user, so it is offered
+    // only to the payer (an admin deleting someone else's cannot undo).
+    final canUndo = expense.userId != null && expense.userId == userId;
+    final payerNote = canUndo
+        ? ''
+        : ' It was paid by someone else, so this cannot be undone.';
 
-    unawaited(
-      showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Delete Expense?'),
-          content: Text(
-            'Are you sure you want to delete "${expense.title}"? This action cannot be reversed.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                unawaited(
-                  ref.read(expenseListProvider(key).notifier).remove(expense),
-                );
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Theme.of(ctx).colorScheme.error,
-                foregroundColor: Theme.of(ctx).colorScheme.onError,
-              ),
-              child: const Text('Delete'),
-            ),
-          ],
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete expense?'),
+        content: Text(
+          '"${expense.title}" (${MoneyFormat.format(expense.amount)}) will be '
+          'deleted${expense.isGroup ? ' for everyone in the group' : ''}.'
+          '$payerNote',
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+              foregroundColor: Theme.of(ctx).colorScheme.onError,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final notifier = ref.read(expenseListProvider(key).notifier);
+    // A failure is rolled back and shown once by the shell.
+    final failure = await notifier.remove(expense);
+    if (failure != null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('Deleted "${expense.title}".'),
+        action: canUndo
+            ? SnackBarAction(
+                label: 'Undo',
+                onPressed: () => unawaited(_undoDelete(key, expense)),
+              )
+            : null,
+      ),
+    );
+  }
+
+  /// Saves the deleted expense again (with a new id).
+  Future<void> _undoDelete(ExpenseListKey key, Expense expense) async {
+    final failure = await ref
+        .read(expenseListProvider(key).notifier)
+        .add(ExpenseDraft.fromExpense(expense));
+    if (failure == null && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Restored "${expense.title}".')));
+    }
+  }
+
+  void _openEditor({Expense? expense}) {
+    AppHaptics.selection();
+    unawaited(
+      AddEditExpenseSheet.show(
+        context,
+        expense: expense,
+        listKey: ref.read(filteredExpenseKeyProvider),
       ),
     );
   }
@@ -133,8 +178,14 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
     final members = ref.watch(activeGroupMembersProvider).value ?? const [];
 
     Future<void> reload() async {
-      if (key != null) {
-        await ref.read(expenseListProvider(key).notifier).reload();
+      if (key == null) return;
+      final failure = await ref
+          .read(expenseListProvider(key).notifier)
+          .reload();
+      // The first load's failure is the error state; later ones keep the
+      // rows and are shown once by the shell.
+      if (failure != null && list != null && mounted) {
+        ref.read(failureReporterProvider.notifier).report(failure);
       }
     }
 
@@ -248,7 +299,7 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
                     onRefresh: reload,
                     child: ListView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      children: [_buildEmptyState(filter.isFiltered)],
+                      children: [_buildEmptyState(filter.isFiltered, group)],
                     ),
                   )
                 : RefreshIndicator(
@@ -297,10 +348,7 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          AppHaptics.selection();
-          unawaited(AddEditExpenseSheet.show(context));
-        },
+        onPressed: _openEditor,
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Theme.of(context).colorScheme.onPrimary,
         icon: const Icon(Icons.add_rounded, size: 24),
@@ -411,7 +459,7 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
       for (final m in members) {
         if (m.userId == payer) return m.label;
       }
-      return 'Group';
+      return 'Member';
     }
 
     return Padding(
@@ -420,10 +468,10 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
         borderRadius: 18,
         padding: const EdgeInsets.all(14),
         onTap: () {
-          AppHaptics.selection();
           if (canEdit) {
-            unawaited(AddEditExpenseSheet.show(context, expense: expense));
+            _openEditor(expense: expense);
           } else {
+            AppHaptics.selection();
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('Only the payer can edit this expense.'),
@@ -467,34 +515,42 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
                   const SizedBox(height: 3),
                   Row(
                     children: [
-                      Text(
-                        '${DateHelpers.formatShortDate(expense.spentAt)} • ${DateHelpers.formatTime(expense.spentAt)}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isDark
-                              ? AppColors.darkTextTertiary
-                              : AppColors.lightTextTertiary,
+                      Flexible(
+                        child: Text(
+                          '${DateHelpers.formatShortDate(expense.spentAt)} • ${DateHelpers.formatTime(expense.spentAt)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark
+                                ? AppColors.darkTextTertiary
+                                : AppColors.lightTextTertiary,
+                          ),
                         ),
                       ),
                       if (!expense.isPersonal) ...[
                         const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 1.5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.primaryViolet.withValues(
-                              alpha: 0.15,
+                        Flexible(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 1.5,
                             ),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            payerLabel(),
-                            style: const TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.primaryViolet,
+                            decoration: BoxDecoration(
+                              color: AppColors.primaryViolet.withValues(
+                                alpha: 0.15,
+                              ),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              payerLabel(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.primaryViolet,
+                              ),
                             ),
                           ),
                         ),
@@ -517,54 +573,54 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
                     letterSpacing: -0.5,
                   ),
                 ),
-                PopupMenuButton<String>(
-                  padding: EdgeInsets.zero,
-                  icon: const Icon(
-                    Icons.more_horiz_rounded,
-                    size: 20,
-                    color: Colors.grey,
+                if (canEdit || canDelete)
+                  PopupMenuButton<String>(
+                    tooltip: 'Expense actions',
+                    padding: EdgeInsets.zero,
+                    icon: Icon(
+                      Icons.more_horiz_rounded,
+                      size: 20,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    onSelected: (val) {
+                      if (val == 'edit') {
+                        _openEditor(expense: expense);
+                      } else if (val == 'delete') {
+                        unawaited(_confirmDelete(expense));
+                      }
+                    },
+                    itemBuilder: (ctx) => [
+                      if (canEdit)
+                        const PopupMenuItem(
+                          value: 'edit',
+                          child: Row(
+                            children: [
+                              Icon(Icons.edit_outlined, size: 18),
+                              SizedBox(width: 8),
+                              Text('Edit'),
+                            ],
+                          ),
+                        ),
+                      if (canDelete)
+                        const PopupMenuItem(
+                          value: 'delete',
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.delete_outline,
+                                size: 18,
+                                color: AppColors.error,
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                'Delete',
+                                style: TextStyle(color: AppColors.error),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
                   ),
-                  onSelected: (val) {
-                    if (val == 'edit') {
-                      unawaited(
-                        AddEditExpenseSheet.show(context, expense: expense),
-                      );
-                    } else if (val == 'delete') {
-                      _confirmDelete(expense);
-                    }
-                  },
-                  itemBuilder: (ctx) => [
-                    if (canEdit)
-                      const PopupMenuItem(
-                        value: 'edit',
-                        child: Row(
-                          children: [
-                            Icon(Icons.edit_outlined, size: 18),
-                            SizedBox(width: 8),
-                            Text('Edit'),
-                          ],
-                        ),
-                      ),
-                    if (canDelete)
-                      const PopupMenuItem(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.delete_outline,
-                              size: 18,
-                              color: AppColors.error,
-                            ),
-                            SizedBox(width: 8),
-                            Text(
-                              'Delete',
-                              style: TextStyle(color: AppColors.error),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
               ],
             ),
           ],
@@ -573,9 +629,28 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
     );
   }
 
-  Widget _buildEmptyState(bool filtered) {
+  /// Two different empty states: nothing recorded yet (with a call to
+  /// add the first expense) and nothing matching the filters (with a call
+  /// to clear them).
+  Widget _buildEmptyState(bool filtered, Group? group) {
+    final scheme = Theme.of(context).colorScheme;
+    final String title;
+    final String body;
+    if (filtered) {
+      title = 'No matching expenses';
+      body = 'Nothing matches your search or filters.';
+    } else if (group != null) {
+      title = 'No expenses yet';
+      body = group.canAddExpenses
+          ? 'Add the first expense for ${group.name} or your own spending.'
+          : 'Expenses added to ${group.name} will show here.';
+    } else {
+      title = 'No expenses yet';
+      body = 'Record your first expense to start tracking your spending.';
+    }
     return Center(
       child: Padding(
+        key: Key(filtered ? 'expenses-empty-filtered' : 'expenses-empty-new'),
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -584,30 +659,42 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: AppColors.primaryCyan.withValues(alpha: 0.1),
+                color: scheme.primary.withValues(alpha: 0.1),
               ),
-              child: const Icon(
-                Icons.savings_outlined,
+              child: Icon(
+                filtered ? Icons.search_off_rounded : Icons.savings_outlined,
                 size: 48,
-                color: AppColors.primaryCyan,
+                color: scheme.primary,
               ),
             ),
             const SizedBox(height: 18),
             Text(
-              filtered ? 'No Expenses Found' : 'No Expenses Yet',
+              title,
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 6),
             Text(
-              filtered
-                  ? 'No expenses match your active filters or search terms.'
-                  : 'Tap Add Expense to log your first one.',
+              body,
               textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                fontSize: 13,
-              ),
+              style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
             ),
+            const SizedBox(height: 16),
+            if (filtered)
+              OutlinedButton.icon(
+                onPressed: () {
+                  _searchDebounce?.cancel();
+                  _searchController.clear();
+                  ref.read(expenseFilterProvider.notifier).clear();
+                },
+                icon: const Icon(Icons.filter_alt_off_rounded, size: 18),
+                label: const Text('Clear filters'),
+              )
+            else
+              ElevatedButton.icon(
+                onPressed: _openEditor,
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Add your first expense'),
+              ),
           ],
         ),
       ),
