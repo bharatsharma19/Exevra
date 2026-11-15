@@ -12,10 +12,13 @@ Designed & developed by Bharat Sharma.
 ## Features
 
 - **Personal expenses.** Add, edit and delete expenses with a title, amount, currency,
-  category, date and time, and an optional note.
+  category, date and time, and an optional note. The payer can move an expense between personal
+  and a group in one step, and undo the move.
 - **Groups with equal splits.** Create a group, invite people by email or with an invite code,
   and add shared expenses. Each group expense is split equally among the group's members at the
-  time it is added. Members can be admins, members or read-only viewers.
+  time it is added. Members can be admins, members or read-only viewers. Once someone who shares
+  an expense leaves the group, its amount can no longer change and it cannot be deleted, so the
+  balances of people who left stay settled.
 - **Balances and settlements.** See who owes whom, with suggested transfers to settle up. A
   payment someone records counts only after the person who received it confirms it, and either
   side can void a mistake.
@@ -27,6 +30,11 @@ Designed & developed by Bharat Sharma.
 - **App lock.** Optional fingerprint, face or device-credential lock. The app content is hidden
   in the app switcher while locked.
 - **Light and dark themes.** Follows the system setting, or pick one.
+- **First run and About.** A short introduction on first launch, a tip for adding the first
+  expense, and an About page with the version, privacy policy, terms, support contact, open-source
+  licences and account deletion.
+- **Account deletion.** Delete your account and data from the app (Profile or About), or follow
+  the account deletion page on the website.
 
 ## Screenshots
 
@@ -106,6 +114,15 @@ supabase test db           # run the pgTAP tests
 # Edge Functions with local secrets (gitignored)
 cp supabase/functions/.env.example supabase/functions/.env
 supabase functions serve --env-file supabase/functions/.env
+```
+
+To check the whole backend at once (auth, RPCs and the three Edge Functions), run the end-to-end
+smoke script against the local stack while `supabase functions serve` is running; usage is at the
+top of [`supabase/e2e/smoke.mjs`](supabase/e2e/smoke.mjs):
+
+```sh
+eval "$(supabase status -o env | grep -E '^(API_URL|ANON_KEY|SERVICE_ROLE_KEY)=')"
+node supabase/e2e/smoke.mjs "$API_URL" "$ANON_KEY" "$SERVICE_ROLE_KEY"
 ```
 
 `supabase status` prints the local API URL and anon key. To run the app against the local stack
@@ -229,11 +246,16 @@ artwork in `assets/icons/app_icon.png` changes.
 
 ## Build and release
 
+Before **every** beta APK (and every store build), bump `version:` in `pubspec.yaml`: raise the
+build number after the `+` each time (for example `1.0.0+1` to `1.0.0+2`), and the version name
+when the release changes. Android refuses an APK with a lower build number than the installed
+one, and testers and crash reports tell builds apart only by their version and build number.
+
 ```sh
 # Debug run on a device or emulator
 flutter run --dart-define-from-file=config/dev.json
 
-# Release APK for beta testers (sideloaded)
+# Release APK for beta testers (sideloaded); bump the version in pubspec.yaml first
 flutter build apk --release --dart-define-from-file=config/prod.json \
   --obfuscate --split-debug-info=build/symbols \
   --extra-gen-snapshot-options=--save-obfuscation-map=build/app/obfuscation.map.json
@@ -292,6 +314,9 @@ cd supabase/functions && deno test -A  # Edge Function tests (no network or data
 
 supabase test db                     # pgTAP tests against the local stack
 
+# Backend smoke test (local stack + functions serve; see supabase/e2e/smoke.mjs)
+node supabase/e2e/smoke.mjs "$API_URL" "$ANON_KEY" "$SERVICE_ROLE_KEY"
+
 # End-to-end on an emulator against the local stack
 flutter test integration_test --dart-define-from-file=config/local.json
 ```
@@ -325,6 +350,7 @@ supabase/
   migrations/  database schema (single source of truth)
   tests/       pgTAP tests
   functions/   Edge Functions (ai-chat, send-invite, delete-account)
+  e2e/         end-to-end smoke script for the backend and functions
   email_templates/
 config/        build configuration (only the example is committed)
 android/ ios/  platform projects
