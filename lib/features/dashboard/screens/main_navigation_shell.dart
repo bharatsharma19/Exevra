@@ -5,7 +5,6 @@ import '../../../core/utils/haptics.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/errors/failure_messages.dart';
-import '../../../providers/chat_provider.dart';
 import '../../../providers/failure_reporter.dart';
 import '../../../providers/group_detail_providers.dart';
 
@@ -47,13 +46,6 @@ class MainNavigationShell extends ConsumerWidget {
     ref.listen<ReportedFailure?>(failureReporterProvider, (prev, next) {
       if (next != null && next.sequence != prev?.sequence) {
         _showError(context, friendlyMessage(next.failure));
-      }
-    });
-
-    ref.listen<ChatState>(chatProvider, (prev, next) {
-      if (next.errorMessage != null &&
-          (prev?.errorMessage != next.errorMessage)) {
-        _showError(context, next.errorMessage!);
       }
     });
 

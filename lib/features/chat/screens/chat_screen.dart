@@ -1,17 +1,20 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_constants.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/date_helpers.dart';
-import '../../../core/utils/haptics.dart';
-import '../../../providers/profile_provider.dart';
-import '../../../providers/chat_provider.dart';
 
+import '../../../core/constants/app_constants.dart';
+import '../../../core/utils/haptics.dart';
+import '../../../data/ai/ai_chat_models.dart';
+import '../../../providers/chat_provider.dart';
+import '../../../providers/profile_provider.dart';
+import '../../shared/failure_retry.dart';
+import '../chat_copy.dart';
+import '../widgets/consent_view.dart';
+import '../widgets/message_bubble.dart';
+
+/// The Exevra Assistant: consent gate, conversation and input.
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({super.key});
 
@@ -20,396 +23,421 @@ class ChatScreen extends ConsumerStatefulWidget {
 }
 
 class _ChatScreenState extends ConsumerState<ChatScreen> {
-  final _textController = TextEditingController();
-  final _scrollController = ScrollController();
+  final _input = TextEditingController();
+  final _scroll = ScrollController();
+  bool _notNow = false;
+
+  /// True while the list is scrolled to (near) the newest message; streamed
+  /// tokens are followed only then.
+  bool _atBottom = true;
+
+  static const double _bottomSlack = 48;
+
+  @override
+  void initState() {
+    super.initState();
+    _scroll.addListener(_onScroll);
+    _input.addListener(() => setState(() {}));
+  }
 
   @override
   void dispose() {
-    _textController.dispose();
-    _scrollController.dispose();
+    _input.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
-  void _sendMessage([String? text]) {
-    final query = text ?? _textController.text;
-    if (query.trim().isEmpty) return;
+  void _onScroll() {
+    if (!_scroll.hasClients) return;
+    final p = _scroll.position;
+    final atBottom = p.pixels >= p.maxScrollExtent - _bottomSlack;
+    if (atBottom != _atBottom) setState(() => _atBottom = atBottom);
+  }
 
-    AppHaptics.light();
-    unawaited(ref.read(chatProvider.notifier).sendMessage(query));
-    _textController.clear();
-
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (_scrollController.hasClients) {
-        unawaited(
-          _scrollController.animateTo(
-            _scrollController.position.maxScrollExtent + 200,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-          ),
-        );
-      }
+  void _followIfAtBottom() {
+    if (!_atBottom) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      _scroll.jumpTo(_scroll.position.maxScrollExtent);
     });
+  }
+
+  void _jumpToLatest() {
+    setState(() => _atBottom = true);
+    if (!_scroll.hasClients) return;
+    unawaited(
+      _scroll.animateTo(
+        _scroll.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      ),
+    );
+  }
+
+  void _send([String? text]) {
+    final query = (text ?? _input.text).trim();
+    final chat = ref.read(chatProvider);
+    if (query.isEmpty ||
+        chat.isStreaming ||
+        query.length > AiChatRequest.maxUserMessageLength) {
+      return;
+    }
+    AppHaptics.light();
+    if (text == null) _input.clear();
+    setState(() => _atBottom = true);
+    unawaited(ref.read(chatProvider.notifier).sendMessage(query));
+  }
+
+  Future<void> _confirmClear() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear conversation?'),
+        content: const Text(
+          'This deletes the conversation from this device. It cannot be '
+          'undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && mounted) {
+      AppHaptics.medium();
+      await ref.read(chatProvider.notifier).clear();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final chatState = ref.watch(chatProvider);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final aiConsent = ref.watch(userProfileProvider)?.aiConsent ?? false;
+    ref.listen(chatProvider, (_, _) => _followIfAtBottom());
+    final chat = ref.watch(chatProvider);
+    final profile = ref.watch(userProfileProvider);
+    final profileState = ref.watch(profileProvider);
+    final needsConsent =
+        profile != null && (!profile.aiConsent || chat.consentRequired);
+    final showChat = profile != null && !needsConsent;
 
+    final Widget body;
+    if (profile == null) {
+      body = profileState.hasError && !profileState.isLoading
+          ? Center(
+              child: FailureRetry(
+                error: profileState.error!,
+                onRetry: () => ref.invalidate(profileProvider),
+              ),
+            )
+          : const Center(child: CircularProgressIndicator());
+    } else if (needsConsent && !_notNow) {
+      body = ChatConsentView(onNotNow: () => setState(() => _notNow = true));
+    } else if (needsConsent) {
+      body = _AssistantOff(onTurnOn: () => setState(() => _notNow = false));
+    } else {
+      body = _conversation(context, chat);
+    }
+
+    final provider = chat.provider;
     return Scaffold(
       appBar: AppBar(
-        title: Row(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: AppColors.primaryGradient,
-              ),
-              child: const Icon(
-                Icons.bolt_rounded,
-                size: 18,
-                color: Colors.black,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'AI Financial Co-Pilot',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            const Text(ChatCopy.assistantName),
+            if (showChat && provider != null)
+              Text(
+                'Answers by ${provider.label}',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
-                Text(
-                  chatState.activeModel ?? ChatNotifier.assistantName,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: AppColors.primaryCyan,
-                  ),
-                ),
-              ],
-            ),
+              ),
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.delete_sweep_outlined),
-            tooltip: 'Clear Chat',
-            onPressed: () => ref.read(chatProvider.notifier).clearChat(),
-          ),
+          if (showChat)
+            IconButton(
+              tooltip: 'Clear conversation',
+              icon: const Icon(Icons.delete_sweep_outlined),
+              onPressed: chat.messages.isEmpty ? null : _confirmClear,
+            ),
         ],
       ),
-      body: Column(
+      body: body,
+    );
+  }
+
+  Widget _conversation(BuildContext context, ChatState chat) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final messages = chat.messages;
+    final last = messages.isEmpty ? null : messages.last;
+    final announcement = chat.isStreaming
+        ? ChatCopy.responding
+        : last != null && !last.isUser
+        ? ChatCopy.complete
+        : '';
+
+    return SafeArea(
+      top: false,
+      child: Column(
         children: [
-          // Privacy Consent Banner
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            color: aiConsent
-                ? AppColors.primaryCyan.withValues(alpha: 0.1)
-                : AppColors.warning.withValues(alpha: 0.1),
-            child: Row(
-              children: [
-                Icon(
-                  aiConsent ? Icons.lock_open_rounded : Icons.shield_outlined,
-                  size: 20,
-                  color: aiConsent ? AppColors.primaryCyan : AppColors.warning,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        aiConsent
-                            ? 'Spending Record Analysis: Enabled'
-                            : 'Privacy Mode: Theoretical Advisor Only',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: aiConsent
-                              ? AppColors.primaryCyan
-                              : AppColors.warning,
-                        ),
-                      ),
-                      Text(
-                        aiConsent
-                            ? 'Sanitized aggregate numbers are injected into context.'
-                            : 'AI has zero access to your database records.',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: isDark
-                              ? AppColors.darkTextSecondary
-                              : AppColors.lightTextSecondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Switch(
-                  value: aiConsent,
-                  activeThumbColor: AppColors.primaryCyan,
-                  onChanged: (val) {
-                    AppHaptics.selection();
-                    unawaited(
-                      ref.read(profileProvider.notifier).setAiConsent(val),
-                    );
-                  },
-                ),
-              ],
-            ),
-          ),
-
-          // Message List
           Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-              itemCount: chatState.messages.length,
-              itemBuilder: (context, index) {
-                final message = chatState.messages[index];
-                return _buildMessageBubble(message, isDark);
-              },
-            ),
-          ),
-
-          // Quick Prompt Recommendation Chips
-          Container(
-            height: 44,
-            margin: const EdgeInsets.symmetric(vertical: 4),
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: AppConstants.aiQuickPrompts.length,
-              separatorBuilder: (context, index) => const SizedBox(width: 8),
-              itemBuilder: (context, idx) {
-                final prompt = AppConstants.aiQuickPrompts[idx];
-                return ActionChip(
-                  label: Text(prompt, style: const TextStyle(fontSize: 12)),
-                  backgroundColor: isDark
-                      ? AppColors.darkCardElevated
-                      : AppColors.lightCardElevated,
-                  side: BorderSide(
-                    color: isDark
-                        ? AppColors.darkBorder
-                        : AppColors.lightBorder,
-                  ),
-                  onPressed: chatState.isGenerating
-                      ? null
-                      : () => _sendMessage(prompt),
-                );
-              },
-            ),
-          ),
-
-          // Input Bar
-          Container(
-            padding: EdgeInsets.fromLTRB(
-              16,
-              8,
-              16,
-              MediaQuery.of(context).viewInsets.bottom > 0 ? 8 : 24,
-            ),
-            decoration: BoxDecoration(
-              color: isDark ? AppColors.darkCard : AppColors.lightCard,
-              border: Border(
-                top: BorderSide(
-                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-                ),
-              ),
-            ),
-            child: Row(
+            child: Stack(
               children: [
-                Expanded(
-                  child: TextField(
-                    controller: _textController,
-                    minLines: 1,
-                    maxLines: 4,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (v) => _sendMessage(),
-                    decoration: InputDecoration(
-                      hintText: 'Ask about budgets, cutbacks, categories...',
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide(
-                          color: isDark
-                              ? AppColors.darkBorder
-                              : AppColors.lightBorder,
-                        ),
-                      ),
+                if (messages.isEmpty)
+                  _EmptyState(onPrompt: _send)
+                else
+                  ListView.builder(
+                    controller: _scroll,
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+                    itemCount: messages.length,
+                    itemBuilder: (context, i) => MessageBubble(
+                      key: ValueKey(messages[i].id),
+                      message: messages[i],
+                      isLast: i == messages.length - 1,
+                      onRetry: () =>
+                          unawaited(ref.read(chatProvider.notifier).retry()),
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Container(
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: AppColors.primaryGradient,
+                if (messages.isNotEmpty && !_atBottom)
+                  PositionedDirectional(
+                    bottom: 12,
+                    end: 12,
+                    child: FloatingActionButton.small(
+                      heroTag: null,
+                      tooltip: 'Jump to latest',
+                      onPressed: _jumpToLatest,
+                      child: const Icon(Icons.arrow_downward_rounded),
+                    ),
                   ),
-                  child: IconButton(
-                    icon: chatState.isGenerating
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation(Colors.black),
-                            ),
-                          )
-                        : const Icon(
-                            Icons.send_rounded,
-                            color: Colors.black,
-                            size: 20,
-                          ),
-                    onPressed: chatState.isGenerating
-                        ? null
-                        : () => _sendMessage(),
-                  ),
-                ),
               ],
+            ),
+          ),
+          Semantics(
+            liveRegion: true,
+            label: announcement,
+            child: const SizedBox(width: double.infinity, height: 0),
+          ),
+          if (messages.isNotEmpty && !chat.isStreaming)
+            _PromptStrip(onPrompt: _send),
+          _InputBar(
+            controller: _input,
+            streaming: chat.isStreaming,
+            onSend: _send,
+            onStop: () => ref.read(chatProvider.notifier).stop(),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+              ChatCopy.disclaimer,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
             ),
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildMessageBubble(ChatMessage msg, bool isDark) {
-    if (msg.isUser) {
-      final primaryColor = Theme.of(context).colorScheme.primary;
-      final onPrimaryColor = Theme.of(context).colorScheme.onPrimary;
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.onPrompt});
 
-      return Align(
-        alignment: Alignment.centerRight,
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 12, left: 48),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: primaryColor,
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(18),
-              topRight: Radius.circular(18),
-              bottomLeft: Radius.circular(18),
-              bottomRight: Radius.circular(4),
+  final void Function(String) onPrompt;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        children: [
+          ExcludeSemantics(
+            child: Icon(
+              Icons.auto_awesome_outlined,
+              size: 40,
+              color: scheme.primary,
             ),
           ),
-          child: Text(
-            msg.text,
-            style: TextStyle(
-              color: onPrimaryColor,
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
+          const SizedBox(height: 12),
+          Text(
+            ChatCopy.emptyTitle,
+            style: theme.textTheme.titleLarge?.copyWith(
+              color: scheme.onSurface,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            ChatCopy.emptyBody,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 20),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final prompt in AppConstants.aiQuickPrompts)
+                ActionChip(
+                  label: Text(prompt),
+                  onPressed: () => onPrompt(prompt),
+                ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Text(
+            ChatCopy.disclaimer,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: scheme.onSurfaceVariant,
             ),
           ),
-        ),
-      );
-    }
+        ],
+      ),
+    );
+  }
+}
 
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 16, right: 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.auto_awesome,
-                  size: 14,
-                  color: AppColors.primaryCyan,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  msg.modelUsed ?? ChatNotifier.assistantName,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.primaryCyan,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  DateHelpers.formatTime(msg.timestamp),
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: isDark
-                        ? AppColors.darkTextTertiary
-                        : AppColors.lightTextTertiary,
-                  ),
-                ),
-              ],
+class _PromptStrip extends StatelessWidget {
+  const _PromptStrip({required this.onPrompt});
+
+  final void Function(String) onPrompt;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 48,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        itemCount: AppConstants.aiQuickPrompts.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (context, i) {
+          final prompt = AppConstants.aiQuickPrompts[i];
+          return Center(
+            child: ActionChip(
+              label: Text(prompt),
+              onPressed: () => onPrompt(prompt),
             ),
-            const SizedBox(height: 6),
-            GlassCard(
-              borderRadius: 18,
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (msg.text.isEmpty && msg.isStreaming)
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          'Analyzing financial telemetry...',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontStyle: FontStyle.italic,
-                            color: isDark
-                                ? AppColors.darkTextSecondary
-                                : AppColors.lightTextSecondary,
-                          ),
-                        ),
-                      ],
-                    )
-                  else
-                    MarkdownBody(
-                      data: msg.text,
-                      styleSheet:
-                          MarkdownStyleSheet.fromTheme(
-                            Theme.of(context),
-                          ).copyWith(
-                            p: TextStyle(
-                              fontSize: 14,
-                              height: 1.45,
-                              color: isDark
-                                  ? AppColors.darkTextPrimary
-                                  : AppColors.lightTextPrimary,
-                            ),
-                          ),
-                    ),
-                  if (msg.isStreaming && msg.text.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child:
-                          Container(
-                                width: 8,
-                                height: 8,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: Theme.of(context).colorScheme.primary,
-                                ),
-                              )
-                              .animate(onPlay: (c) => c.repeat(reverse: true))
-                              .scale(
-                                begin: const Offset(0.5, 0.5),
-                                end: const Offset(1.3, 1.3),
-                              ),
-                    ),
-                ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _InputBar extends StatelessWidget {
+  const _InputBar({
+    required this.controller,
+    required this.streaming,
+    required this.onSend,
+    required this.onStop,
+  });
+
+  final TextEditingController controller;
+  final bool streaming;
+  final VoidCallback onSend;
+  final VoidCallback onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    final canSend = controller.text.trim().isNotEmpty && !streaming;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 8, 0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: TextField(
+              controller: controller,
+              minLines: 1,
+              maxLines: 5,
+              maxLength: AiChatRequest.maxUserMessageLength,
+              maxLengthEnforcement: MaxLengthEnforcement.enforced,
+              textCapitalization: TextCapitalization.sentences,
+              textInputAction: TextInputAction.send,
+              onSubmitted: (_) {
+                if (canSend) onSend();
+              },
+              decoration: const InputDecoration(
+                hintText: 'Ask about your spending…',
+                border: OutlineInputBorder(),
+                isDense: true,
               ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          if (streaming)
+            IconButton.filledTonal(
+              tooltip: 'Stop response',
+              icon: const Icon(Icons.stop_rounded),
+              onPressed: onStop,
+            )
+          else
+            IconButton.filled(
+              tooltip: 'Send message',
+              icon: const Icon(Icons.send_rounded),
+              onPressed: canSend ? onSend : null,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AssistantOff extends StatelessWidget {
+  const _AssistantOff({required this.onTurnOn});
+
+  final VoidCallback onTurnOn;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ExcludeSemantics(
+              child: Icon(
+                Icons.chat_bubble_outline,
+                size: 40,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'The assistant is off',
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: scheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'You can keep using Exevra without it, and turn it on '
+              'whenever you like.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: onTurnOn,
+              style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
+              child: const Text('Turn on the assistant'),
             ),
           ],
         ),

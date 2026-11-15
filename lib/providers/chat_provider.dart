@@ -1,180 +1,405 @@
 import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/logging/app_logger.dart';
-import '../core/utils/haptics.dart';
-import '../services/ai_chat_service.dart';
+import '../core/platform/device_time_zone.dart';
+import '../core/storage/preferences.dart';
+import '../data/ai/ai_chat_client.dart';
+import '../data/ai/ai_chat_models.dart';
+import '../features/chat/chat_copy.dart';
+import '../features/chat/models/chat_message.dart';
 import 'auth_provider.dart';
+import 'profile_provider.dart';
 
-class ChatMessage {
-  final String id;
-  final String text;
-  final bool isUser;
-  final DateTime timestamp;
-  final String? modelUsed;
-  final bool isStreaming;
+export '../features/chat/models/chat_message.dart';
 
-  const ChatMessage({
-    required this.id,
-    required this.text,
-    required this.isUser,
-    required this.timestamp,
-    this.modelUsed,
-    this.isStreaming = false,
-  });
-
-  ChatMessage copyWith({
-    String? id,
-    String? text,
-    bool? isUser,
-    DateTime? timestamp,
-    String? modelUsed,
-    bool? isStreaming,
-  }) {
-    return ChatMessage(
-      id: id ?? this.id,
-      text: text ?? this.text,
-      isUser: isUser ?? this.isUser,
-      timestamp: timestamp ?? this.timestamp,
-      modelUsed: modelUsed ?? this.modelUsed,
-      isStreaming: isStreaming ?? this.isStreaming,
-    );
-  }
-}
-
+/// The conversation of the signed-in user.
 class ChatState {
+  const ChatState({this.messages = const [], this.consentRequired = false});
+
   final List<ChatMessage> messages;
-  final bool isGenerating;
-  final String? activeModel;
-  final String? errorMessage;
 
-  const ChatState({
-    this.messages = const [],
-    this.isGenerating = false,
-    this.activeModel,
-    this.errorMessage,
-  });
+  /// The server answered `consent_required`: show the consent screen even
+  /// if the local profile says otherwise.
+  final bool consentRequired;
 
-  ChatState copyWith({
-    List<ChatMessage>? messages,
-    bool? isGenerating,
-    String? activeModel,
-    Object? errorMessage = const Object(),
-  }) {
-    return ChatState(
-      messages: messages ?? this.messages,
-      isGenerating: isGenerating ?? this.isGenerating,
-      activeModel: activeModel ?? this.activeModel,
-      errorMessage: errorMessage == const Object()
-          ? this.errorMessage
-          : errorMessage as String?,
-    );
+  /// An answer is streaming.
+  bool get isStreaming => messages.isNotEmpty && messages.last.isStreaming;
+
+  /// The model of the latest answer that named one.
+  AiProvider? get provider {
+    for (final m in messages.reversed) {
+      if (!m.isUser && m.provider != null) return m.provider;
+    }
+    return null;
+  }
+
+  ChatState copyWith({List<ChatMessage>? messages, bool? consentRequired}) =>
+      ChatState(
+        messages: messages ?? this.messages,
+        consentRequired: consentRequired ?? this.consentRequired,
+      );
+}
+
+class _InFlight {
+  _InFlight(this.messageId);
+
+  final String messageId;
+  final Completer<void> abort = Completer<void>();
+  final Completer<void> done = Completer<void>();
+  StreamSubscription<AiStreamEvent>? subscription;
+
+  void complete() {
+    if (!done.isCompleted) done.complete();
+  }
+
+  void cancel() {
+    if (!abort.isCompleted) abort.complete();
+    unawaited(subscription?.cancel());
+    complete();
   }
 }
 
-/// The assistant conversation of the signed-in user. It lives in memory
-/// only and starts over when the user changes, so no conversation is ever
-/// shown to another account.
+/// The assistant conversation of the current user: multi-turn history,
+/// streaming answers, Stop, Retry and Clear. History is kept per user under
+/// a [UserPrefs] key, so sign-out removes it.
 class ChatNotifier extends Notifier<ChatState> {
-  AiChatService get _aiService => ref.read(aiChatServiceProvider);
+  static const String historyPref = 'chat_history';
+  static const int maxStoredMessages = 50;
+
+  /// Question/answer pairs sent before the new question (20 turns at most).
+  static const int maxHistoryPairs = 9;
+
+  String? _uid;
+  _InFlight? _active;
+  int _seq = 0;
 
   @override
   ChatState build() {
-    ref.watch(currentUserIdProvider);
-    ref.watch(aiChatServiceProvider);
-    return ChatState(messages: [_welcome()]);
+    final uid = ref.watch(currentUserIdProvider);
+    _uid = uid;
+    ref.onDispose(() {
+      _active?.cancel();
+      _active = null;
+    });
+    return ChatState(messages: uid == null ? const [] : _load(uid));
   }
 
-  static const String assistantName = 'Exevra Assistant';
-  static const String genericFailureMessage =
-      'Something went wrong. Please try again.';
-
-  static ChatMessage _welcome() {
-    return ChatMessage(
-      id: 'msg-welcome',
-      text:
-          '👋 **Welcome to the Exevra Assistant**\n\n'
-          'Ask about your spending, budgets or ways to save. '
-          'Tap a quick prompt below to get started.',
-      isUser: false,
-      timestamp: DateTime.now(),
-      modelUsed: assistantName,
-      isStreaming: false,
-    );
-  }
-
+  /// Sends [text] as a new question. Ignored while an answer is streaming,
+  /// when blank or longer than the server allows.
   Future<void> sendMessage(String text) async {
-    final query = text.trim();
-    if (query.isEmpty || state.isGenerating) return;
-    final owner = ref.read(currentUserIdProvider);
-
-    AppHaptics.light();
-
-    final userMsg = ChatMessage(
-      id: 'msg-${DateTime.now().millisecondsSinceEpoch}',
-      text: query,
+    final question = text.trim();
+    if (question.isEmpty ||
+        question.length > AiChatRequest.maxUserMessageLength ||
+        state.isStreaming ||
+        _uid == null) {
+      return;
+    }
+    final prior = state.messages;
+    final now = DateTime.now().toUtc();
+    final user = ChatMessage(
+      id: _newId('u'),
       isUser: true,
-      timestamp: DateTime.now(),
+      text: question,
+      createdAt: now,
     );
-
-    final assistantMsgId = 'msg-ai-${DateTime.now().millisecondsSinceEpoch}';
-    final assistantMsg = ChatMessage(
-      id: assistantMsgId,
-      text: '',
+    final answer = ChatMessage(
+      id: _newId('a'),
       isUser: false,
-      timestamp: DateTime.now(),
-      isStreaming: true,
+      text: '',
+      createdAt: now,
+      status: ChatMessageStatus.streaming,
     );
+    state = state.copyWith(messages: [...prior, user, answer]);
+    _persist();
+    await _start(answer.id, historyTurns(prior, question));
+  }
 
-    state = state.copyWith(
-      messages: [...state.messages, userMsg, assistantMsg],
-      isGenerating: true,
-      errorMessage: null,
+  /// Sends the last question again, replacing the failed or partial answer.
+  Future<void> retry() async {
+    final messages = state.messages;
+    if (messages.length < 2 || state.isStreaming) return;
+    final last = messages.last;
+    final question = messages[messages.length - 2];
+    if (!last.canRetry || !question.isUser) return;
+    final replacement = ChatMessage(
+      id: _newId('a'),
+      isUser: false,
+      text: '',
+      createdAt: DateTime.now().toUtc(),
+      status: ChatMessageStatus.streaming,
     );
+    final prior = messages.sublist(0, messages.length - 2);
+    state = state.copyWith(messages: [...prior, question, replacement]);
+    _persist();
+    await _start(replacement.id, historyTurns(prior, question.text));
+  }
 
-    String replyText;
-    String? failureMessage;
+  /// Cancels the streaming answer and keeps the text received so far.
+  void stop() {
+    final active = _active;
+    if (active == null) return;
+    active.cancel();
+    _active = null;
+    _update(
+      active.messageId,
+      (m) => m.copyWith(status: ChatMessageStatus.stopped),
+    );
+    _persist();
+  }
+
+  /// Cancels any request in flight and deletes the conversation.
+  Future<void> clear() async {
+    _active?.cancel();
+    _active = null;
+    state = const ChatState();
+    final uid = _uid;
+    if (uid == null) return;
     try {
-      final reply = await _aiService.ask(query);
-      replyText = reply.text;
-      AppHaptics.medium();
-    } on AiChatFailure catch (failure) {
-      replyText = failure.userMessage;
-      failureMessage = failure.userMessage;
-    } catch (e, stackTrace) {
-      AppLogger.error('Assistant request failed', e, stackTrace);
-      AppHaptics.error();
-      replyText = genericFailureMessage;
-      failureMessage = genericFailureMessage;
+      await ref
+          .read(sharedPreferencesProvider)
+          .remove(UserPrefs.key(uid, historyPref));
+    } on Object catch (e) {
+      AppLogger.warn('Could not clear the chat history', e.runtimeType);
+    }
+  }
+
+  /// The user allowed the assistant (consent saved on the server).
+  void consentGranted() {
+    if (state.consentRequired) state = state.copyWith(consentRequired: false);
+  }
+
+  /// The turns sent for [question]: the newest complete question/answer
+  /// pairs of [prior] that fit the server's limits, then [question].
+  static List<AiTurn> historyTurns(List<ChatMessage> prior, String question) {
+    final pairs = <(AiTurn, AiTurn)>[];
+    for (var i = 0; i + 1 < prior.length; i++) {
+      final q = prior[i];
+      final a = prior[i + 1];
+      if (!q.isUser || a.isUser) continue;
+      i++;
+      if (q.text.trim().isEmpty || !a.hasUsableText) continue;
+      pairs.add((
+        AiTurn.user(_clip(q.text, AiChatRequest.maxMessageLength)),
+        AiTurn.assistant(_clip(a.text, AiChatRequest.maxMessageLength)),
+      ));
+    }
+    var kept = pairs.length > maxHistoryPairs
+        ? pairs.sublist(pairs.length - maxHistoryPairs)
+        : pairs;
+    int total() =>
+        question.length +
+        kept.fold<int>(
+          0,
+          (sum, p) => sum + p.$1.content.length + p.$2.content.length,
+        );
+    while (kept.isNotEmpty && total() > AiChatRequest.maxTotalLength) {
+      kept = kept.sublist(1);
+    }
+    return [
+      for (final (q, a) in kept) ...[q, a],
+      AiTurn.user(question),
+    ];
+  }
+
+  static String _clip(String text, int max) {
+    if (text.length <= max) return text;
+    var end = max;
+    final last = text.codeUnitAt(end - 1);
+    if (last >= 0xD800 && last <= 0xDBFF) end--;
+    return text.substring(0, end);
+  }
+
+  Future<void> _start(String messageId, List<AiTurn> turns) async {
+    _active?.cancel();
+    final flight = _InFlight(messageId);
+    _active = flight;
+    bool current() => ref.mounted && identical(_active, flight);
+
+    String zone;
+    try {
+      zone = await ref.read(deviceTimeZoneProvider.future);
+    } on Object {
+      zone = DeviceTimeZone.fallbackForOffset(DateTime.now().timeZoneOffset);
+    }
+    if (!current()) return flight.done.future;
+    final locale =
+        ref.read(userProfileProvider)?.locale ?? ref.read(deviceLocaleProvider);
+    final request = AiChatRequest(
+      messages: turns,
+      timeZone: zone,
+      locale: locale,
+    );
+
+    void finish() {
+      if (identical(_active, flight)) _active = null;
+      _persist();
+      flight.complete();
     }
 
-    // The user changed while waiting: this reply is not theirs.
-    if (!ref.mounted || ref.read(currentUserIdProvider) != owner) return;
-    state = state.copyWith(
-      messages: state.messages.map((m) {
-        if (m.id == assistantMsgId) {
-          return m.copyWith(
-            text: replyText,
-            modelUsed: assistantName,
-            isStreaming: false,
+    final AiChatApi api;
+    try {
+      api = ref.read(aiChatApiProvider);
+    } on Object catch (e, s) {
+      AppLogger.error('Assistant client unavailable', e, s);
+      _fail(messageId, AiErrorCode.unavailable);
+      finish();
+      return flight.done.future;
+    }
+    flight.subscription = api
+        .stream(request, abortTrigger: flight.abort.future)
+        .listen(
+          (event) {
+            if (!current()) return;
+            _onEvent(messageId, event, finish);
+          },
+          onError: (Object error, StackTrace stack) {
+            if (!current()) return;
+            final code = error is AiChatException
+                ? error.code
+                : AiErrorCode.unknown;
+            if (error is! AiChatException) {
+              AppLogger.error('Assistant stream failed', error, stack);
+            }
+            if (code == AiErrorCode.aborted) return;
+            _fail(messageId, code);
+            finish();
+          },
+          onDone: () {
+            if (current()) {
+              _update(messageId, (m) {
+                if (!m.isStreaming) return m;
+                return m.text.isEmpty
+                    ? m.copyWith(
+                        status: ChatMessageStatus.error,
+                        errorCode: AiErrorCode.network,
+                      )
+                    : m.copyWith(status: ChatMessageStatus.interrupted);
+              });
+              finish();
+            }
+            flight.complete();
+          },
+        );
+    return flight.done.future;
+  }
+
+  void _onEvent(String id, AiStreamEvent event, void Function() finish) {
+    switch (event) {
+      case AiMeta(:final provider):
+        _update(id, (m) => m.copyWith(provider: provider));
+      case AiDelta(:final text):
+        _update(id, (m) => m.copyWith(text: m.text + text));
+      case AiDone(:final truncated):
+        _update(
+          id,
+          (m) => m.copyWith(
+            status: truncated
+                ? ChatMessageStatus.truncated
+                : ChatMessageStatus.done,
+          ),
+        );
+        finish();
+      case AiInterrupted():
+        _update(
+          id,
+          (m) => m.copyWith(
+            status: m.text.isEmpty
+                ? ChatMessageStatus.error
+                : ChatMessageStatus.interrupted,
+            errorCode: m.text.isEmpty ? AiErrorCode.unavailable : null,
+          ),
+        );
+        finish();
+      case AiStreamError(:final code, :final message):
+        if (code == AiErrorCode.declined) {
+          // Partial text of a refusal is never kept, copied or resent.
+          _update(
+            id,
+            (m) => m.copyWith(
+              text: message ?? ChatCopy.declinedFallback,
+              status: ChatMessageStatus.declined,
+            ),
           );
+        } else {
+          _fail(id, code);
         }
-        return m;
-      }).toList(),
-      isGenerating: false,
-      errorMessage: failureMessage,
+        finish();
+    }
+  }
+
+  void _fail(String id, AiErrorCode code) {
+    _update(
+      id,
+      (m) => m.copyWith(
+        text: '',
+        status: ChatMessageStatus.error,
+        errorCode: code,
+      ),
+    );
+    if (code == AiErrorCode.consentRequired) {
+      state = state.copyWith(consentRequired: true);
+    }
+  }
+
+  void _update(String id, ChatMessage Function(ChatMessage) change) {
+    state = state.copyWith(
+      messages: [for (final m in state.messages) m.id == id ? change(m) : m],
     );
   }
 
-  void clearChat() {
-    AppHaptics.medium();
-    state = ChatState(messages: [_welcome()]);
+  String _newId(String kind) =>
+      '$kind-${DateTime.now().microsecondsSinceEpoch}-${_seq++}';
+
+  List<ChatMessage> _load(String uid) {
+    try {
+      final raw = ref
+          .read(sharedPreferencesProvider)
+          .getString(UserPrefs.key(uid, historyPref));
+      if (raw == null) return const [];
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      return _trimmed([
+        for (final item in decoded) ?ChatMessage.fromJson(item),
+      ]);
+    } on Object catch (e) {
+      AppLogger.warn('Could not restore the chat history', e.runtimeType);
+      return const [];
+    }
+  }
+
+  void _persist() {
+    final uid = _uid;
+    if (uid == null || !ref.mounted) return;
+    final messages = _trimmed(state.messages);
+    final prefs = ref.read(sharedPreferencesProvider);
+    final key = UserPrefs.key(uid, historyPref);
+    unawaited(
+      prefs
+          .setString(key, jsonEncode([for (final m in messages) m.toJson()]))
+          .then<void>(
+            (_) {},
+            onError: (Object e) => AppLogger.warn(
+              'Could not save the chat history',
+              e.runtimeType,
+            ),
+          ),
+    );
+  }
+
+  /// The newest [maxStoredMessages], starting with a question.
+  static List<ChatMessage> _trimmed(List<ChatMessage> messages) {
+    var start = messages.length > maxStoredMessages
+        ? messages.length - maxStoredMessages
+        : 0;
+    while (start < messages.length && !messages[start].isUser) {
+      start++;
+    }
+    return start == 0 ? messages : messages.sublist(start);
   }
 }
-
-final aiChatServiceProvider = Provider<AiChatService>(
-  (ref) => const UnavailableAiChatService(),
-);
 
 final chatProvider = NotifierProvider<ChatNotifier, ChatState>(
   ChatNotifier.new,
