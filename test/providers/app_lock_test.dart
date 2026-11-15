@@ -3,10 +3,13 @@ import 'dart:async';
 import 'package:expense_manager/core/platform/secure_window.dart';
 import 'package:expense_manager/core/storage/preferences.dart';
 import 'package:expense_manager/features/auth/screens/app_lock_screen.dart';
+import 'package:expense_manager/features/auth/screens/login_screen.dart';
+import 'package:expense_manager/features/dashboard/screens/main_navigation_shell.dart';
 import 'package:expense_manager/main.dart';
 import 'package:expense_manager/providers/app_lock_provider.dart';
 import 'package:expense_manager/providers/auth_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:local_auth/local_auth.dart';
@@ -413,6 +416,94 @@ void main() {
       await tester.pump();
       expect(find.byType(AppLockScreen), findsNothing);
       expect(find.text('Secret balance'), findsOneWidget);
+    });
+  });
+
+  group('session messages', () {
+    const secret = 'Rent 25,000 paid to Asha';
+
+    Future<void> frames(WidgetTester tester, [int count = 5]) async {
+      for (var i = 0; i < count; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+    }
+
+    Future<ProviderContainer> pumpApp(
+      WidgetTester tester, {
+      bool lockOn = false,
+    }) async {
+      tester.view.physicalSize = const Size(1800, 4800);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            SystemChannels.platform,
+            (call) async => null,
+          );
+      final c = (await tester.runAsync(
+        () => start(signedInAs: 'A', lockOn: lockOn),
+      ))!;
+      backend.profiles.profiles['A'] = profileOf('A');
+      backend.profiles.profiles['B'] = profileOf('B');
+      await tester.pumpWidget(
+        UncontrolledProviderScope(container: c, child: const ExevraApp()),
+      );
+      await frames(tester);
+      expect(find.byType(AppLockScreen), findsNothing);
+      return c;
+    }
+
+    void showSecret(WidgetTester tester) {
+      ScaffoldMessenger.of(
+        tester.element(find.byType(MainNavigationShell)),
+      ).showSnackBar(const SnackBar(content: Text(secret)));
+    }
+
+    testWidgets('a snack bar is not visible once the app locks', (
+      tester,
+    ) async {
+      final c = await pumpApp(tester, lockOn: true);
+      showSecret(tester);
+      await frames(tester);
+      expect(find.text(secret), findsOneWidget);
+
+      // Back after a long time away: the app locks (the prompt is
+      // cancelled, so it stays locked).
+      localAuth.answers.add(
+        const LocalAuthException(code: LocalAuthExceptionCode.userCanceled),
+      );
+      lockOf(c).onLifecycleChanged(AppLifecycleState.paused);
+      now = now.add(const Duration(minutes: 1));
+      lockOf(c).onLifecycleChanged(AppLifecycleState.resumed);
+      await frames(tester);
+
+      expect(find.byType(AppLockScreen), findsOneWidget);
+      expect(find.text(secret), findsNothing);
+    });
+
+    testWidgets('no snack bar of A survives sign-out or reaches B', (
+      tester,
+    ) async {
+      final c = await pumpApp(tester);
+      showSecret(tester);
+      await frames(tester);
+      expect(find.text(secret), findsOneWidget);
+
+      await tester.runAsync(
+        () => c.read(authControllerProvider.notifier).signOut(),
+      );
+      await frames(tester);
+      expect(find.byType(LoginScreen), findsOneWidget);
+      expect(find.text(secret), findsNothing);
+
+      await tester.runAsync(() async {
+        backend.auth.signInAs('B');
+        await settle();
+      });
+      await frames(tester);
+      expect(c.read(currentUserIdProvider), 'B');
+      expect(find.byType(MainNavigationShell), findsOneWidget);
+      expect(find.text(secret), findsNothing);
     });
   });
 }

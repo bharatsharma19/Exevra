@@ -12,11 +12,13 @@ import 'core/router/deep_links.dart';
 import 'core/storage/preferences.dart';
 import 'core/storage/secure_session_storage.dart';
 import 'core/theme/app_theme.dart';
+import 'core/ui/root_messenger.dart';
 import 'core/utils/app_locale.dart';
 import 'features/auth/screens/app_lock_screen.dart';
 import 'features/startup/service_unavailable_app.dart';
 import 'models/profile.dart';
 import 'providers/app_lock_provider.dart';
+import 'providers/auth_provider.dart';
 import 'providers/profile_provider.dart';
 
 Future<void> main() async {
@@ -128,6 +130,20 @@ class _ExevraAppState extends ConsumerState<ExevraApp>
     // Opens invitation links for as long as the app runs.
     ref.watch(deepLinkHandlerProvider);
 
+    // Snack bars and banners never outlive the session they belong to
+    // (sign-out, account deletion, another user) and never stay up
+    // behind the lock screen.
+    ref
+      ..listen<String?>(currentUserIdProvider, (previous, next) {
+        if (previous != next) clearRootMessages();
+      })
+      ..listen<bool>(appLockProvider.select((lock) => lock.showLockScreen), (
+        previous,
+        next,
+      ) {
+        if (next) clearRootMessages();
+      });
+
     final themeMode = switch (ref.watch(themePreferenceProvider)) {
       ThemePreference.light => ThemeMode.light,
       ThemePreference.dark => ThemeMode.dark,
@@ -141,6 +157,7 @@ class _ExevraAppState extends ConsumerState<ExevraApp>
       darkTheme: AppTheme.darkTheme,
       themeMode: themeMode,
       routerConfig: router,
+      scaffoldMessengerKey: rootScaffoldMessengerKey,
       builder: (context, child) => LockGate(child: child ?? const SizedBox()),
     );
   }
@@ -149,6 +166,9 @@ class _ExevraAppState extends ConsumerState<ExevraApp>
 /// Puts the lock screen (or the privacy cover) over the app. While either
 /// shows, the app below is kept (so navigation survives) but excluded from
 /// semantics, focus, pointer input and animations.
+///
+/// The cover has a messenger of its own: snack bars of the app (root
+/// messenger) are never shown on it, and stay below it.
 class LockGate extends ConsumerWidget {
   const LockGate({super.key, required this.child});
 
@@ -171,10 +191,12 @@ class LockGate extends ConsumerWidget {
             ),
           ),
         ),
-        if (lock.showLockScreen)
-          const AppLockScreen()
-        else if (lock.coverVisible)
-          const PrivacyCover(),
+        if (hidden)
+          ScaffoldMessenger(
+            child: lock.showLockScreen
+                ? const AppLockScreen()
+                : const PrivacyCover(),
+          ),
       ],
     );
   }
