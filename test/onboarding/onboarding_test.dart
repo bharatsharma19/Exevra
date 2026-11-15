@@ -197,6 +197,22 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byTooltip('Skip the introduction'), findsOneWidget);
       expect(find.bySemanticsLabel('Skip the introduction'), findsOneWidget);
+      // Skip keeps the button's own node: focusable, with the focus action.
+      final skip = tester.getSemantics(
+        find.bySemanticsLabel('Skip the introduction'),
+      );
+      expect(
+        skip,
+        matchesSemantics(
+          label: 'Skip the introduction',
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: true,
+          isFocusable: true,
+          hasTapAction: true,
+          hasFocusAction: true,
+        ),
+      );
       await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
       await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
       await expectLater(tester, meetsGuideline(textContrastGuideline));

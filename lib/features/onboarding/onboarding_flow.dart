@@ -141,18 +141,17 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
                     horizontal: AppSpacing.sm,
                     vertical: AppSpacing.xs,
                   ),
+                  // The button keeps its own semantics node (focusable, with
+                  // the focus action keyboard and switch users rely on); only
+                  // its label is replaced by the fuller tooltip text.
                   child: Tooltip(
                     message: l10n.onboardingSkipTooltip,
                     excludeFromSemantics: true,
-                    child: Semantics(
-                      label: l10n.onboardingSkipTooltip,
-                      button: true,
-                      enabled: onSkip != null,
-                      onTap: onSkip,
-                      excludeSemantics: true,
-                      child: TextButton(
-                        onPressed: onSkip,
-                        child: Text(l10n.onboardingSkip),
+                    child: TextButton(
+                      onPressed: onSkip,
+                      child: Text(
+                        l10n.onboardingSkip,
+                        semanticsLabel: l10n.onboardingSkipTooltip,
                       ),
                     ),
                   ),
