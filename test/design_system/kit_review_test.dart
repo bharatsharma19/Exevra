@@ -429,7 +429,12 @@ void main() {
       ]) {
         final side = style.side!.resolve({WidgetState.focused})!;
         expect(side.color, AppPalette.light.focusRing);
-        expect(side.strokeAlign, BorderSide.strokeAlignOutside);
+        // Outside the control: the outlined border sits on its edge, the
+        // other buttons' ring leaves a gap (see focus_indicator_test).
+        expect(
+          side.strokeAlign,
+          greaterThanOrEqualTo(BorderSide.strokeAlignOutside),
+        );
       }
     });
 

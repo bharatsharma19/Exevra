@@ -34,6 +34,37 @@ class AppTheme {
   /// Legacy alias of [dark]; see [lightTheme].
   static ThemeData get darkTheme => _dark;
 
+  /// Width of the keyboard focus ring.
+  static const double focusRingWidth = 2;
+
+  /// Space between a filled control and its focus ring.
+  static const double focusRingGap = 2;
+
+  /// Keyboard focus ring for filled and borderless controls (filled,
+  /// elevated, destructive, text and icon buttons, the FAB).
+  ///
+  /// A [focusRingWidth] ring of [AppPalette.focusRing] drawn [focusRingGap]
+  /// outside the control, so the page shows between the fill and the ring.
+  /// Both edges of the ring then touch the page (at least 3:1, see
+  /// contrast_test), and the gap keeps the ring apart from a fill of the same
+  /// hue (the light accent equals the light focus ring).
+  static BorderSide focusRingSide(AppPalette p) => BorderSide(
+    color: p.focusRing,
+    width: focusRingWidth,
+    // strokeInset = width * (1 - (1 + align) / 2) = -gap.
+    strokeAlign: 1 + 2 * focusRingGap / focusRingWidth,
+  );
+
+  /// Keyboard focus border for outlined controls (outlined buttons, chips):
+  /// their own border turns into a thicker [AppPalette.focusRing] border
+  /// drawn outside the control. The colours on both sides of it (the page and
+  /// the control's pale fill) are at least 3:1 against the ring.
+  static BorderSide focusBorderSide(AppPalette p) => BorderSide(
+    color: p.focusRing,
+    width: 3,
+    strokeAlign: BorderSide.strokeAlignOutside,
+  );
+
   /// Builds the [ColorScheme] for [p]. Exposed for tests.
   static ColorScheme colorSchemeFor(AppPalette p) => ColorScheme(
     brightness: p.brightness,
@@ -84,16 +115,26 @@ class AppTheme {
     final buttonText = text.labelLarge!.copyWith(fontSize: 16);
     const minButton = Size(AppSizes.minTapTarget, AppSizes.minTapTarget);
 
-    // Keyboard and D-pad focus: a 2 dp ring drawn outside the control, so it
-    // sits on the page (at least 3:1, see contrast_test) instead of on the
-    // control's own fill, where an overlay or same-colour ring would vanish.
-    final focusRing = BorderSide(
-      color: p.focusRing,
-      width: 2,
-      strokeAlign: BorderSide.strokeAlignOutside,
-    );
+    // Keyboard and D-pad focus (WCAG 2.4.7): Material's focus overlay is a
+    // faint tint, so every interactive component gets a solid indicator in
+    // AppPalette.focusRing (at least 3:1 against the page, see
+    // contrast_test). Filled controls get a ring with a gap ([focusRingSide]),
+    // outlined controls a thicker border ([focusBorderSide]), and toggles
+    // (switch, checkbox, radio) a solid halo with their marks redrawn in
+    // textOnAccent on top of it. Material only reports the focused state
+    // while the keyboard drives focus, so touch users never see it.
+    final focusRing = focusRingSide(p);
+    final focusBorder = focusBorderSide(p);
+    bool focused(Set<WidgetState> states) =>
+        states.contains(WidgetState.focused) &&
+        !states.contains(WidgetState.disabled);
     final focusSide = WidgetStateProperty.resolveWith<BorderSide?>(
-      (states) => states.contains(WidgetState.focused) ? focusRing : null,
+      (states) => focused(states) ? focusRing : null,
+    );
+    // Radial focus halo of switches, checkboxes and radios. Pressed and
+    // hovered overlays keep the Material defaults (null falls through).
+    final toggleOverlay = WidgetStateProperty.resolveWith<Color?>(
+      (states) => focused(states) ? p.focusRing : null,
     );
 
     OutlineInputBorder inputBorder(Color color, [double width = 1]) =>
@@ -137,6 +178,10 @@ class AppTheme {
         // the indicator has an accent outline (at least 3:1 against the bar),
         // and the icon and label switch to the accent colour and a heavier
         // weight. Screens should also pass a filled `selectedIcon`.
+        // Keyboard focus: NavigationBar paints its focus highlight under the
+        // opaque indicator and does not resolve the focused state for icons or
+        // labels, so the theme cannot draw a visible ring here. Destinations
+        // use AppNavigationDestination, which adds the focus outline.
         indicatorColor: p.accentContainer,
         indicatorShape: StadiumBorder(side: BorderSide(color: p.accent)),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
@@ -211,13 +256,15 @@ class AppTheme {
               : p.surfaceVariant,
         ),
         side: WidgetStateBorderSide.resolveWith(
-          (states) => BorderSide(
-            color: states.contains(WidgetState.disabled)
-                ? p.outlineVariant
-                : states.contains(WidgetState.selected)
-                ? p.accent
-                : p.outline,
-          ),
+          (states) => focused(states)
+              ? focusBorder
+              : BorderSide(
+                  color: states.contains(WidgetState.disabled)
+                      ? p.outlineVariant
+                      : states.contains(WidgetState.selected)
+                      ? p.accent
+                      : p.outline,
+                ),
         ),
         labelStyle: WidgetStateTextStyle.resolveWith(
           (states) => text.labelLarge!.copyWith(
@@ -241,7 +288,14 @@ class AppTheme {
         focusElevation: AppElevation.medium,
         hoverElevation: AppElevation.medium,
         highlightElevation: AppElevation.medium,
-        shape: const RoundedRectangleBorder(borderRadius: AppRadius.lgAll),
+        // The FAB has no themeable side, but RawMaterialButton resolves a
+        // state-dependent shape, so the focus ring rides on the shape.
+        shape: WidgetStateOutlinedBorder.resolveWith(
+          (states) => RoundedRectangleBorder(
+            borderRadius: AppRadius.lgAll,
+            side: focused(states) ? focusRing : BorderSide.none,
+          ),
+        ),
         extendedTextStyle: buttonText,
       ),
       cardTheme: CardThemeData(
@@ -333,8 +387,8 @@ class AppTheme {
         style:
             ButtonStyle(
               side: WidgetStateBorderSide.resolveWith(
-                (states) => states.contains(WidgetState.focused)
-                    ? focusRing.copyWith(width: 3)
+                (states) => focused(states)
+                    ? focusBorder
                     : BorderSide(
                         color: states.contains(WidgetState.disabled)
                             ? p.outlineVariant
@@ -366,24 +420,56 @@ class AppTheme {
         ).copyWith(side: focusSide),
       ),
       iconButtonTheme: IconButtonThemeData(
-        style: IconButton.styleFrom(
-          foregroundColor: p.textSecondary,
-          disabledForegroundColor: p.textTertiary,
-          minimumSize: minButton,
-          tapTargetSize: MaterialTapTargetSize.padded,
-        ).copyWith(side: focusSide),
+        // A selected (toggled) icon button gets a filled accent container with
+        // an accent outline, so the state shows even without a selectedIcon.
+        style:
+            IconButton.styleFrom(
+              foregroundColor: p.textSecondary,
+              disabledForegroundColor: p.textTertiary,
+              minimumSize: minButton,
+              tapTargetSize: MaterialTapTargetSize.padded,
+            ).copyWith(
+              foregroundColor: WidgetStateProperty.resolveWith(
+                (states) => states.contains(WidgetState.disabled)
+                    ? p.textTertiary
+                    : states.contains(WidgetState.selected)
+                    ? p.onAccentContainer
+                    : p.textSecondary,
+              ),
+              backgroundColor: WidgetStateProperty.resolveWith(
+                (states) => !states.contains(WidgetState.selected)
+                    ? null
+                    : states.contains(WidgetState.disabled)
+                    ? p.surfaceVariant
+                    : p.accentContainer,
+              ),
+              side: WidgetStateProperty.resolveWith(
+                (states) => focused(states)
+                    ? focusRing
+                    : states.contains(WidgetState.selected) &&
+                          !states.contains(WidgetState.disabled)
+                    ? BorderSide(color: p.accent)
+                    : null,
+              ),
+            ),
       ),
       segmentedButtonTheme: SegmentedButtonThemeData(
         style: ButtonStyle(
           minimumSize: const WidgetStatePropertyAll(minButton),
+          // The segments share one outer border, so a focused segment is
+          // filled with the focus colour instead of getting its own ring.
           backgroundColor: WidgetStateProperty.resolveWith(
-            (states) => states.contains(WidgetState.selected)
+            (states) => focused(states)
+                ? p.focusRing
+                : states.contains(WidgetState.selected)
                 ? p.accentContainer
                 : p.surface,
           ),
           foregroundColor: WidgetStateProperty.resolveWith(
             (states) => states.contains(WidgetState.disabled)
                 ? p.textTertiary
+                : focused(states)
+                ? p.textOnAccent
                 : states.contains(WidgetState.selected)
                 ? p.onAccentContainer
                 : p.textPrimary,
@@ -392,8 +478,10 @@ class AppTheme {
         ),
       ),
       switchTheme: SwitchThemeData(
+        overlayColor: toggleOverlay,
         thumbColor: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.disabled)) return p.outlineVariant;
+          if (focused(states)) return p.textOnAccent;
           return states.contains(WidgetState.selected)
               ? p.textOnAccent
               : p.outlineStrong;
@@ -405,6 +493,12 @@ class AppTheme {
               : p.surfaceVariant;
         }),
         trackOutlineColor: WidgetStateProperty.resolveWith((states) {
+          if (focused(states)) {
+            // On the accent track the outline must contrast with the track.
+            return states.contains(WidgetState.selected)
+                ? p.textOnAccent
+                : p.focusRing;
+          }
           if (states.contains(WidgetState.selected)) return Colors.transparent;
           return states.contains(WidgetState.disabled)
               ? p.outlineVariant
@@ -412,20 +506,39 @@ class AppTheme {
         }),
       ),
       checkboxTheme: CheckboxThemeData(
+        overlayColor: toggleOverlay,
+        // While focused the box sits on the focusRing halo, so it is redrawn
+        // in textOnAccent (at least 4.5:1 against the halo).
         fillColor: WidgetStateProperty.resolveWith(
           (states) => states.contains(WidgetState.selected)
               ? (states.contains(WidgetState.disabled)
                     ? p.outlineVariant
+                    : focused(states)
+                    ? p.textOnAccent
                     : p.accent)
               : Colors.transparent,
         ),
-        checkColor: WidgetStatePropertyAll(p.textOnAccent),
-        side: BorderSide(color: p.outline, width: 2),
+        checkColor: WidgetStateProperty.resolveWith(
+          (states) => focused(states) ? p.focusRing : p.textOnAccent,
+        ),
+        // A WidgetStateBorderSide is also resolved for selected boxes; null
+        // keeps the default (no border) there.
+        side: WidgetStateBorderSide.resolveWith(
+          (states) => focused(states) && !states.contains(WidgetState.selected)
+              ? BorderSide(color: p.textOnAccent, width: 2)
+              : states.contains(WidgetState.selected)
+              ? null
+              : BorderSide(color: p.outline, width: 2),
+        ),
       ),
       radioTheme: RadioThemeData(
+        overlayColor: toggleOverlay,
         fillColor: WidgetStateProperty.resolveWith(
-          (states) =>
-              states.contains(WidgetState.selected) ? p.accent : p.outline,
+          (states) => focused(states)
+              ? p.textOnAccent
+              : states.contains(WidgetState.selected)
+              ? p.accent
+              : p.outline,
         ),
       ),
       progressIndicatorTheme: ProgressIndicatorThemeData(

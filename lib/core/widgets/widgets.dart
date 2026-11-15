@@ -9,6 +9,7 @@ export 'app_avatar.dart';
 export 'app_card.dart';
 export 'app_icon_button.dart';
 export 'app_list_tile.dart';
+export 'app_navigation_destination.dart';
 export 'app_password_field.dart';
 export 'app_sheet.dart';
 export 'app_snackbar.dart';
