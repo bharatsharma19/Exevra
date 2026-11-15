@@ -80,8 +80,10 @@ class GroupsNotifier extends AsyncNotifier<GroupsState> {
     return match.isEmpty ? null : saved;
   }
 
-  void _report(AppFailure failure) {
-    if (ref.mounted) ref.read(failureReporterProvider.notifier).report(failure);
+  void _report(AppFailure failure, {bool report = true}) {
+    if (report && ref.mounted) {
+      ref.read(failureReporterProvider.notifier).report(failure);
+    }
     AppHaptics.error();
   }
 
@@ -131,9 +133,12 @@ class GroupsNotifier extends AsyncNotifier<GroupsState> {
   }
 
   /// Creates a group and makes it active. Returns the failure or null.
+  /// With [report] false a failure to create is only returned (for a form
+  /// that shows it inline).
   Future<AppFailure?> createGroup(
     String name, {
     required String currency,
+    bool report = true,
   }) async {
     try {
       final id = await _repo.createGroup(name: name, currency: currency);
@@ -143,19 +148,36 @@ class GroupsNotifier extends AsyncNotifier<GroupsState> {
       if (switched == null) AppHaptics.success();
       return switched;
     } on AppFailure catch (failure) {
-      _report(failure);
+      _report(failure, report: report);
       return failure;
     }
   }
 
   /// Sends a join request with an invite code. The group shows as
   /// pending until an admin approves.
-  Future<(JoinRequest?, AppFailure?)> joinByCode(String code) async {
+  Future<(JoinRequest?, AppFailure?)> joinByCode(
+    String code, {
+    bool report = true,
+  }) async {
     try {
       final request = await _repo.joinByCode(code);
       await refresh();
       AppHaptics.success();
       return (request, null);
+    } on AppFailure catch (failure) {
+      _report(failure, report: report);
+      return (null, failure);
+    }
+  }
+
+  /// Issues a new invite code for [groupId] (admin only); the old code
+  /// stops working.
+  Future<(InviteCode?, AppFailure?)> rotateInviteCode(String groupId) async {
+    try {
+      final code = await _repo.rotateInviteCode(groupId);
+      await refresh();
+      AppHaptics.success();
+      return (code, null);
     } on AppFailure catch (failure) {
       _report(failure);
       return (null, failure);

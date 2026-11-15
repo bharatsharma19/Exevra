@@ -264,6 +264,46 @@ void main() {
       expect(server.lastJsonBody, {'p_group_id': null});
     });
 
+    test('a group is deleted through delete_group', () async {
+      server.respond = (_) => json({'group_id': 'g1', 'deleted': true});
+      final repo = SupabaseGroupRepository(server.client());
+      await repo.deleteGroup('g1');
+      expect(server.last.url.path, '/rest/v1/rpc/delete_group');
+      expect(server.lastJsonBody, {'p_group_id': 'g1'});
+    });
+
+    test('a group with other members cannot be deleted', () async {
+      server.respond = (_) =>
+          json({'code': 'P0001', 'message': 'group_has_members'}, 400);
+      final repo = SupabaseGroupRepository(server.client());
+      final failure = await repo
+          .deleteGroup('g1')
+          .then<Object?>((_) => null, onError: (Object e) => e);
+      expect(failure, const AppFailure.business('group_has_members'));
+    });
+
+    test('remove_member sends p_force and maps an open balance', () async {
+      server.respond = (_) => json({
+        'code': 'P0001',
+        'message': 'outstanding_balance',
+        'details': 'net_minor=-500 pending_minor=0',
+      }, 400);
+      final repo = SupabaseGroupRepository(server.client());
+      final failure = await repo
+          .removeMember('g1', 'u2')
+          .then<Object?>((_) => null, onError: (Object e) => e);
+      expect(failure, const AppFailure.business('outstanding_balance'));
+      expect(server.lastJsonBody, {
+        'p_group_id': 'g1',
+        'p_user_id': 'u2',
+        'p_force': false,
+      });
+
+      server.respond = (_) => json({'removed': true});
+      await repo.removeMember('g1', 'u2', force: true);
+      expect(server.lastJsonBody['p_force'], isTrue);
+    });
+
     test('members come from get_group_members', () async {
       server.respond = (_) => json([
         {

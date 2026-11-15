@@ -40,7 +40,14 @@ abstract interface class GroupRepository {
   Future<void> deleteGroup(String groupId);
 
   Future<void> transferAdmin(String groupId, String newAdminId);
-  Future<void> removeMember(String groupId, String userId);
+
+  /// Removes a member or rejects a pending request. A member with an
+  /// open balance is only removed with [force] (their balance stays).
+  Future<void> removeMember(
+    String groupId,
+    String userId, {
+    bool force = false,
+  });
   Future<void> approveMember(
     String groupId,
     String userId, {
@@ -114,12 +121,7 @@ class SupabaseGroupRepository implements GroupRepository {
   @override
   Future<void> deleteGroup(String groupId) {
     return ErrorMapper.guard(() async {
-      final rows = await _client
-          .from('groups')
-          .delete()
-          .eq('id', groupId)
-          .select('id');
-      requireRows(rows);
+      await _rpc('delete_group', {'p_group_id': groupId});
     });
   }
 
@@ -134,9 +136,17 @@ class SupabaseGroupRepository implements GroupRepository {
   }
 
   @override
-  Future<void> removeMember(String groupId, String userId) {
+  Future<void> removeMember(
+    String groupId,
+    String userId, {
+    bool force = false,
+  }) {
     return ErrorMapper.guard(() async {
-      await _rpc('remove_member', {'p_group_id': groupId, 'p_user_id': userId});
+      await _rpc('remove_member', {
+        'p_group_id': groupId,
+        'p_user_id': userId,
+        'p_force': force,
+      });
     });
   }
 

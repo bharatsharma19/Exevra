@@ -27,9 +27,11 @@ String _requireUser(Ref ref) {
   return userId;
 }
 
-AppFailure _report(Ref ref, AppFailure failure) {
+AppFailure _report(Ref ref, AppFailure failure, {bool report = true}) {
   AppHaptics.error();
-  if (ref.mounted) ref.read(failureReporterProvider.notifier).report(failure);
+  if (report && ref.mounted) {
+    ref.read(failureReporterProvider.notifier).report(failure);
+  }
   return failure;
 }
 
@@ -49,7 +51,10 @@ class GroupMembersNotifier extends AsyncNotifier<List<GroupMember>> {
     return ref.watch(groupRepositoryProvider).fetchMembers(groupId);
   }
 
-  Future<AppFailure?> _act(Future<void> Function() action) async {
+  Future<AppFailure?> _act(
+    Future<void> Function() action, {
+    bool report = true,
+  }) async {
     try {
       await action();
       AppHaptics.success();
@@ -59,7 +64,7 @@ class GroupMembersNotifier extends AsyncNotifier<List<GroupMember>> {
       await ref.read(groupsProvider.notifier).refresh();
       return null;
     } on AppFailure catch (failure) {
-      return _report(ref, failure);
+      return _report(ref, failure, report: report);
     }
   }
 
@@ -69,9 +74,17 @@ class GroupMembersNotifier extends AsyncNotifier<List<GroupMember>> {
     GroupRole role = GroupRole.member,
   }) => _act(() => _repo.approveMember(groupId, userId, role: role));
 
-  /// Removes a member or rejects a pending request.
-  Future<AppFailure?> remove(String userId) =>
-      _act(() => _repo.removeMember(groupId, userId));
+  /// Removes a member or rejects a pending request. A member with an open
+  /// balance needs [force] (the server answers `outstanding_balance`
+  /// otherwise).
+  Future<AppFailure?> remove(
+    String userId, {
+    bool force = false,
+    bool report = true,
+  }) => _act(
+    () => _repo.removeMember(groupId, userId, force: force),
+    report: report,
+  );
 
   Future<AppFailure?> setRole(String userId, GroupRole role) =>
       _act(() => _repo.setMemberRole(groupId, userId, role));
@@ -132,7 +145,10 @@ class SettlementsNotifier extends AsyncNotifier<List<Settlement>> {
     return ref.watch(settlementRepositoryProvider).list(groupId);
   }
 
-  Future<AppFailure?> _write(Future<Settlement> Function() action) async {
+  Future<AppFailure?> _write(
+    Future<Settlement> Function() action, {
+    bool report = true,
+  }) async {
     try {
       final saved = await action();
       if (!ref.mounted) return null;
@@ -145,7 +161,7 @@ class SettlementsNotifier extends AsyncNotifier<List<Settlement>> {
       AppHaptics.success();
       return null;
     } on AppFailure catch (failure) {
-      return _report(ref, failure);
+      return _report(ref, failure, report: report);
     }
   }
 
@@ -154,6 +170,7 @@ class SettlementsNotifier extends AsyncNotifier<List<Settlement>> {
     required String toUser,
     required Money amount,
     String? note,
+    bool report = true,
   }) => _write(
     () => _repo.record(
       groupId: groupId,
@@ -161,6 +178,7 @@ class SettlementsNotifier extends AsyncNotifier<List<Settlement>> {
       amount: amount,
       note: note,
     ),
+    report: report,
   );
 
   /// The payee confirms they received the payment.
@@ -168,8 +186,14 @@ class SettlementsNotifier extends AsyncNotifier<List<Settlement>> {
       _write(() => _repo.confirm(settlementId));
 
   /// Payer, payee or admin cancels a payment.
-  Future<AppFailure?> voidPayment(String settlementId, {String? reason}) =>
-      _write(() => _repo.voidSettlement(settlementId, reason: reason));
+  Future<AppFailure?> voidPayment(
+    String settlementId, {
+    String? reason,
+    bool report = true,
+  }) => _write(
+    () => _repo.voidSettlement(settlementId, reason: reason),
+    report: report,
+  );
 }
 
 final settlementsProvider = AsyncNotifierProvider.autoDispose
@@ -206,6 +230,7 @@ class PendingInvitationsNotifier extends AsyncNotifier<List<GroupInvitation>> {
   Future<(SentInvitation?, AppFailure?)> send(
     String email, {
     GroupRole role = GroupRole.member,
+    bool report = true,
   }) async {
     try {
       final sent = await _repo.send(groupId: groupId, email: email, role: role);
@@ -213,7 +238,7 @@ class PendingInvitationsNotifier extends AsyncNotifier<List<GroupInvitation>> {
       if (ref.mounted) ref.invalidateSelf();
       return (sent, null);
     } on AppFailure catch (failure) {
-      return (null, _report(ref, failure));
+      return (null, _report(ref, failure, report: report));
     }
   }
 

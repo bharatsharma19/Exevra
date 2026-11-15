@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:expense_manager/core/errors/app_failure.dart';
 import 'package:expense_manager/core/platform/connectivity.dart';
 import 'package:expense_manager/core/platform/device_time_zone.dart';
+import 'package:expense_manager/core/platform/share_service.dart';
 import 'package:expense_manager/core/storage/preferences.dart';
 import 'package:expense_manager/data/repositories/expense_repository.dart';
 import 'package:expense_manager/data/repositories/group_repository.dart';
@@ -309,12 +310,180 @@ class FakeGroupRepository implements GroupRepository {
     if (failure != null) throw failure;
   }
 
-  @override
-  Future<List<GroupMember>> fetchMembers(String groupId) async => const [];
+  /// Members per group as `get_group_members` returns them.
+  final Map<String, List<GroupMember>> membersByGroup = {};
+
+  /// Members with an open balance (removal needs force).
+  final Set<String> unsettled = {};
+  final List<String> calls = [];
+  int _ids = 0;
 
   @override
-  dynamic noSuchMethod(Invocation invocation) =>
-      throw UnimplementedError(invocation.memberName.toString());
+  Future<List<GroupMember>> fetchMembers(String groupId) async =>
+      List.of(membersByGroup[groupId] ?? const []);
+
+  void _updateMember(
+    String groupId,
+    String userId,
+    GroupMember Function(GroupMember m) change,
+  ) {
+    final list = membersByGroup[groupId] ?? [];
+    final i = list.indexWhere((m) => m.userId == userId);
+    if (i < 0) throw const AppFailure.notFound(key: 'member_not_found');
+    list[i] = change(list[i]);
+  }
+
+  @override
+  Future<String> createGroup({
+    required String name,
+    required String currency,
+  }) async {
+    calls.add('create:$name:$currency');
+    final user = currentUser()!;
+    final id = 'new-${++_ids}';
+    (groupsByUser[user] ??= []).insert(
+      0,
+      Group(
+        id: id,
+        name: name,
+        currency: currency,
+        adminId: user,
+        createdAt: DateTime.utc(2026, 11),
+        role: GroupRole.admin,
+        status: MemberStatus.approved,
+      ),
+    );
+    return id;
+  }
+
+  @override
+  Future<JoinRequest> joinByCode(String code) async {
+    calls.add('join:$code');
+    if (code.toUpperCase().startsWith('BAD')) {
+      throw const AppFailure.business('invalid_code');
+    }
+    final user = currentUser()!;
+    (groupsByUser[user] ??= []).add(
+      groupOf(
+        'joined',
+        adminId: 'someone',
+        role: GroupRole.viewer,
+        status: MemberStatus.pending,
+      ),
+    );
+    return const JoinRequest(
+      groupId: 'joined',
+      groupName: 'Group joined',
+      status: MemberStatus.pending,
+    );
+  }
+
+  @override
+  Future<void> approveMember(
+    String groupId,
+    String userId, {
+    GroupRole role = GroupRole.member,
+  }) async {
+    calls.add('approve:$userId:${role.name}');
+    _updateMember(
+      groupId,
+      userId,
+      (m) => m.copyWith(role: role, status: MemberStatus.approved),
+    );
+  }
+
+  @override
+  Future<void> removeMember(
+    String groupId,
+    String userId, {
+    bool force = false,
+  }) async {
+    calls.add('remove:$userId:$force');
+    if (!force && unsettled.contains(userId)) {
+      throw const AppFailure.business('outstanding_balance');
+    }
+    membersByGroup[groupId]?.removeWhere((m) => m.userId == userId);
+  }
+
+  @override
+  Future<void> setMemberRole(
+    String groupId,
+    String userId,
+    GroupRole role,
+  ) async {
+    calls.add('role:$userId:${role.name}');
+    _updateMember(groupId, userId, (m) => m.copyWith(role: role));
+  }
+
+  @override
+  Future<void> transferAdmin(String groupId, String newAdminId) async {
+    calls.add('transfer:$newAdminId');
+    final me = currentUser()!;
+    _updateMember(
+      groupId,
+      newAdminId,
+      (m) => m.copyWith(role: GroupRole.admin),
+    );
+    _updateMember(groupId, me, (m) => m.copyWith(role: GroupRole.member));
+    final groups = groupsByUser[me] ?? [];
+    final i = groups.indexWhere((g) => g.id == groupId);
+    if (i >= 0) {
+      groups[i] = groups[i].copyWith(
+        role: GroupRole.member,
+        adminId: newAdminId,
+        inviteCode: null,
+      );
+    }
+  }
+
+  @override
+  Future<LeaveResult> leaveGroup(String groupId) async {
+    calls.add('leave:$groupId');
+    final me = currentUser()!;
+    if (unsettled.contains(me)) {
+      throw const AppFailure.business('outstanding_balance');
+    }
+    groupsByUser[me]?.removeWhere((g) => g.id == groupId);
+    return const LeaveResult(groupDeleted: false);
+  }
+
+  @override
+  Future<void> deleteGroup(String groupId) async {
+    calls.add('delete:$groupId');
+    groupsByUser[currentUser()]?.removeWhere((g) => g.id == groupId);
+  }
+
+  @override
+  Future<InviteCode> rotateInviteCode(String groupId) async {
+    calls.add('rotate:$groupId');
+    return InviteCode('NEWC0DE0NEWC0DE0', DateTime.utc(2026, 12, 15));
+  }
+}
+
+GroupMember memberOf(
+  String userId, {
+  GroupRole role = GroupRole.member,
+  MemberStatus status = MemberStatus.approved,
+  DateTime? joinedAt,
+}) => GroupMember(
+  userId: userId,
+  displayName: 'User $userId',
+  role: role,
+  status: status,
+  joinedAt: joinedAt ?? DateTime.utc(2026, 1, 1),
+);
+
+/// Records what would have been shared.
+class FakeShareService implements ShareService {
+  final List<String> shared = [];
+  bool available = true;
+
+  @override
+  Future<bool> shareText(String text, {String? subject}) async {
+    if (!available) return false;
+    shared.add(text);
+    return true;
+  }
 }
 
 Expense expenseOf(
@@ -679,6 +848,8 @@ class TestBackend {
   late final FakeSettlementRepository settlements;
   final FakeConnectivitySource connectivity = FakeConnectivitySource();
 
+  final FakeShareService share = FakeShareService();
+
   /// Set before [container] to fake email invitations.
   FakeInvitationRepository? invitations;
 
@@ -703,6 +874,7 @@ class TestBackend {
         balanceRepositoryProvider.overrideWithValue(balances),
         settlementRepositoryProvider.overrideWithValue(settlements),
         connectivitySourceProvider.overrideWithValue(connectivity),
+        shareServiceProvider.overrideWithValue(share),
         if (invitations case final invitations?)
           invitationRepositoryProvider.overrideWithValue(invitations),
         deviceTimeZoneProvider.overrideWith((ref) async => 'Asia/Kolkata'),

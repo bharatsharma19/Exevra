@@ -70,6 +70,12 @@ const Map<String, String> _byKey = {
   'member_not_pending': 'This member has already been approved.',
   'cannot_remove_self': "You can't remove yourself. Leave the group instead.",
   'cannot_change_own_role': "You can't change your own role.",
+  'outstanding_balance':
+      "Settle up first: there's still an open balance or a payment waiting "
+      'for confirmation.',
+  'group_has_members':
+      'Remove the other members or make someone else admin before deleting '
+      'this group.',
   'membership_rpc_only': "You don't have permission to do that.",
   'invalid_code': "That invite code isn't valid. Check it and try again.",
   'group_not_ready': 'Your groups are still loading. Try again in a moment.',
@@ -85,6 +91,9 @@ const Map<String, String> _byKey = {
   'invalid_amount': 'Enter an amount greater than zero.',
   'invalid_note': 'Notes can be at most 200 characters.',
   'invalid_reason': 'The reason can be at most 200 characters.',
+  'invalid_scope': "That view isn't available.",
+  'invalid_timeframe': "That time range isn't available.",
+  'invalid_group': "That group isn't available.",
   'same_password': 'Your new password must be different from the old one.',
   'too_long': 'That message is too long. Please shorten it.',
   // Amount entry (money_parser.dart)
