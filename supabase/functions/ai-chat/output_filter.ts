@@ -6,9 +6,15 @@
  *
  * - inline and reference images (`![alt](url)`, `![alt][ref]`) become their alt text;
  * - any other `![` loses its `!` (so shortcut reference images such as `![ref]` cannot render);
- * - HTML tags that fetch or embed content (`<img>`, `<picture>`, `<source>`, `<iframe>`, `<svg>`,
- *   `<object>`, `<embed>`, `<link>`, `<video>`, `<audio>`; see {@link BLOCKED_TAGS}) are removed,
- *   opening and closing tags alike.
+ * - HTML tags that fetch or embed content (`<img>`, `<image>`, `<picture>`, `<source>`,
+ *   `<iframe>`, `<svg>`, `<object>`, `<embed>`, `<link>`, `<video>`, `<audio>`; see
+ *   {@link BLOCKED_TAGS}) are removed, opening and closing tags alike.
+ *
+ * Removing a construct must never splice its neighbours into a new one (`!<img>[a](url)` must not
+ * become `![a](url)`), so a removed tag or a dropped `!`/`<` leaves a space behind, and a final
+ * guard checks the emitted stream itself, across chunks: it never emits `!` directly followed by
+ * `[` (a space goes between them), and a `<` that would start a blocked tag (`<img`, `</svg`,
+ * `< img`) is sent as {@link NEUTRAL_LT} instead.
  *
  * Text is held back only while a possible image is still incomplete at a chunk boundary, and at
  * most {@link MAX_HOLD_CHARS} characters; past that (or at the end of the stream) the construct
@@ -33,7 +39,12 @@ type Match =
   | { kind: "incomplete" };
 
 /** Index of the bracket closing the one at `open`, honouring nesting and backslash escapes. */
-function closing(s: string, open: number, opener: string, closer: string): number {
+function closing(
+  s: string,
+  open: number,
+  opener: string,
+  closer: string,
+): number {
   let depth = 0;
   for (let i = open; i < s.length; i++) {
     const ch = s[i];
@@ -73,6 +84,7 @@ function matchImage(s: string, i: number): Match {
  */
 export const BLOCKED_TAGS: ReadonlySet<string> = new Set([
   "img",
+  "image",
   "picture",
   "source",
   "iframe",
@@ -134,13 +146,89 @@ export function stripImages(text: string): string {
   return filter.push(text) + filter.flush();
 }
 
+/**
+ * Sent instead of a `<` that would start a blocked tag in the output ("‹", U+2039). It is not
+ * whitespace, `/` or a letter, and has no compatibility decomposition back to `<`.
+ */
+export const NEUTRAL_LT = "\u2039";
+
+const WORD = /[A-Za-z0-9_]/;
+const SPACE_OR_SLASH = /[\s/]/;
+const LONGEST_BLOCKED_TAG = Math.max(
+  ...[...BLOCKED_TAGS].map((tag) => tag.length),
+);
+
+/**
+ * Decides whether the `<` at `s[i]` (in the output stream) would start a blocked tag. Stricter
+ * than HTML on purpose: whitespace and `/` between `<` and the name are skipped (`< img`,
+ * `</ svg`), and the name is the whole word that follows, so `<imgx` and `<img2` are safe.
+ */
+function classifyAngle(
+  s: string,
+  i: number,
+  final: boolean,
+): "safe" | "unsafe" | "wait" {
+  let j = i + 1;
+  while (j < s.length && SPACE_OR_SLASH.test(s[j])) j++;
+  if (j >= s.length) return final ? "safe" : "wait";
+  let k = j;
+  while (k < s.length && k - j <= LONGEST_BLOCKED_TAG && WORD.test(s[k])) k++;
+  const word = s.slice(j, k).toLowerCase();
+  if (k >= s.length && !final) {
+    for (const tag of BLOCKED_TAGS) {
+      if (tag.startsWith(word)) return "wait";
+    }
+    return "safe";
+  }
+  return BLOCKED_TAGS.has(word) && !(k < s.length && WORD.test(s[k])) ? "unsafe" : "safe";
+}
+
+/**
+ * The last line of defence, applied to everything the filter emits: whatever the removals
+ * produced, the stream never contains `![` or a `<` that starts a blocked tag. Holds back from a
+ * `<` only until the following word is known (at most {@link MAX_HOLD_CHARS} characters).
+ */
+function createGuard(): (text: string, final: boolean) => string {
+  let held = "";
+  let last = "";
+  return (text, final) => {
+    const s = held + text;
+    held = "";
+    let out = "";
+    for (let i = 0; i < s.length; i++) {
+      let ch = s[i];
+      if (ch === "<") {
+        const verdict = classifyAngle(s, i, final);
+        if (verdict === "wait" && s.length - i <= MAX_HOLD_CHARS) {
+          held = s.slice(i);
+          break;
+        }
+        if (verdict !== "safe") ch = NEUTRAL_LT;
+      } else if (ch === "[" && last === "!") {
+        out += " ";
+      }
+      out += ch;
+      last = ch;
+    }
+    return out;
+  };
+}
+
 /** Creates an {@link OutputFilter}. */
 export function createOutputFilter(): OutputFilter {
   let pending = "";
+  /** Last character this stage produced, across chunks ("" before any). */
+  let lastChar = "";
+  const guard = createGuard();
 
   const run = (final: boolean): string => {
     const s = pending;
     let out = "";
+    // Leaves a space where something was removed, so the text around it cannot join up.
+    const separate = () => {
+      const prev = out.length > 0 ? out[out.length - 1] : lastChar;
+      if (prev !== "" && !/\s/.test(prev)) out += " ";
+    };
     let i = 0;
     while (i < s.length) {
       const ch = s[i];
@@ -166,23 +254,28 @@ export function createOutputFilter(): OutputFilter {
         const match = matchImage(s, i);
         if (match.kind === "incomplete" && canWait) break;
         if (match.kind === "image") {
-          out += stripImages(match.alt);
+          const alt = stripImages(match.alt);
+          if (alt === "") separate();
+          out += alt;
           i = match.end;
           continue;
         }
         // Not an inline/reference image (or it never completed): drop the "!" so it cannot
         // render as an image, and keep the rest as ordinary text.
+        separate();
         i++;
         continue;
       }
       const match = matchBlockedTag(s, i);
       if (match.kind === "incomplete" && canWait) break;
       if (match.kind === "tag") {
+        separate();
         i = match.end;
         continue;
       }
       if (match.kind === "incomplete") {
         // A blocked tag that never closed: drop the "<" so it cannot form a tag.
+        separate();
         i++;
         continue;
       }
@@ -190,7 +283,8 @@ export function createOutputFilter(): OutputFilter {
       i++;
     }
     pending = s.slice(i);
-    return out;
+    if (out.length > 0) lastChar = out[out.length - 1];
+    return guard(out, final);
   };
 
   return {

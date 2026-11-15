@@ -17,7 +17,10 @@ import {
 /** Default API origin. */
 export const GEMINI_API_BASE = "https://generativelanguage.googleapis.com";
 
-/** Finish reasons that mean the answer was withheld (declined before text, interrupted after). */
+/**
+ * Finish reasons that mean the answer was withheld: declined, either before any text or after some
+ * (then with `discard_partial`, so the app drops the partial text).
+ */
 export const GEMINI_BLOCKED_FINISH_REASONS: ReadonlySet<string> = new Set([
   "SAFETY",
   "RECITATION",
