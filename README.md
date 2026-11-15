@@ -148,7 +148,7 @@ to be reverted with `supabase migration repair --remote --status reverted <versi
 ```sh
 # 5. Server secrets (gitignored file; same names as supabase/functions/.env.example).
 cp supabase/functions/.env.example supabase/.env.secrets
-#    Fill in the production values (AI_DAILY_QUOTA=20 for launch), then:
+#    Fill in the production values, then:
 supabase secrets set --env-file supabase/.env.secrets
 
 # 6. Deploy the functions.
@@ -181,13 +181,13 @@ Secrets (set with `supabase secrets set`):
 | `GEMINI_API_KEY` | none | Gemini fallback. |
 | `CLAUDE_MODEL` | `claude-haiku-5-5` | Set to `claude-sonnet-5-5` for stronger answers at a higher cost. |
 | `GEMINI_MODEL` | `gemini-3.8-flash` | |
-| `AI_DAILY_QUOTA` | `50` | Questions per user per UTC day. The launch setting is `20`. |
-| `AI_PER_MINUTE` | `6` | Questions per user per minute. |
+| `AI_DAILY_QUOTA` | `20` | Questions per user per UTC day. |
+| `AI_PER_MINUTE` | `4` | Questions per user per minute. |
 
 Change the model or quota without a redeploy:
 
 ```sh
-supabase secrets set CLAUDE_MODEL=claude-sonnet-5-5 AI_DAILY_QUOTA=20
+supabase secrets set CLAUDE_MODEL=claude-sonnet-5-5
 ```
 
 To see what the function is doing, open **Edge Functions → ai-chat → Logs** in the dashboard, or
