@@ -3,6 +3,7 @@ import 'package:expense_manager/core/theme/app_theme.dart';
 import 'package:expense_manager/features/onboarding/onboarding.dart';
 import 'package:expense_manager/l10n/l10n.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -238,6 +239,29 @@ void main() {
             .map((c) => (c.decoration! as BoxDecoration).color)
             .toList();
         expect(dots, [palette.accent, palette.outline, palette.outline]);
+      });
+
+      testWidgets('status and navigation bar icons match the theme ($mode)', (
+        tester,
+      ) async {
+        await tester.pumpWidget(
+          _app(OnboardingFlow(onFinished: () {}), mode: mode),
+        );
+        await tester.pumpAndSettle();
+        final region = tester.widget<AnnotatedRegion<SystemUiOverlayStyle>>(
+          find
+              .ancestor(
+                of: find.byType(Scaffold),
+                matching: find.byType(AnnotatedRegion<SystemUiOverlayStyle>),
+              )
+              .first,
+        );
+        final icons = mode == ThemeMode.dark
+            ? Brightness.light
+            : Brightness.dark;
+        expect(region.value.statusBarIconBrightness, icons);
+        expect(region.value.systemNavigationBarIconBrightness, icons);
+        expect(region.value.systemNavigationBarColor, palette.background);
       });
 
       testWidgets('fits 320dp at 200% text on every page ($mode)', (
