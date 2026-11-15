@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
 
-/// Antigravity High-Fidelity Color System
+/// Raw colour constants used by the current screens.
+///
+/// Legacy: new code reads semantic tokens from `AppPalette`
+/// (`context.palette`) or the `ColorScheme`, which are contrast-checked for
+/// both themes. These constants stay until the screens are migrated; avoid
+/// adding new uses. Several of them (for example [primaryCyan] on light
+/// surfaces) do not meet contrast requirements as text.
 class AppColors {
   AppColors._();
 
@@ -21,7 +27,7 @@ class AppColors {
   static const Color darkBorder = Color(0x1FFFFFFF);
   static const Color darkTextPrimary = Color(0xFFF8FAFC);
   static const Color darkTextSecondary = Color(0xFF94A3B8);
-  static const Color darkTextTertiary = Color(0xFF64748B);
+  static const Color darkTextTertiary = Color(0xFF94A3B8);
 
   // Light Theme Palette (Crisp Titanium & Platinum)
   static const Color lightBackground = Color(0xFFF8FAFC);
@@ -31,7 +37,7 @@ class AppColors {
   static const Color lightBorder = Color(0x14000000);
   static const Color lightTextPrimary = Color(0xFF0F172A);
   static const Color lightTextSecondary = Color(0xFF475569);
-  static const Color lightTextTertiary = Color(0xFF94A3B8);
+  static const Color lightTextTertiary = Color(0xFF5B6B80);
 
   // Glassmorphic Accents
   static const Color glassWhite = Color(0x1AFFFFFF);
@@ -45,7 +51,11 @@ class AppColors {
   static const Color error = Color(0xFFEF4444);
   static const Color info = Color(0xFF3B82F6);
 
-  // Category Color Map
+  /// Legacy category colours, the same in both themes. Several (Food,
+  /// Utilities, the cyan fallback) are low contrast on light surfaces. New
+  /// code uses `context.palette.categoryColor(name)`, which is per theme and
+  /// contrast-checked. Not marked `@Deprecated` yet because the analyzer
+  /// would then fail on the screens that still call it.
   static const Map<String, Color> categoryColors = {
     'Food': Color(0xFFF59E0B),
     'Transport': Color(0xFF3B82F6),
@@ -59,6 +69,8 @@ class AppColors {
     'Other': Color(0xFF64748B),
   };
 
+  /// Legacy lookup in [categoryColors]; use
+  /// `context.palette.categoryColor(name)` in new code.
   static Color getCategoryColor(String category) {
     return categoryColors[category] ?? const Color(0xFF00E5FF);
   }
