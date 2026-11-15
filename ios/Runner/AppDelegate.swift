@@ -16,9 +16,10 @@ import UIKit
   }
 
   /// Answers the "exevra/secure_window" channel that Android uses to set
-  /// FLAG_SECURE. iOS has no equivalent window flag (the app covers its
-  /// content when it becomes inactive instead), so `setSecure` succeeds
+  /// FLAG_SECURE. iOS has no equivalent window flag, so `setSecure` succeeds
   /// without doing anything rather than failing with MissingPluginException.
+  /// Hiding content in the app switcher is not done natively here: the
+  /// privacy cover is drawn by the Flutter app on both platforms.
   private func registerSecureWindowChannel(messenger: FlutterBinaryMessenger) {
     let channel = FlutterMethodChannel(name: "exevra/secure_window", binaryMessenger: messenger)
     channel.setMethodCallHandler { call, result in
