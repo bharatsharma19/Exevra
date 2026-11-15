@@ -1,9 +1,11 @@
+import 'package:expense_manager/core/accessibility/focus_ring_overlay.dart';
 import 'package:expense_manager/core/config/legal_links.dart';
 import 'package:expense_manager/core/theme/app_palette.dart';
 import 'package:expense_manager/core/theme/app_theme.dart';
 import 'package:expense_manager/core/widgets/widgets.dart';
 import 'package:expense_manager/features/about/about_screen.dart';
 import 'package:expense_manager/l10n/l10n.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -202,6 +204,57 @@ void main() {
     expect(page.applicationName, 'Exevra');
     expect(page.applicationVersion, 'Version 1.0.0 (1)');
     expect(page.applicationLegalese, '© 2026 Bharat Sharma');
+  });
+
+  testWidgets('licence rows get a visible keyboard focus ring', (tester) async {
+    LicenseRegistry.addLicense(
+      () => Stream.value(
+        const LicenseEntryWithLineBreaks(['zz_test_package'], 'Licence text'),
+      ),
+    );
+    FocusManager.instance.highlightStrategy =
+        FocusHighlightStrategy.alwaysTraditional;
+    addTearDown(
+      () => FocusManager.instance.highlightStrategy =
+          FocusHighlightStrategy.automatic,
+    );
+    await tester.pumpWidget(_app(const AboutScreen(links: _links)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open-source licenses'));
+    // The licences load outside the fake clock.
+    for (
+      var i = 0;
+      i < 10 && find.text('zz_test_package').evaluate().isEmpty;
+      i++
+    ) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(
+      find.ancestor(
+        of: find.byType(LicensePage),
+        matching: find.byType(FocusRingOverlay),
+      ),
+      findsOneWidget,
+    );
+    final ring = find.byKey(const ValueKey('focus-ring'));
+    expect(ring, findsNothing);
+
+    final row = find.ancestor(
+      of: find.text('zz_test_package'),
+      matching: find.byType(ListTile),
+    );
+    Focus.of(tester.element(find.text('zz_test_package'))).requestFocus();
+    await tester.pump();
+    await tester.pump();
+    expect(ring, findsOneWidget);
+    expect(tester.getRect(ring), tester.getRect(row));
+    final border =
+        (tester.widget<DecoratedBox>(ring).decoration as BoxDecoration).border!
+            as Border;
+    expect(border.top.color, AppPalette.light.focusRing);
   });
 
   testWidgets('rows are labelled and at least 48dp tall', (tester) async {

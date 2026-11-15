@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import '../../core/accessibility/focus_ring_overlay.dart';
 import '../../core/config/legal_links.dart';
 import '../../core/logging/app_logger.dart';
 import '../../core/theme/app_palette.dart';
@@ -99,11 +100,20 @@ class _AboutScreenState extends State<AboutScreen> {
               links: _links,
               onOpen: (uri) => unawaited(_open(uri)),
               onEmailSupport: () => unawaited(_emailSupport(info)),
-              onLicences: () => showLicensePage(
-                context: context,
-                applicationName: l10n.appName,
-                applicationVersion: version,
-                applicationLegalese: l10n.aboutLegalese,
+              // showLicensePage, plus a visible keyboard focus ring on the
+              // licence rows (their own ink tint is under 3:1).
+              onLicences: () => unawaited(
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (context) => FocusRingOverlay(
+                      child: LicensePage(
+                        applicationName: l10n.appName,
+                        applicationVersion: version,
+                        applicationLegalese: l10n.aboutLegalese,
+                      ),
+                    ),
+                  ),
+                ),
               ),
               onDeleteAccount: widget.onDeleteAccount,
             );

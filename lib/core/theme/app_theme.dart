@@ -135,7 +135,8 @@ class AppTheme {
     // tint, which cannot reach 3:1 against the page without pushing
     // textSecondary on it under 4.5:1. Kit widgets built on them (AppListTile,
     // AppCard, AppNavigationDestination) add a FocusOutline; screens should
-    // use those instead of the raw widgets.
+    // use those instead of the raw widgets. Screens built by Flutter (the
+    // licence page) are wrapped in a FocusRingOverlay.
     final focusRing = focusRingSide(p);
     final focusBorder = focusBorderSide(p);
     bool focused(Set<WidgetState> states) =>
