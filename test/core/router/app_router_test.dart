@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:expense_manager/core/errors/app_failure.dart';
 import 'package:expense_manager/core/router/app_router.dart';
 import 'package:expense_manager/core/ui/root_messenger.dart';
+import 'package:expense_manager/data/ai/ai_chat_models.dart';
 import 'package:expense_manager/data/repositories/invitation_repository.dart';
 import 'package:expense_manager/features/auth/screens/login_screen.dart';
 import 'package:expense_manager/features/profile/screens/invite_screen.dart';
@@ -149,7 +150,12 @@ void main() {
     await c.read(chatProvider.notifier).sendMessage('hello');
     await _settle(tester);
 
-    expect(c.read(chatProvider).messages.last.text, isNotEmpty);
+    // The failure lives in the reply bubble (friendly copy for its code),
+    // never in a snack bar.
+    final reply = c.read(chatProvider).messages.last;
+    expect(reply.isUser, isFalse);
+    expect(reply.status, ChatMessageStatus.error);
+    expect(reply.errorCode, AiErrorCode.unavailable);
     expect(find.byType(SnackBar), findsNothing);
   });
 

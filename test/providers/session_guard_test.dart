@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:expense_manager/core/errors/app_failure.dart';
+import 'package:expense_manager/data/ai/ai_chat_client.dart';
+import 'package:expense_manager/data/ai/ai_chat_models.dart';
 import 'package:expense_manager/models/expense.dart';
 import 'package:expense_manager/models/group.dart';
 import 'package:expense_manager/models/invitation.dart';
@@ -14,19 +16,11 @@ import 'package:expense_manager/providers/group_detail_providers.dart';
 import 'package:expense_manager/providers/groups_provider.dart';
 import 'package:expense_manager/providers/profile_provider.dart';
 import 'package:expense_manager/providers/session_guard.dart';
-import 'package:expense_manager/services/ai_chat_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../chat/chat_test_support.dart';
 import '../support/fakes.dart';
-
-/// An assistant whose reply waits for the test.
-class _HeldAssistant implements AiChatService {
-  final Completer<AiChatReply> reply = Completer<AiChatReply>();
-
-  @override
-  Future<AiChatReply> ask(String prompt) => reply.future;
-}
 
 /// Actions user A started that end after the session changed: nothing of
 /// them reaches the next session (state, follow-up calls, reports).
@@ -35,13 +29,16 @@ void main() {
 
   late TestBackend backend;
   late ProviderContainer container;
-  late _HeldAssistant assistant;
+  late FakeAiChatApi assistant;
 
   setUp(() async {
     backend = TestBackend(signedInAs: 'A')
       ..invitations = FakeInvitationRepository();
-    backend.profiles.profiles['A'] = profileOf('A', activeGroupId: 'gS');
-    backend.profiles.profiles['B'] = profileOf('B');
+    backend.profiles.profiles['A'] = profileOf(
+      'A',
+      activeGroupId: 'gS',
+    ).copyWith(aiConsent: true);
+    backend.profiles.profiles['B'] = profileOf('B').copyWith(aiConsent: true);
     backend.groups.groupsByUser['A'] = [
       groupOf('gS', adminId: 'A'),
       groupOf('g2', adminId: 'A'),
@@ -64,9 +61,9 @@ void main() {
         createdAt: DateTime.utc(2026, 11),
       ),
     );
-    assistant = _HeldAssistant();
+    assistant = FakeAiChatApi();
     container = await backend.container(
-      extraOverrides: [aiChatServiceProvider.overrideWithValue(assistant)],
+      extraOverrides: [aiChatApiProvider.overrideWithValue(assistant)],
     );
     addTearDown(container.dispose);
     container
@@ -411,16 +408,16 @@ void main() {
   test('an assistant reply for A is not shown to B', () async {
     final sending = container.read(chatProvider.notifier).sendMessage('hi');
     await settle();
-    expect(container.read(chatProvider).isGenerating, isTrue);
+    expect(container.read(chatProvider).isStreaming, isTrue);
 
     await signOutAndIn('B');
-    assistant.reply.complete(const AiChatReply(text: 'A\'s answer'));
+    await assistant.last.finish([const AiDelta('A\'s answer'), const AiDone()]);
     await sending;
     await settle();
 
     final chat = container.read(chatProvider);
-    expect(chat.messages, hasLength(1));
-    expect(chat.isGenerating, isFalse);
+    expect(chat.messages, isEmpty);
+    expect(chat.isStreaming, isFalse);
     expect(chat.messages.any((m) => m.text == 'A\'s answer'), isFalse);
   });
 

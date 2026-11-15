@@ -124,7 +124,7 @@ void main() {
       ]);
       expect(container.read(activeGroupProvider), isNull);
       expect(container.read(expenseFilterProvider), const ExpenseFilter());
-      expect(container.read(chatProvider).messages.length, 1);
+      expect(container.read(chatProvider).messages, isEmpty);
       expect(
         container.read(chatProvider).messages.any((m) => m.text == 'hi A'),
         isFalse,

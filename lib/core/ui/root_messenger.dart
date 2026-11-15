@@ -1,11 +1,12 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
-/// The app's root [ScaffoldMessenger] (given to `MaterialApp`). Snack bars
-/// and banners shown anywhere in the app go through it, so they can be
-/// cleared when the session ends or the app locks.
-final GlobalKey<ScaffoldMessengerState> rootScaffoldMessengerKey =
-    GlobalKey<ScaffoldMessengerState>();
+import '../widgets/app_snackbar.dart';
+
+// The app's root ScaffoldMessenger key (given to `MaterialApp`) is the
+// design system's one: snack bars and banners shown anywhere in the app,
+// including AppSnackbar's, go through it, so they can be cleared when the
+// session ends or the app locks.
+export '../widgets/app_snackbar.dart' show rootScaffoldMessengerKey;
 
 /// Removes every snack bar and material banner of the root messenger at
 /// once (no exit animation), so nothing from a previous session, or from

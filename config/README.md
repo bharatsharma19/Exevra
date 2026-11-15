@@ -28,10 +28,11 @@ environment (for example `config/prod.json`, also gitignored).
 | --- | --- | --- |
 | `SUPABASE_URL` | yes | `https://<project-ref>.supabase.co`. Plain `http` is accepted only for `127.0.0.1`, `localhost` or `10.0.2.2` in debug builds. |
 | `SUPABASE_ANON_KEY` | yes | The **anon** (publishable) key. Never use the `service_role` or `sb_secret_` key here; the app refuses to start with one. |
-| `APP_LINK_HOST` | no | Host used for shared invite links. Defaults to `exevra.app`. The Android build also uses it as the invite link host in the manifest. |
+| `APP_LINK_HOST` | no | Host used for shared invite links. Defaults to `exevra.app`. The Android build also uses it as the invite link host in the manifest. iOS reads the host from `EXEVRA_APP_LINK_HOST` in `ios/Flutter/Debug.xcconfig` and `Release.xcconfig` (the associated domains entitlement); change it there too. |
 | `SENTRY_DSN` | no | Crash reporting DSN (not secret). Empty disables reporting. |
 | `GOOGLE_WEB_CLIENT_ID` | no | OAuth web client ID used as the Google sign-in server client ID. Empty hides Google sign-in behind a "not available" message. |
-| `GOOGLE_IOS_CLIENT_ID` | no | OAuth iOS client ID. |
+| `GOOGLE_IOS_CLIENT_ID` | no | OAuth iOS client ID. The same client also goes into `GOOGLE_IOS_CLIENT_ID` and `GOOGLE_REVERSED_CLIENT_ID` in `ios/Flutter/Debug.xcconfig` and `Release.xcconfig`, which feed `Info.plist`. |
+| `APP_ENV` | no | Environment name attached to crash reports: `development` in `dev.json`, `production` in `prod.json`. Defaults to `production` when the key is missing. |
 
 ## What the client may hold
 

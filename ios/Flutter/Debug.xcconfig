@@ -1,1 +1,16 @@
 #include "Generated.xcconfig"
+
+// Host of the universal (invite) links, used by the associated domains
+// entitlement in Runner/Runner.entitlements. Must match APP_LINK_HOST in
+// config/<env>.json (default exevra.app). Keep Debug.xcconfig and
+// Release.xcconfig in sync.
+EXEVRA_APP_LINK_HOST = exevra.app
+
+// Google Sign-In (iOS). Not secret, but project specific: replace both
+// placeholders with the iOS OAuth client from Google Cloud Console
+// (APIs & Services > Credentials > OAuth client ID, type iOS, bundle ID
+// com.exevra.app). They feed GIDClientID and the reversed-client URL scheme
+// in Runner/Info.plist. Keep Debug.xcconfig and Release.xcconfig in sync;
+// the same value goes into GOOGLE_IOS_CLIENT_ID in config/<env>.json.
+GOOGLE_IOS_CLIENT_ID = 000000000000-placeholder.apps.googleusercontent.com
+GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.000000000000-placeholder

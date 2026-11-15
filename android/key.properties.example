@@ -1,0 +1,12 @@
+# Release signing for Exevra. Copy to android/key.properties (gitignored) and
+# fill in the upload key. Never commit the real file or the keystore.
+#
+# Create an upload key once, outside the repository:
+#   keytool -genkeypair -v -keystore ~/keys/exevra-upload.jks -keyalg RSA \
+#     -keysize 4096 -validity 10000 -alias upload
+#
+# storeFile may be absolute, or relative to the android/ directory.
+storeFile=/absolute/path/to/exevra-upload.jks
+storePassword=
+keyAlias=upload
+keyPassword=

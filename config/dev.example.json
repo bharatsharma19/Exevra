@@ -4,5 +4,6 @@
   "APP_LINK_HOST": "exevra.app",
   "SENTRY_DSN": "",
   "GOOGLE_WEB_CLIENT_ID": "",
-  "GOOGLE_IOS_CLIENT_ID": ""
+  "GOOGLE_IOS_CLIENT_ID": "",
+  "APP_ENV": "development"
 }
