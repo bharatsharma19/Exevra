@@ -363,22 +363,31 @@ reset role;
 select tests.invite('admin', 'House', 'popular@example.test', 'member', 'p' || i) from generate_series(1, 5) as i;
 select tests.authenticate_as('admin');
 select throws_ok($$ select * from public.create_group_invitation(tests.gid('House'), 'popular@example.test', 'viewer') $$,
-                 'P0001', 'rate_limited', 'an inviter can send at most five invitations to the same address per day');
--- One account's invitations do not use up the address's allowance for other groups.
+                 'P0001', 'rate_limited', 'an address can be invited to one group at most five times per day');
+-- One group's invitations do not use up the address's allowance for other groups.
 select tests.authenticate_as('other_admin');
 select lives_ok($$ select * from public.create_group_invitation(tests.gid('Other'), 'popular@example.test', 'member') $$,
-                'another admin can still invite an address that one inviter has reached the limit for');
--- At most ten different inviters per address per day.
+                'another group can still invite an address that one group has reached the limit for');
+-- However many unrelated inviters have invited the address, another group can still invite it.
 reset role;
-select tests.create_user('inviter' || i) from generate_series(1, 9) as i;
-select tests.create_group_as('inviter' || i, 'Inviter group ' || i) from generate_series(1, 9) as i;
-select tests.invite('inviter' || i, 'Inviter group ' || i, 'popular@example.test', 'member', 'q' || i) from generate_series(1, 8) as i;
-select tests.authenticate_as('inviter9');
-select throws_ok($$ select * from public.create_group_invitation(tests.gid('Inviter group 9'), 'popular@example.test', 'member') $$,
-                 'P0001', 'rate_limited', 'an address can be invited by at most ten different inviters per day');
-select tests.authenticate_as('other_admin');
-select lives_ok($$ select * from public.create_group_invitation(tests.gid('Other'), 'popular@example.test', 'viewer') $$,
-                'an inviter already counted for the address is limited only by their own allowance');
+select tests.create_user('inviter' || i) from generate_series(1, 12) as i;
+select tests.create_group_as('inviter' || i, 'Inviter group ' || i) from generate_series(1, 12) as i;
+select tests.invite('inviter' || i, 'Inviter group ' || i, 'popular@example.test', 'member', 'q' || i) from generate_series(1, 11) as i;
+select tests.authenticate_as('inviter12');
+select lives_ok($$ select * from public.create_group_invitation(tests.gid('Inviter group 12'), 'popular@example.test', 'member') $$,
+                'unrelated inviters cannot block an address for another group');
+-- The per-address limit belongs to the group: a new admin does not get a fresh allowance.
+reset role;
+select tests.create_user('relay_a');
+select tests.create_user('relay_b');
+select tests.create_group_as('relay_a', 'Relay');
+select tests.add_member(tests.gid('Relay'), 'relay_b', 'member');
+select tests.invite('relay_a', 'Relay', 'relayed@example.test', 'member', 'r' || i) from generate_series(1, 5) as i;
+select tests.authenticate_as('relay_a');
+select public.transfer_admin(tests.gid('Relay'), tests.uid('relay_b'));
+select tests.authenticate_as('relay_b');
+select throws_ok($$ select * from public.create_group_invitation(tests.gid('Relay'), 'relayed@example.test', 'member') $$,
+                 'P0001', 'rate_limited', 'the per-address limit counts every invitation of the group, whoever sent it');
 
 reset role;
 select tests.create_user('busy');

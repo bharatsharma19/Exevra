@@ -4,7 +4,7 @@
 begin;
 set local client_min_messages = warning;
 create extension if not exists pgtap with schema extensions;
-select plan(31);
+select plan(33);
 
 -- Timestamps of existing rows are kept: the conversion is not a user edit.
 select is((select count(*) from public.expenses where updated_at <> '2025-01-02 00:00:00+00'), 0::bigint,
@@ -64,6 +64,10 @@ select is((select status from public.group_invitations where id = '40000000-0000
           'the newest pending invitation from the admin stays pending');
 select is((select status from public.group_invitations where id = '40000000-0000-0000-0000-000000000001'), 'revoked',
           'an older duplicate pending invitation is revoked');
+select is((select status from public.group_invitations where id = '40000000-0000-0000-0000-00000000000c'), 'pending',
+          'an admin''s valid invitation is kept even when a non-admin sent a newer one');
+select is((select status from public.group_invitations where id = '40000000-0000-0000-0000-00000000000d'), 'revoked',
+          'the newer invitation from a non-admin is revoked');
 select is((select count(*) from public.group_invitations as gi
            where gi.status = 'pending'
              and not exists (select 1 from public.groups as g where g.id = gi.group_id and g.admin_id = gi.inviter_id)),

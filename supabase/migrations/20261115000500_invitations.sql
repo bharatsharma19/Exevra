@@ -9,15 +9,17 @@
 -- * An invitation is valid only while its inviter is the group admin: transfer_admin and leave_group
 --   revoke the outgoing admin's pending invitations, and accept/details treat any other pending
 --   invitation as revoked.
--- * Rate limits (P0001 rate_limited): 20 invitations per inviter per hour; 5 per inviter and recipient
---   email per day; and an address can be invited by at most 10 different inviters per day. Counting
---   distinct inviters (rather than all invitations to an address) means no single account can use
---   up an address's allowance and keep other groups from inviting it.
+-- * Rate limits (P0001 rate_limited): 20 invitations per inviter per rolling hour, and 5 invitations
+--   per (recipient email, group) per rolling day, whoever sent them. There is no limit across groups:
+--   invitations from unrelated groups never use up the allowance of another group, so nobody can
+--   keep a group from inviting an address by inviting it themselves.
 -- * purge_old_invitations() removes answered/expired invitations after 90 days.
 --
 -- Idempotent and safe on a database that already holds user data: legacy tokens are hashed, legacy
--- admin invitations become member invitations, malformed emails are removed, and pending invitations
--- that were not sent by the group's admin (the old policy let members invite) are revoked.
+-- admin invitations become member invitations, malformed emails are removed, pending invitations that
+-- were not sent by the group's admin (the old policy let members invite) are revoked, and then only
+-- the newest still-valid pending invitation per (group, email) is kept. Validity is decided first, so
+-- an admin's valid invitation is never revoked in favour of a newer one from a non-admin.
 -- =============================================================================
 
 -- Functions whose signature or return type changes are dropped first.
@@ -78,8 +80,14 @@ ALTER TABLE public.group_invitations DROP CONSTRAINT IF EXISTS group_invitations
 ALTER TABLE public.group_invitations ADD CONSTRAINT group_invitations_role_check
     CHECK (role IN ('member', 'viewer'));
 
--- Status: persist expiry; keep only the newest pending invitation per (group, email).
+-- Status: persist expiry; revoke pending invitations not sent by the group's current admin (the
+-- membership migration made groups.admin_id consistent); then keep only the newest remaining (valid)
+-- pending invitation per (group, email).
 UPDATE public.group_invitations SET status = 'expired' WHERE status = 'pending' AND expires_at <= now();
+UPDATE public.group_invitations AS gi
+SET status = 'revoked'
+WHERE gi.status = 'pending'
+  AND NOT EXISTS (SELECT 1 FROM public.groups AS g WHERE g.id = gi.group_id AND g.admin_id = gi.inviter_id);
 UPDATE public.group_invitations AS gi
 SET status = 'revoked'
 WHERE gi.status = 'pending'
@@ -90,12 +98,6 @@ WHERE gi.status = 'pending'
   );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_group_invitations_pending_email
     ON public.group_invitations (group_id, email) WHERE status = 'pending';
-
--- Only the admin may invite (groups.admin_id was made consistent by the membership migration).
-UPDATE public.group_invitations AS gi
-SET status = 'revoked'
-WHERE gi.status = 'pending'
-  AND NOT EXISTS (SELECT 1 FROM public.groups AS g WHERE g.id = gi.group_id AND g.admin_id = gi.inviter_id);
 
 UPDATE public.group_invitations SET responded_at = COALESCE(responded_at, created_at)
 WHERE status IN ('accepted', 'declined') AND responded_at IS NULL;
@@ -169,8 +171,7 @@ SET search_path = ''
 AS $$
 DECLARE
     c_per_inviter_per_hour constant int := 20;
-    c_per_inviter_email_per_day constant int := 5;
-    c_inviters_per_email_per_day constant int := 10;
+    c_per_email_group_per_day constant int := 5;
     v_uid uuid := auth.uid();
     v_email text := lower(btrim(p_email));
     v_token text;
@@ -205,19 +206,15 @@ BEGIN
         RAISE EXCEPTION 'already_member' USING ERRCODE = '23505';
     END IF;
 
-    -- Serialise per inviter and per address so the limits hold under concurrency (always in this
-    -- order: inviter, then address).
+    -- Serialise per inviter so the hourly limit holds under concurrency. The per-(address, group)
+    -- limit is already serialised by the group row lock taken above.
     PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('create_group_invitation:' || v_uid::text, 0));
-    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('create_group_invitation_email:' || v_email, 0));
 
     IF (SELECT count(*) FROM public.group_invitations AS gi
         WHERE gi.inviter_id = v_uid AND gi.created_at > now() - interval '1 hour') >= c_per_inviter_per_hour
     OR (SELECT count(*) FROM public.group_invitations AS gi
-        WHERE gi.inviter_id = v_uid AND gi.email = v_email
-          AND gi.created_at > now() - interval '1 day') >= c_per_inviter_email_per_day
-    OR (SELECT count(DISTINCT gi.inviter_id) FROM public.group_invitations AS gi
-        WHERE gi.email = v_email AND gi.inviter_id <> v_uid
-          AND gi.created_at > now() - interval '1 day') >= c_inviters_per_email_per_day THEN
+        WHERE gi.email = v_email AND gi.group_id = p_group_id
+          AND gi.created_at > now() - interval '1 day') >= c_per_email_group_per_day THEN
         RAISE EXCEPTION 'rate_limited' USING ERRCODE = 'P0001';
     END IF;
 

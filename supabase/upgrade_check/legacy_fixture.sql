@@ -1,7 +1,8 @@
 -- Legacy data for the upgrade check (run.sh). Loaded on top of the baseline migration only, i.e. the
 -- schema the hosted project had before the migration series. It covers the shapes the upgrade has to
 -- convert: mixed-case emails and currencies, over-long names and titles (also cut at a space), short
--- invite codes, numeric amounts, plaintext invitation tokens, invitations sent by a non-admin, an
+-- invite codes, numeric amounts (including fractional yen), an infinite date, plaintext invitation
+-- tokens, invitations sent by a non-admin (one newer than the admin's own pending invitation), an
 -- active group the user does not belong to, a user without a profile, a group expense paid by a
 -- user who already left the group, and fixed created_at/updated_at values.
 --
@@ -103,8 +104,13 @@ INSERT INTO public.group_invitations (id, group_id, inviter_id, email, role, tok
  ('40000000-0000-0000-0000-000000000008', '10000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-00000000000e', 'not-an-email', 'member', 'legacytokenbademail', 'pending', now() + interval '3 days', NULL),
  ('40000000-0000-0000-0000-000000000009', '10000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-00000000000e', repeat('a', 300) || '@example.com', 'member', 'legacytokenlongemail', 'pending', now() + interval '3 days', NULL),
  ('40000000-0000-0000-0000-00000000000a', '10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-00000000000b', 'carol@example.com', 'member', 'legacytokenmemberinvite', 'pending', now() + interval '3 days', NULL),
- ('40000000-0000-0000-0000-00000000000b', '10000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-00000000000f', 'old@example.com', 'member', 'legacytokenold', 'declined', now() - interval '200 days', NULL);
+ ('40000000-0000-0000-0000-00000000000b', '10000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-00000000000f', 'old@example.com', 'member', 'legacytokenold', 'declined', now() - interval '200 days', NULL),
+ ('40000000-0000-0000-0000-00000000000c', '10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-00000000000a', 'keep@example.com', 'member', 'legacytokenkeepadmin', 'pending', now() + interval '4 days', NULL),
+ ('40000000-0000-0000-0000-00000000000d', '10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-00000000000b', 'keep@example.com', 'member', 'legacytokenkeepmember', 'pending', now() + interval '5 days', NULL);
 UPDATE public.group_invitations SET created_at = now() - interval '200 days' WHERE id = '40000000-0000-0000-0000-00000000000b';
+-- An admin's pending invitation followed by a newer one from a non-admin member for the same address.
+UPDATE public.group_invitations SET created_at = now() - interval '2 days' WHERE id = '40000000-0000-0000-0000-00000000000c';
+UPDATE public.group_invitations SET created_at = now() - interval '1 day' WHERE id = '40000000-0000-0000-0000-00000000000d';
 
 -- Fixed timestamps, so the check can tell whether the upgrade rewrote them.
 ALTER TABLE public.profiles DISABLE TRIGGER USER;
