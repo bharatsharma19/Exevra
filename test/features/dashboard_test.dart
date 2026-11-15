@@ -3,6 +3,8 @@ import 'package:expense_manager/core/errors/failure_messages.dart';
 import 'package:expense_manager/core/utils/money_format.dart';
 import 'package:expense_manager/features/dashboard/screens/dashboard_screen.dart';
 import 'package:expense_manager/features/dashboard/screens/main_navigation_shell.dart';
+import 'package:expense_manager/features/expenses/screens/add_edit_expense_sheet.dart';
+import 'package:expense_manager/features/onboarding/first_expense_nudge.dart';
 import 'package:expense_manager/main.dart';
 import 'package:expense_manager/models/insights.dart';
 import 'package:expense_manager/models/money.dart';
@@ -105,6 +107,57 @@ void main() {
     expect(find.text('Solo lunch'), findsOneWidget);
     expect(find.text('Team dinner'), findsNothing);
     expect(find.byKey(const Key('dashboard-my-balance')), findsNothing);
+  });
+
+  group('first-expense tip', () {
+    testWidgets('shows while there are no expenses and opens the add sheet', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        inGroup: false,
+        setUp: (b) => b.expenses.rows.clear(),
+      );
+      final tip = find.byKey(const Key('dashboard-first-expense'));
+      expect(tip, findsOneWidget);
+      expect(find.byType(FirstExpenseNudge), findsOneWidget);
+
+      await tester.tap(
+        find.descendant(of: tip, matching: find.byType(FilledButton)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(AddEditExpenseSheet), findsOneWidget);
+    });
+
+    testWidgets('is hidden once there is an expense', (tester) async {
+      await _pump(tester, inGroup: false);
+      expect(find.text('Solo lunch'), findsOneWidget);
+      expect(find.byType(FirstExpenseNudge), findsNothing);
+    });
+
+    testWidgets('stays hidden after it was dismissed', (tester) async {
+      await _pump(
+        tester,
+        inGroup: false,
+        setUp: (b) => b.expenses.rows.clear(),
+      );
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const Key('dashboard-first-expense')),
+          matching: find.byIcon(Icons.close),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('dashboard-first-expense')), findsOneWidget);
+      // The tip itself renders nothing once dismissed.
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('dashboard-first-expense')),
+          matching: find.byType(FilledButton),
+        ),
+        findsNothing,
+      );
+    });
   });
 
   testWidgets('adding is only on the FAB', (tester) async {

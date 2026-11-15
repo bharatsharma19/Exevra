@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/utils/haptics.dart';
+import '../../../core/widgets/app_navigation_destination.dart';
+import '../../../core/widgets/app_snackbar.dart' show SnackbarClearance;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/errors/app_failure.dart';
@@ -74,64 +76,67 @@ class MainNavigationShell extends ConsumerWidget {
           ),
         ],
       ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          border: Border(
-            top: BorderSide(
-              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-              width: 1,
+      // Snack bars (shown by the root SnackbarHost) stay above the bar.
+      bottomNavigationBar: SnackbarClearance(
+        child: Container(
+          decoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(
+                color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                width: 1,
+              ),
             ),
           ),
-        ),
-        child: NavigationBar(
-          selectedIndex: navigationShell.currentIndex,
-          onDestinationSelected: _onTap,
-          backgroundColor: isDark ? AppColors.darkCard : AppColors.lightCard,
-          indicatorColor: Theme.of(
-            context,
-          ).colorScheme.primary.withValues(alpha: 0.2),
-          destinations: [
-            NavigationDestination(
-              icon: const Icon(Icons.dashboard_outlined),
-              selectedIcon: Icon(
-                Icons.dashboard_rounded,
-                color: Theme.of(context).colorScheme.primary,
+          child: NavigationBar(
+            selectedIndex: navigationShell.currentIndex,
+            onDestinationSelected: _onTap,
+            backgroundColor: isDark ? AppColors.darkCard : AppColors.lightCard,
+            indicatorColor: Theme.of(
+              context,
+            ).colorScheme.primary.withValues(alpha: 0.2),
+            destinations: [
+              AppNavigationDestination(
+                icon: const Icon(Icons.dashboard_outlined),
+                selectedIcon: Icon(
+                  Icons.dashboard_rounded,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                label: 'Dashboard',
               ),
-              label: 'Dashboard',
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.receipt_long_outlined),
-              selectedIcon: Icon(
-                Icons.receipt_long_rounded,
-                color: Theme.of(context).colorScheme.primary,
+              AppNavigationDestination(
+                icon: const Icon(Icons.receipt_long_outlined),
+                selectedIcon: Icon(
+                  Icons.receipt_long_rounded,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                label: 'Expenses',
               ),
-              label: 'Expenses',
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.insert_chart_outlined_rounded),
-              selectedIcon: Icon(
-                Icons.insert_chart_rounded,
-                color: Theme.of(context).colorScheme.primary,
+              AppNavigationDestination(
+                icon: const Icon(Icons.insert_chart_outlined_rounded),
+                selectedIcon: Icon(
+                  Icons.insert_chart_rounded,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                label: 'Insights',
               ),
-              label: 'Insights',
-            ),
-            const NavigationDestination(
-              icon: Icon(Icons.auto_awesome_outlined),
-              selectedIcon: Icon(
-                Icons.auto_awesome_rounded,
-                color: AppColors.primaryViolet,
+              const AppNavigationDestination(
+                icon: Icon(Icons.auto_awesome_outlined),
+                selectedIcon: Icon(
+                  Icons.auto_awesome_rounded,
+                  color: AppColors.primaryViolet,
+                ),
+                label: 'AI Advisor',
               ),
-              label: 'AI Advisor',
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.person_outline_rounded),
-              selectedIcon: Icon(
-                Icons.person_rounded,
-                color: Theme.of(context).colorScheme.primary,
+              AppNavigationDestination(
+                icon: const Icon(Icons.person_outline_rounded),
+                selectedIcon: Icon(
+                  Icons.person_rounded,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                label: 'Profile',
               ),
-              label: 'Profile',
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

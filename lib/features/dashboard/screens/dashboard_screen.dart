@@ -22,6 +22,7 @@ import '../../../providers/insights_provider.dart';
 import '../../../providers/profile_provider.dart';
 import '../../shared/failure_retry.dart';
 import '../../expenses/screens/add_edit_expense_sheet.dart';
+import '../../onboarding/first_expense_nudge.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -197,6 +198,12 @@ class DashboardScreen extends ConsumerWidget {
         : ref.watch(expenseListProvider(listKey));
     final recentExpenses =
         listAsync.value?.items.take(5).toList() ?? const <Expense>[];
+    // Only once the list loaded (not while it loads or after a failure).
+    final hasNoExpenses =
+        listAsync.hasValue &&
+        !listAsync.isLoading &&
+        !listAsync.hasError &&
+        listAsync.requireValue.items.isEmpty;
     final inGroup = group != null && group.canRead;
     final insightPending = insightsAsync.value == null;
     final scopeLabel = inGroup ? 'GROUP TOTAL' : 'YOUR SPENDING';
@@ -372,6 +379,21 @@ class DashboardScreen extends ConsumerWidget {
                         ),
                       ],
                     ).animate().fadeIn(duration: 300.ms),
+
+                    // First-run tip while the user has no expenses yet
+                    // (hidden for good once dismissed).
+                    if (hasNoExpenses) ...[
+                      const SizedBox(height: 16),
+                      FirstExpenseNudge(
+                        key: const Key('dashboard-first-expense'),
+                        onAddExpense: () {
+                          AppHaptics.selection();
+                          unawaited(
+                            AddEditExpenseSheet.show(context, listKey: listKey),
+                          );
+                        },
+                      ),
+                    ],
 
                     const SizedBox(height: 20),
 
