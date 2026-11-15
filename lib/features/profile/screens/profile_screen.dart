@@ -676,6 +676,22 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
   }
 
+  Future<void> _setAppLock(bool enabled) async {
+    AppHaptics.selection();
+    final messenger = ScaffoldMessenger.of(context);
+    final key = await ref.read(appLockProvider.notifier).setEnabled(enabled);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          key == null
+              ? (enabled ? 'App Lock is on.' : 'App Lock is off.')
+              : friendlyMessageForKey(key),
+        ),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
   void _showSignOutDialog() {
     AppHaptics.medium();
     unawaited(
@@ -1892,7 +1908,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Column(
                 children: [
-                  // App Lock (Biometrics) Toggle
+                  // App Lock: turning it on or off needs authentication.
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     secondary: const Icon(
@@ -1900,59 +1916,29 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       color: AppColors.primaryCyan,
                     ),
                     title: const Text(
-                      'App Lock (Biometrics / PIN)',
+                      'App Lock',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                     subtitle: Text(
-                      appLockState.canCheckBiometrics
-                          ? 'Protect application with Face ID, Fingerprint or Device PIN'
-                          : 'Hardware biometric sensor not detected',
+                      appLockState.availability ==
+                                  LockAvailability.unavailable &&
+                              !appLockState.enabled
+                          ? friendlyMessageForKey('lock_no_credentials')
+                          : 'Ask for your fingerprint, face or device PIN '
+                                'when opening Exevra',
                       style: const TextStyle(fontSize: 11),
                     ),
-                    value: appLockState.isBiometricsEnabled,
-                    activeThumbColor: AppColors.primaryCyan,
-                    onChanged: (val) async {
-                      AppHaptics.selection();
-                      if (val) {
-                        final authenticated = await ref
-                            .read(appLockProvider.notifier)
-                            .authenticate(
-                              customReason:
-                                  'Authenticate to enable App Lock security',
-                            );
-                        if (authenticated) {
-                          await ref
-                              .read(appLockProvider.notifier)
-                              .setBiometricsEnabled(true);
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'App Lock enabled. Your data is secured.',
-                                ),
-                                backgroundColor: AppColors.primaryCyan,
-                                duration: Duration(seconds: 2),
-                              ),
-                            );
-                          }
-                        }
-                      } else {
-                        await ref
-                            .read(appLockProvider.notifier)
-                            .setBiometricsEnabled(false);
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('App Lock disabled.'),
-                              duration: Duration(seconds: 2),
-                            ),
-                          );
-                        }
-                      }
-                    },
+                    value: appLockState.enabled,
+                    onChanged:
+                        appLockState.isAuthenticating ||
+                            (appLockState.availability ==
+                                    LockAvailability.unavailable &&
+                                !appLockState.enabled)
+                        ? null
+                        : (val) => unawaited(_setAppLock(val)),
                   ),
                   const Divider(height: 1),
 

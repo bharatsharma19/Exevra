@@ -1,192 +1,175 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_constants.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/haptics.dart';
-import '../../../providers/app_lock_provider.dart';
 
-class AppLockScreen extends ConsumerWidget {
+import '../../../core/constants/app_constants.dart';
+import '../../../core/errors/failure_messages.dart';
+import '../../../providers/app_lock_provider.dart';
+import '../../../providers/auth_provider.dart';
+
+/// Covers the whole app while it is locked. It sits above the navigator
+/// (so it cannot open dialogs) and the app below it is excluded from
+/// semantics, focus and pointer input.
+class AppLockScreen extends ConsumerStatefulWidget {
   const AppLockScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final lockState = ref.watch(appLockProvider);
-    final lockNotifier = ref.read(appLockProvider.notifier);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+  ConsumerState<AppLockScreen> createState() => _AppLockScreenState();
+}
 
-    return PopScope(
-      canPop: false,
-      child: Scaffold(
-        backgroundColor: isDark
-            ? AppColors.darkBackground
-            : AppColors.lightBackground,
-        body: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 28),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // Glowing Security Badge
-                  Container(
-                        width: 100,
-                        height: 100,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: LinearGradient(
-                            colors: [
-                              AppColors.primaryCyan.withValues(alpha: 0.25),
-                              AppColors.primaryViolet.withValues(alpha: 0.25),
-                            ],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          border: Border.all(
-                            color: AppColors.primaryCyan.withValues(alpha: 0.4),
-                            width: 2,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: AppColors.primaryCyan.withValues(
-                                alpha: 0.2,
-                              ),
-                              blurRadius: 30,
-                              spreadRadius: 4,
-                            ),
-                          ],
-                        ),
-                        child: const Icon(
-                          Icons.fingerprint_rounded,
-                          size: 54,
-                          color: AppColors.primaryCyan,
-                        ),
-                      )
-                      .animate(
-                        onPlay: (controller) =>
-                            controller.repeat(reverse: true),
-                      )
-                      .scale(
-                        begin: const Offset(0.96, 0.96),
-                        end: const Offset(1.04, 1.04),
-                        duration: 1800.ms,
-                        curve: Curves.easeInOut,
-                      ),
+class _AppLockScreenState extends ConsumerState<AppLockScreen> {
+  bool _confirmSignOut = false;
 
-                  const SizedBox(height: 32),
+  @override
+  void initState() {
+    super.initState();
+    // Prompt once when the lock appears; Unlock retries.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final lock = ref.read(appLockProvider);
+      if (lock.availability != LockAvailability.unavailable) {
+        unawaited(ref.read(appLockProvider.notifier).unlock());
+      }
+    });
+  }
 
-                  // App Title & Status
-                  Text(
-                        AppConstants.appName,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.5,
-                          color: isDark
-                              ? AppColors.darkTextPrimary
-                              : AppColors.lightTextPrimary,
-                        ),
-                      )
-                      .animate()
-                      .fadeIn(duration: 400.ms)
-                      .slideY(begin: 0.1, end: 0),
+  @override
+  Widget build(BuildContext context) {
+    final lock = ref.watch(appLockProvider);
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final unavailable = lock.availability == LockAvailability.unavailable;
+    final message = unavailable
+        ? friendlyMessageForKey('lock_no_credentials')
+        : lock.messageKey == null
+        ? null
+        : friendlyMessageForKey(lock.messageKey!);
 
-                  const SizedBox(height: 8),
-
-                  Text(
-                    'Biometric Security Protection Active',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: isDark
-                          ? AppColors.darkTextSecondary
-                          : AppColors.lightTextSecondary,
+    return Scaffold(
+      backgroundColor: scheme.surface,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Semantics(
+                  excludeSemantics: true,
+                  child: CircleAvatar(
+                    radius: 44,
+                    backgroundColor: scheme.primaryContainer,
+                    child: Icon(
+                      Icons.lock_rounded,
+                      size: 40,
+                      color: scheme.onPrimaryContainer,
                     ),
-                  ).animate().fadeIn(delay: 100.ms, duration: 400.ms),
-
-                  const SizedBox(height: 36),
-
-                  // Status / Error Card
-                  if (lockState.errorMessage != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 24),
-                      child: GlassCard(
-                        borderRadius: 16,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.info_outline_rounded,
-                              color: AppColors.warning,
-                              size: 20,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                lockState.errorMessage!,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: AppColors.warning,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  '${AppConstants.appName} is locked',
+                  style: text.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Use your fingerprint, face or device PIN to continue.',
+                  style: text.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                if (message != null) ...[
+                  const SizedBox(height: 16),
+                  Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      message,
+                      style: text.bodyMedium?.copyWith(color: scheme.error),
+                      textAlign: TextAlign.center,
                     ),
-
-                  // Unlock Action Button
+                  ),
+                ],
+                const SizedBox(height: 28),
+                if (!unavailable)
                   SizedBox(
                     width: double.infinity,
-                    height: 54,
-                    child: ElevatedButton.icon(
-                      onPressed: lockState.isAuthenticating
+                    child: FilledButton.icon(
+                      onPressed: lock.isAuthenticating
                           ? null
-                          : () {
-                              AppHaptics.medium();
-                              unawaited(lockNotifier.authenticate());
-                            },
-                      icon: lockState.isAuthenticating
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
-                                color: Colors.black,
-                              ),
-                            )
-                          : const Icon(Icons.lock_open_rounded, size: 20),
-                      label: Text(
-                        lockState.isAuthenticating
-                            ? 'Verifying Identity...'
-                            : 'Unlock with Biometrics / PIN',
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        elevation: 4,
-                      ),
+                          : () => unawaited(
+                              ref.read(appLockProvider.notifier).unlock(),
+                            ),
+                      icon: const Icon(Icons.fingerprint_rounded),
+                      label: const Text('Unlock'),
                     ),
-                  ).animate().fadeIn(delay: 200.ms).slideY(begin: 0.15, end: 0),
-                ],
-              ),
+                  ),
+                const SizedBox(height: 12),
+                if (_confirmSignOut) ...[
+                  Text(
+                    'Sign out on this device? You can sign in again with '
+                    'your email and password.',
+                    style: text.bodySmall,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      TextButton(
+                        onPressed: () =>
+                            setState(() => _confirmSignOut = false),
+                        child: const Text('Cancel'),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton.tonal(
+                        onPressed: () => unawaited(
+                          ref.read(authControllerProvider.notifier).signOut(),
+                        ),
+                        child: const Text('Sign out'),
+                      ),
+                    ],
+                  ),
+                ] else
+                  SizedBox(
+                    width: double.infinity,
+                    child: unavailable
+                        ? FilledButton(
+                            onPressed: () =>
+                                setState(() => _confirmSignOut = true),
+                            child: const Text('Sign out'),
+                          )
+                        : TextButton(
+                            onPressed: () =>
+                                setState(() => _confirmSignOut = true),
+                            child: const Text('Sign out instead'),
+                          ),
+                  ),
+              ],
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Shown over the app while it is inactive, so the app switcher preview
+/// shows no financial data.
+class PrivacyCover extends StatelessWidget {
+  const PrivacyCover({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ColoredBox(
+      color: scheme.surface,
+      child: Center(
+        child: Icon(Icons.lock_rounded, size: 48, color: scheme.primary),
       ),
     );
   }

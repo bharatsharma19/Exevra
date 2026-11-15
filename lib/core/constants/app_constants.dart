@@ -47,8 +47,6 @@ class AppConstants {
   static const String keyAiConsent = 'app_ai_consent';
   static const String keyCachedProfile = 'app_cached_profile';
   static const String keySecureToken = 'app_secure_token';
-  static const String keyBiometricsEnabled = 'app_biometrics_enabled';
-  static const int lockTimeoutSeconds = 30;
 
   // AI Financial Assistant Quick Prompts
   static const List<String> aiQuickPrompts = [

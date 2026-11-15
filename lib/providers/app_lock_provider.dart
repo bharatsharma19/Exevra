@@ -1,206 +1,261 @@
 import 'dart:async';
 
-import 'package:flutter_riverpod/legacy.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleState;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:local_auth/local_auth.dart';
-import '../core/constants/app_constants.dart';
-import '../core/utils/haptics.dart';
+
 import '../core/logging/app_logger.dart';
+import '../core/platform/secure_window.dart';
+import '../core/storage/preferences.dart';
+import '../core/utils/haptics.dart';
+import 'auth_provider.dart';
 
+/// Whether the device can authenticate the user (biometrics or a screen
+/// lock PIN, pattern or password).
+enum LockAvailability { unknown, available, unavailable }
+
+@immutable
 class AppLockState {
-  final bool isBiometricsEnabled;
-  final bool isLocked;
-  final bool canCheckBiometrics;
-  final bool isAuthenticating;
-  final String? errorMessage;
-  final DateTime? lastBackgroundTime;
-
   const AppLockState({
-    this.isBiometricsEnabled = false,
-    this.isLocked = false,
-    this.canCheckBiometrics = false,
+    this.enabled = false,
+    this.locked = false,
+    this.availability = LockAvailability.unknown,
     this.isAuthenticating = false,
-    this.errorMessage,
-    this.lastBackgroundTime,
+    this.messageKey,
+    this.coverVisible = false,
   });
 
+  /// App Lock is on for the signed-in user.
+  final bool enabled;
+
+  /// The app is locked until the user authenticates.
+  final bool locked;
+
+  final LockAvailability availability;
+  final bool isAuthenticating;
+
+  /// Why the last unlock did not work (a `friendlyMessageForKey` key).
+  final String? messageKey;
+
+  /// The app is inactive (app switcher, system dialog): its content is
+  /// covered so it does not show in the preview.
+  final bool coverVisible;
+
+  bool get showLockScreen => enabled && locked;
+
   AppLockState copyWith({
-    bool? isBiometricsEnabled,
-    bool? isLocked,
-    bool? canCheckBiometrics,
+    bool? enabled,
+    bool? locked,
+    LockAvailability? availability,
     bool? isAuthenticating,
-    Object? errorMessage = const Object(),
-    DateTime? lastBackgroundTime,
-    bool clearLastBackgroundTime = false,
-  }) {
-    return AppLockState(
-      isBiometricsEnabled: isBiometricsEnabled ?? this.isBiometricsEnabled,
-      isLocked: isLocked ?? this.isLocked,
-      canCheckBiometrics: canCheckBiometrics ?? this.canCheckBiometrics,
-      isAuthenticating: isAuthenticating ?? this.isAuthenticating,
-      errorMessage: errorMessage == const Object()
-          ? this.errorMessage
-          : errorMessage as String?,
-      lastBackgroundTime: clearLastBackgroundTime
-          ? null
-          : (lastBackgroundTime ?? this.lastBackgroundTime),
-    );
-  }
+    String? Function()? messageKey,
+    bool? coverVisible,
+  }) => AppLockState(
+    enabled: enabled ?? this.enabled,
+    locked: locked ?? this.locked,
+    availability: availability ?? this.availability,
+    isAuthenticating: isAuthenticating ?? this.isAuthenticating,
+    messageKey: messageKey == null ? this.messageKey : messageKey(),
+    coverVisible: coverVisible ?? this.coverVisible,
+  );
 }
 
-class AppLockNotifier extends StateNotifier<AppLockState> {
-  final LocalAuthentication _localAuth;
-  final FlutterSecureStorage _secureStorage;
+/// The platform authenticator (replaced by a fake in tests).
+final localAuthProvider = Provider<LocalAuthentication>(
+  (ref) => LocalAuthentication(),
+);
 
-  AppLockNotifier({
-    LocalAuthentication? localAuth,
-    FlutterSecureStorage? secureStorage,
-  }) : _localAuth = localAuth ?? LocalAuthentication(),
-       _secureStorage = secureStorage ?? const FlutterSecureStorage(),
-       super(const AppLockState()) {
-    unawaited(init());
+/// Clock used for the background timeout (replaced in tests).
+final appLockClockProvider = Provider<DateTime Function()>(
+  (ref) => DateTime.now,
+);
+
+/// App Lock for the signed-in user.
+///
+/// * Only active while a user is signed in; nothing prompts while signed
+///   out. The flag is per user (`u.<uid>.app_lock`) and is removed with the
+///   user's other preferences on sign-out or deletion.
+/// * When on, the app starts locked and locks again after
+///   [relockAfter] in the background.
+/// * Turning it on or off needs a successful authentication.
+/// * Screenshots and the recent-apps preview are blocked while it is on.
+class AppLockController extends Notifier<AppLockState> {
+  static const Duration relockAfter = Duration(seconds: 30);
+  static const String unlockReason = 'Unlock Exevra';
+
+  DateTime? _backgroundedAt;
+  String? _userId;
+
+  LocalAuthentication get _auth => ref.read(localAuthProvider);
+
+  @override
+  AppLockState build() {
+    final userId = ref.watch(currentUserIdProvider);
+    _userId = userId;
+    _backgroundedAt = null;
+    if (userId == null) {
+      unawaited(SecureWindow.setSecure(false));
+      return const AppLockState();
+    }
+    final enabled =
+        ref
+            .read(sharedPreferencesProvider)
+            .getBool(UserPrefs.key(userId, UserPrefs.appLock)) ??
+        false;
+    unawaited(SecureWindow.setSecure(enabled));
+    unawaited(Future(refreshAvailability));
+    return AppLockState(enabled: enabled, locked: enabled);
   }
 
-  Future<void> init() async {
-    bool canCheck = false;
-    bool enabled = false;
-
+  /// Re-checks whether the device can authenticate.
+  Future<LockAvailability> refreshAvailability() async {
+    LockAvailability availability;
     try {
-      final isSupported = await _localAuth.isDeviceSupported();
-      final hasBiometrics = await _localAuth.canCheckBiometrics;
-      canCheck = isSupported || hasBiometrics;
-    } catch (e) {
-      AppLogger.warn('AppLockNotifier: Biometrics capability check notice', e);
-      canCheck = false;
+      availability = await _auth.isDeviceSupported()
+          ? LockAvailability.available
+          : LockAvailability.unavailable;
+    } on Object catch (e) {
+      AppLogger.warn('Device authentication check failed', e.runtimeType);
+      availability = LockAvailability.unavailable;
     }
-
-    try {
-      final storedVal = await _secureStorage.read(
-        key: AppConstants.keyBiometricsEnabled,
-      );
-      enabled = storedVal == 'true';
-    } catch (e) {
-      AppLogger.warn('AppLockNotifier: Secure storage read notice', e);
-      enabled = false;
+    if (ref.mounted && _userId != null) {
+      state = state.copyWith(availability: availability);
     }
-
-    state = state.copyWith(
-      canCheckBiometrics: canCheck,
-      isBiometricsEnabled: enabled,
-      isLocked: enabled, // Cold launch locks if enabled
-    );
-
-    if (enabled) {
-      // Prompt on cold launch
-      await authenticate();
-    }
+    return availability;
   }
 
-  Future<void> setBiometricsEnabled(bool enabled) async {
+  /// Asks for biometrics or the device PIN. Returns null on success, or
+  /// the message key of what went wrong.
+  Future<String?> _authenticate(String reason) async {
     try {
-      await _secureStorage.write(
-        key: AppConstants.keyBiometricsEnabled,
-        value: enabled ? 'true' : 'false',
-      );
-      state = state.copyWith(isBiometricsEnabled: enabled, isLocked: false);
-      AppHaptics.selection();
-    } catch (e) {
-      AppLogger.warn(
-        'AppLockNotifier: Error persisting biometrics preference',
-        e,
-      );
-    }
-  }
-
-  Future<bool> authenticate({String? customReason}) async {
-    if (state.isAuthenticating) return false;
-
-    state = state.copyWith(isAuthenticating: true, errorMessage: null);
-
-    try {
-      final authenticated = await _localAuth.authenticate(
-        localizedReason: customReason ?? 'Authenticate to access Exevra',
+      final ok = await _auth.authenticate(
+        localizedReason: reason,
         persistAcrossBackgrounding: true,
       );
-
-      if (authenticated) {
-        state = state.copyWith(
-          isLocked: false,
-          isAuthenticating: false,
-          errorMessage: null,
-          clearLastBackgroundTime: true,
-        );
-        AppHaptics.success();
-        return true;
-      } else {
-        _onAuthenticationCancelled();
-        return false;
-      }
+      return ok ? null : 'lock_failed';
     } on LocalAuthException catch (e) {
-      if (e.code == LocalAuthExceptionCode.userCanceled ||
-          e.code == LocalAuthExceptionCode.systemCanceled ||
-          e.code == LocalAuthExceptionCode.timeout) {
-        _onAuthenticationCancelled();
-        return false;
+      final key = messageKeyFor(e.code);
+      if (key == 'lock_no_credentials' && ref.mounted) {
+        state = state.copyWith(availability: LockAvailability.unavailable);
       }
-      _onAuthenticationUnavailable(e);
-      return false;
-    } catch (e) {
-      _onAuthenticationUnavailable(e);
-      return false;
+      return key;
+    } on PlatformException catch (e) {
+      AppLogger.warn('Device authentication failed', e.code);
+      return 'lock_failed';
+    } on MissingPluginException {
+      return 'lock_no_credentials';
     }
   }
 
-  void _onAuthenticationCancelled() {
+  /// Message key for a local_auth error code.
+  @visibleForTesting
+  static String messageKeyFor(LocalAuthExceptionCode code) => switch (code) {
+    LocalAuthExceptionCode.userCanceled ||
+    LocalAuthExceptionCode.systemCanceled ||
+    LocalAuthExceptionCode.timeout ||
+    LocalAuthExceptionCode.userRequestedFallback => 'lock_cancelled',
+    LocalAuthExceptionCode.noCredentialsSet ||
+    LocalAuthExceptionCode.noBiometricHardware ||
+    LocalAuthExceptionCode.noBiometricsEnrolled => 'lock_no_credentials',
+    LocalAuthExceptionCode.temporaryLockout => 'lock_temporary_lockout',
+    LocalAuthExceptionCode.biometricLockout => 'lock_biometric_lockout',
+    LocalAuthExceptionCode.biometricHardwareTemporarilyUnavailable =>
+      'lock_hardware_busy',
+    LocalAuthExceptionCode.authInProgress => 'lock_in_progress',
+    LocalAuthExceptionCode.uiUnavailable => 'lock_ui_unavailable',
+    _ => 'lock_failed',
+  };
+
+  /// Unlocks after a successful authentication. Returns true when the app
+  /// is unlocked.
+  Future<bool> unlock() async {
+    if (!state.showLockScreen) return true;
+    if (state.isAuthenticating) return false;
+    state = state.copyWith(isAuthenticating: true, messageKey: () => null);
+    final userId = _userId;
+    final key = await _authenticate(unlockReason);
+    if (!ref.mounted || _userId != userId) return false;
+    if (key == null) {
+      AppHaptics.success();
+      state = state.copyWith(
+        locked: false,
+        isAuthenticating: false,
+        coverVisible: false,
+      );
+      return true;
+    }
     state = state.copyWith(
       isAuthenticating: false,
-      errorMessage: 'Authentication was cancelled or failed.',
+      // Cancelling is not an error worth showing.
+      messageKey: () => key == 'lock_cancelled' ? null : key,
     );
-    AppHaptics.error();
+    return false;
   }
 
-  void _onAuthenticationUnavailable(Object error) {
-    AppLogger.warn('AppLockNotifier: LocalAuth exception', error);
-    state = state.copyWith(
-      isAuthenticating: false,
-      errorMessage:
-          'Biometric authentication unavailable. Use device PIN/Passcode.',
+  /// Turns App Lock on or off. Both need a successful authentication.
+  /// Returns null on success or the message key of the problem.
+  Future<String?> setEnabled(bool enabled) async {
+    final userId = _userId;
+    if (userId == null) return 'lock_signed_out';
+    if (state.enabled == enabled) return null;
+    if (state.isAuthenticating) return 'lock_in_progress';
+    if (enabled &&
+        await refreshAvailability() == LockAvailability.unavailable) {
+      return 'lock_no_credentials';
+    }
+    if (!ref.mounted || _userId != userId) return 'lock_signed_out';
+    state = state.copyWith(isAuthenticating: true);
+    final key = await _authenticate(
+      enabled ? 'Turn on App Lock for Exevra' : 'Turn off App Lock for Exevra',
     );
-  }
-
-  void onAppPaused() {
-    state = state.copyWith(lastBackgroundTime: DateTime.now());
-  }
-
-  void onAppResumed() {
-    if (!state.isBiometricsEnabled) return;
-
-    final lastPaused = state.lastBackgroundTime;
-    if (lastPaused == null) {
-      // First resume or already tracked
-      return;
+    if (!ref.mounted || _userId != userId) return 'lock_signed_out';
+    state = state.copyWith(isAuthenticating: false);
+    if (key != null) return key;
+    try {
+      await ref
+          .read(sharedPreferencesProvider)
+          .setBool(UserPrefs.key(userId, UserPrefs.appLock), enabled);
+    } on Object catch (e) {
+      AppLogger.warn('App Lock setting was not saved', e.runtimeType);
+      return 'lock_failed';
     }
-
-    final elapsedSeconds = DateTime.now().difference(lastPaused).inSeconds;
-    if (elapsedSeconds >= AppConstants.lockTimeoutSeconds) {
-      state = state.copyWith(isLocked: true);
-      unawaited(authenticate());
-    }
+    if (!ref.mounted || _userId != userId) return 'lock_signed_out';
+    state = state.copyWith(enabled: enabled, locked: false);
+    await SecureWindow.setSecure(enabled);
+    AppHaptics.selection();
+    return null;
   }
 
-  void unlockDirectly() {
-    state = state.copyWith(isLocked: false, errorMessage: null);
-  }
-
-  void lockImmediately() {
-    if (state.isBiometricsEnabled) {
-      state = state.copyWith(isLocked: true);
+  /// Follows the app life cycle: covers the content when inactive, notes
+  /// when the app went to the background and locks again on return.
+  void onLifecycleChanged(AppLifecycleState lifecycle) {
+    if (_userId == null || !state.enabled) return;
+    // The system prompt itself makes the app inactive; ignore that.
+    if (state.isAuthenticating) return;
+    final now = ref.read(appLockClockProvider)();
+    switch (lifecycle) {
+      case AppLifecycleState.inactive:
+        state = state.copyWith(coverVisible: true);
+      case AppLifecycleState.hidden || AppLifecycleState.paused:
+        _backgroundedAt ??= now;
+        state = state.copyWith(coverVisible: true);
+      case AppLifecycleState.resumed:
+        final since = _backgroundedAt;
+        _backgroundedAt = null;
+        final relock = since != null && now.difference(since) >= relockAfter;
+        state = state.copyWith(
+          coverVisible: false,
+          locked: state.locked || relock,
+          messageKey: relock ? () => null : null,
+        );
+      case AppLifecycleState.detached:
+        break;
     }
   }
 }
 
-final appLockProvider = StateNotifierProvider<AppLockNotifier, AppLockState>((
-  ref,
-) {
-  return AppLockNotifier();
-});
+final appLockProvider = NotifierProvider<AppLockController, AppLockState>(
+  AppLockController.new,
+);

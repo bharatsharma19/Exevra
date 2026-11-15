@@ -17,7 +17,6 @@ import 'features/auth/screens/app_lock_screen.dart';
 import 'features/startup/service_unavailable_app.dart';
 import 'models/profile.dart';
 import 'providers/app_lock_provider.dart';
-import 'providers/auth_provider.dart';
 import 'providers/profile_provider.dart';
 
 Future<void> main() async {
@@ -118,12 +117,7 @@ class _ExevraAppState extends ConsumerState<ExevraApp>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.hidden) {
-      ref.read(appLockProvider.notifier).onAppPaused();
-    } else if (state == AppLifecycleState.resumed) {
-      ref.read(appLockProvider.notifier).onAppResumed();
-    }
+    ref.read(appLockProvider.notifier).onLifecycleChanged(state);
   }
 
   @override
@@ -131,8 +125,6 @@ class _ExevraAppState extends ConsumerState<ExevraApp>
     final router = ref.watch(routerProvider);
     // Opens invitation links for as long as the app runs.
     ref.watch(deepLinkHandlerProvider);
-    final signedIn = ref.watch(currentUserIdProvider) != null;
-    final appLockState = ref.watch(appLockProvider);
 
     final themeMode = switch (ref.watch(themePreferenceProvider)) {
       ThemePreference.light => ThemeMode.light,
@@ -147,19 +139,41 @@ class _ExevraAppState extends ConsumerState<ExevraApp>
       darkTheme: AppTheme.darkTheme,
       themeMode: themeMode,
       routerConfig: router,
-      builder: (context, child) {
-        if (signedIn &&
-            appLockState.isLocked &&
-            appLockState.isBiometricsEnabled) {
-          return Stack(
-            children: [
-              ?child,
-              const Positioned.fill(child: AppLockScreen()),
-            ],
-          );
-        }
-        return child ?? const SizedBox();
-      },
+      builder: (context, child) => LockGate(child: child ?? const SizedBox()),
+    );
+  }
+}
+
+/// Puts the lock screen (or the privacy cover) over the app. While either
+/// shows, the app below is kept (so navigation survives) but excluded from
+/// semantics, focus, pointer input and animations.
+class LockGate extends ConsumerWidget {
+  const LockGate({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lock = ref.watch(appLockProvider);
+    final hidden = lock.showLockScreen || lock.coverVisible;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        ExcludeSemantics(
+          excluding: hidden,
+          child: ExcludeFocus(
+            excluding: hidden,
+            child: IgnorePointer(
+              ignoring: hidden,
+              child: TickerMode(enabled: !hidden, child: child),
+            ),
+          ),
+        ),
+        if (lock.showLockScreen)
+          const AppLockScreen()
+        else if (lock.coverVisible)
+          const PrivacyCover(),
+      ],
     );
   }
 }
