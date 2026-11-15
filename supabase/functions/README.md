@@ -147,3 +147,34 @@ Errors (standard error body; `reason` is the database key when there is one):
 | 429    | `rate_limited`       | `rate_limited`                          | Per-inviter or per-recipient limit reached                   |
 | 500    | `internal`           |                                         | Unexpected database error                                    |
 | 503    | `unavailable`        |                                         | `APP_BASE_URL` missing or invalid (no invitation is created) |
+
+## `delete-account` contract
+
+`POST /functions/v1/delete-account` with `Authorization: Bearer <user JWT>` and an optional JSON
+body `{ "apple_authorization_code": "<code>" }` (an empty body is fine).
+
+1. The caller is verified with `auth.getUser`.
+2. A service-role client runs `prepare_account_deletion(p_user_id)`: group admin rights move to
+   the longest-standing approved member (or the group is deleted), shared expenses are kept as
+   "Former member", personal data is removed. The RPC is idempotent.
+3. Sign in with Apple: when the user has an Apple identity, the app sent a fresh
+   `apple_authorization_code` (from re-authenticating with Apple just before deleting) and all
+   four `APPLE_*` secrets are set, the function signs an ES256 `client_secret` (5 minute lifetime),
+   exchanges the code at `https://appleid.apple.com/auth/token` and revokes the refresh token at
+   `https://appleid.apple.com/auth/revoke`. Any Apple failure is logged and reported as
+   `apple_revoked: false`; it never blocks deletion. `APPLE_CLIENT_ID` must be the client the code
+   was issued to (the iOS bundle ID for native sign-in).
+4. `auth.admin.deleteUser(user.id)` hard-deletes the auth user.
+
+| Status | Body                                                    | When                                                                                                    |
+| ------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| 200    | `{ "deleted": true, "apple_revoked": <bool> }`          | Deleted, or already deleted (token for a user that no longer exists, or `deleteUser` 404)               |
+| 400    | `{ "error": { "code": "invalid_request", ... } }`       | Body is not a JSON object or the Apple code is malformed (nothing was changed)                          |
+| 401    | `{ "error": { "code": "unauthorized", ... } }`          | Missing, invalid or expired JWT (nothing was changed)                                                   |
+| 405    | `{ "error": { "code": "method_not_allowed", ... } }`    | Not `POST`                                                                                              |
+| 413    | `{ "error": { "code": "too_long", ... } }`              | Body over 8 KiB                                                                                         |
+| 500    | `{ "error": { "code": "deletion_failed", "message" } }` | Any failure before the auth user was deleted (auth outage, missing config, RPC or `deleteUser` failure) |
+
+On 500 the app must keep the user signed in and offer a retry; it must not behave as if the
+account were gone. Retrying is safe. Only a 200 means the account is deleted, after which the app
+signs out locally and clears its caches.
