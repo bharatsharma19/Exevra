@@ -100,3 +100,50 @@ Error responses always look like `{ "error": { "code": "<ErrorCode>", "message":
 401, `consent_required` 403, `forbidden` 403, `not_found` 404, `method_not_allowed` 405,
 `conflict` 409, `too_long` 413, `quota_exceeded` 429, `rate_limited` 429, `internal` 500,
 `unavailable` 503.
+
+## `send-invite` contract
+
+`POST /functions/v1/send-invite` with `Authorization: Bearer <user JWT>` and a JSON body:
+
+```json
+{ "group_id": "<uuid>", "email": "friend@example.com", "role": "member" }
+```
+
+- `email` is trimmed and lower-cased; it must match the database's format rule and be at most
+  254 characters. `role` is `member` (default) or `viewer`; admin is only reached by transfer.
+- The caller-scoped client runs `create_group_invitation(p_group_id, p_email, p_role)`, which
+  enforces the admin check, the rate limits (20 per inviter per hour, 5 per recipient per day)
+  and creates the 256-bit token. The function never uses the service role.
+- The link is always `${APP_BASE_URL}/invite/<token>`. `APP_BASE_URL` comes only from the
+  environment; nothing in the request (body, `Host`, `Origin`, forwarded headers) affects it.
+- Group name and inviter display name are read as the caller (RLS). Every value in the HTML
+  email is escaped; names are flattened to one line of at most 60 characters. Subject:
+  `<Inviter> invited you to <Group> on Exevra`.
+- Email goes through Resend (`POST https://api.resend.com/emails`) with
+  `Idempotency-Key: <invitation_id>` and a 10 s timeout.
+
+Responses (200 means the invitation exists):
+
+| Case                                            | Body                                                                                              |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Resend answered 2xx                             | `{ "invitation_id", "sent": true, "expires_at" }`                                                 |
+| `RESEND_API_KEY` or `INVITE_FROM_EMAIL` not set | `{ "invitation_id", "sent": false, "expires_at", "reason": "email_not_configured", "share_url" }` |
+| Resend non-2xx, timeout or network error        | `{ "invitation_id", "sent": false, "expires_at", "reason": "email_failed", "share_url" }`         |
+
+When `sent` is `false` the app should offer to share `share_url` manually. It must never say the
+email was sent.
+
+Errors (standard error body; `reason` is the database key when there is one):
+
+| Status | `code`               | `reason`                                | When                                                         |
+| ------ | -------------------- | --------------------------------------- | ------------------------------------------------------------ |
+| 400    | `invalid_request`    | `invalid_email`, `invalid_role` or none | Bad JSON, group id, email or role                            |
+| 401    | `unauthorized`       |                                         | Missing, invalid or expired JWT                              |
+| 403    | `forbidden`          | `not_group_admin`                       | Caller is not the group's admin                              |
+| 404    | `not_found`          | `group_not_found`                       | Group does not exist                                         |
+| 405    | `method_not_allowed` |                                         | Not `POST`                                                   |
+| 409    | `conflict`           | `already_member`                        | The address already belongs to an approved member            |
+| 413    | `too_long`           |                                         | Body over 4 KiB                                              |
+| 429    | `rate_limited`       | `rate_limited`                          | Per-inviter or per-recipient limit reached                   |
+| 500    | `internal`           |                                         | Unexpected database error                                    |
+| 503    | `unavailable`        |                                         | `APP_BASE_URL` missing or invalid (no invitation is created) |
