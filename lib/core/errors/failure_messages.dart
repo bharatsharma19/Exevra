@@ -88,7 +88,11 @@ const Map<String, String> _byKey = {
   'amount_not_positive': 'The amount must be more than zero.',
   'amount_too_many_decimals': 'Too many decimal places for this currency.',
   'amount_too_large': 'That amount is too large.',
-  // Expenses
+  // Expenses and profile
+  'invalid_title': 'Titles must be 1 to 120 characters.',
+  'invalid_category': 'Choose a category from the list.',
+  'invalid_display_name': 'Names must be 1 to 60 characters.',
+  'invalid_avatar_url': 'Use an https:// image link.',
   'currency_mismatch': "Group expenses must use the group's currency.",
   'expense_group_immutable':
       "An expense can't be moved between personal and a group.",
