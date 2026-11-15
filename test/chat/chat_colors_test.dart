@@ -1,14 +1,16 @@
 import 'package:expense_manager/core/theme/app_theme.dart';
-import 'package:expense_manager/features/chat/chat_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-void main() {
-  final themes = {'light': AppTheme.lightTheme, 'dark': AppTheme.darkTheme};
+import '../design_system/contrast.dart';
 
-  for (final MapEntry(key: name, value: base) in themes.entries) {
+/// The assistant uses the app theme unchanged; every text role it draws
+/// reaches WCAG AA on the surface it sits on.
+void main() {
+  final themes = {'light': AppTheme.light(), 'dark': AppTheme.dark()};
+
+  for (final MapEntry(key: name, value: theme) in themes.entries) {
     test('$name: every chat text role reaches 4.5:1', () {
-      final theme = ChatTheme.of(base);
       final s = theme.colorScheme;
       final page = theme.scaffoldBackgroundColor;
       final fill = Color.alphaBlend(
@@ -30,18 +32,11 @@ void main() {
       };
       for (final MapEntry(key: label, value: (fg, bg)) in pairs.entries) {
         expect(
-          ChatTheme.contrast(fg, bg),
+          contrastRatio(fg, bg),
           greaterThanOrEqualTo(4.5),
-          reason: label,
+          reason: '$label: ${hex(fg)} on ${hex(bg)}',
         );
       }
     });
   }
-
-  test('the dark primary stays the brand cyan', () {
-    expect(
-      ChatTheme.of(AppTheme.darkTheme).colorScheme.primary,
-      AppTheme.darkTheme.colorScheme.primary,
-    );
-  });
 }

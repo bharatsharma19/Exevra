@@ -12,7 +12,6 @@ import '../../../providers/chat_provider.dart';
 import '../../../providers/profile_provider.dart';
 import '../../shared/failure_retry.dart';
 import '../chat_copy.dart';
-import '../chat_theme.dart';
 import '../widgets/consent_view.dart';
 import '../widgets/message_bubble.dart';
 
@@ -20,15 +19,10 @@ import '../widgets/message_bubble.dart';
 class ChatScreen extends StatelessWidget {
   const ChatScreen({super.key});
 
+  // The design-system theme defines every colour role the assistant uses
+  // at WCAG AA (see chat_colors_test), so the screen uses it unchanged.
   @override
-  Widget build(BuildContext context) {
-    // Everything below, dialogs and sheets included, uses colour roles that
-    // reach AA contrast.
-    return Theme(
-      data: ChatTheme.of(Theme.of(context)),
-      child: const _ChatView(),
-    );
-  }
+  Widget build(BuildContext context) => const _ChatView();
 }
 
 class _ChatView extends ConsumerStatefulWidget {
