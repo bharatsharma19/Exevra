@@ -8,48 +8,6 @@ class AppConstants {
   static const String appVersion = '1.0.0';
   static const String defaultCurrency = 'INR';
 
-  // Supabase Configuration Keys (can be overridden via --dart-define or environment)
-  static const String defaultSupabaseUrl = String.fromEnvironment(
-    'SUPABASE_URL',
-    defaultValue: 'https://xyzcompany.supabase.co',
-  );
-
-  static const String defaultSupabaseAnonKey = String.fromEnvironment(
-    'SUPABASE_ANON_KEY',
-    defaultValue: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.demoKey',
-  );
-
-  // AI Inference Endpoints & Models
-  static const String geminiModel = String.fromEnvironment(
-    'GEMINI_MODEL',
-    defaultValue: 'gemini-2.5-flash',
-  );
-  static const String geminiEndpoint =
-      'https://generativelanguage.googleapis.com/v1beta/models';
-  static const String openAiModel = String.fromEnvironment(
-    'OPENAI_MODEL',
-    defaultValue: 'gpt-4o-mini',
-  );
-  static const String openAiEndpoint =
-      'https://api.openai.com/v1/chat/completions';
-  static const String claudeModel = String.fromEnvironment(
-    'CLAUDE_MODEL',
-    defaultValue: 'claude-3-5-haiku-20241022',
-  );
-  static const String claudeEndpoint = 'https://api.anthropic.com/v1/messages';
-  static const String deepseekModel = String.fromEnvironment(
-    'DEEPSEEK_MODEL',
-    defaultValue: 'deepseek-chat',
-  );
-  static const String deepseekEndpoint =
-      'https://api.deepseek.com/v1/chat/completions';
-
-  // Secure Storage Keys for AI Credentials
-  static const String keyGeminiApiKey = 'secure_gemini_api_key';
-  static const String keyOpenAiApiKey = 'secure_openai_api_key';
-  static const String keyClaudeApiKey = 'secure_claude_api_key';
-  static const String keyDeepseekApiKey = 'secure_deepseek_api_key';
-
   // Supported Currencies (Default: INR for Indian Launch)
   static const Map<String, String> currencies = {
     'INR': '₹',

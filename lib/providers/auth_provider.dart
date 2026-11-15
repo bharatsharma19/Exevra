@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,8 +6,10 @@ import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 import '../models/user_profile.dart';
 import '../services/auth_service.dart';
 import '../services/supabase_service.dart';
+import '../core/config/demo_mode.dart';
 import '../core/constants/app_constants.dart';
 import '../core/utils/haptics.dart';
+import '../core/logging/app_logger.dart';
 
 enum AuthStatus { initial, loading, authenticated, unauthenticated, error }
 
@@ -89,7 +90,7 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
       cachedHaptics = prefs.getBool(AppConstants.keyHapticsEnabled) ?? true;
       cachedAiConsent = prefs.getBool(AppConstants.keyAiConsent) ?? false;
     } catch (e) {
-      debugPrint('[AuthNotifier] Failed to load preferences: $e');
+      AppLogger.warn('AuthNotifier: Failed to load preferences', e);
     }
 
     AppHaptics.isEnabled = cachedHaptics;
@@ -179,11 +180,8 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
         AppHaptics.success();
       }
     } catch (e) {
-      final isDemoUrl = _supabaseService.isDemoMode;
-      if (isDemoUrl &&
-          (e.toString().contains('Invalid login credentials') ||
-              e.toString().contains('Failed host lookup'))) {
-        _enterDemoSession(email);
+      if (kDemoMode) {
+        _signInOfflineDemo(email);
         return;
       }
       state = state.copyWith(
@@ -236,13 +234,8 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
         AppHaptics.success();
       }
     } catch (e) {
-      final isDemoUrl = _supabaseService.isDemoMode;
-      if (isDemoUrl &&
-          (e.toString().contains('Failed host lookup') ||
-              e.toString().contains('Network') ||
-              e.toString().contains('Invalid API key') ||
-              e.toString().contains('ClientException'))) {
-        _enterDemoSession(email, displayName: displayName, isVerified: false);
+      if (kDemoMode) {
+        _signInOfflineDemo(email, displayName: displayName, isVerified: false);
         return;
       }
       state = state.copyWith(
@@ -291,9 +284,9 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
         AppHaptics.success();
       }
     } catch (e) {
-      if (_supabaseService.isDemoMode && token == '123456') {
-        _enterDemoSession(
-          'phone-user@antigravity.io',
+      if (kDemoMode && token == '123456') {
+        _signInOfflineDemo(
+          'phone-user@demo.invalid',
           displayName: 'Phone User',
           phone: phone,
         );
@@ -332,11 +325,10 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
       state = state.copyWith(isLoading: false, errorMessage: e.toString());
       AppHaptics.error();
     } catch (e) {
-      debugPrint('[AuthNotifier] Google sign-in error: $e');
-      final isDemoUrl = _supabaseService.isDemoMode;
-      if (isDemoUrl) {
-        _enterDemoSession(
-          'google.user@antigravity.io',
+      AppLogger.warn('AuthNotifier: Google sign-in error', e);
+      if (kDemoMode) {
+        _signInOfflineDemo(
+          'google.user@demo.invalid',
           displayName: 'Google User',
         );
         return;
@@ -367,11 +359,10 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
         AppHaptics.success();
       }
     } catch (e) {
-      debugPrint('[AuthNotifier] Apple sign-in error: $e');
-      final isDemoUrl = _supabaseService.isDemoMode;
-      if (isDemoUrl) {
-        _enterDemoSession(
-          'apple.user@antigravity.io',
+      AppLogger.warn('AuthNotifier: Apple sign-in error', e);
+      if (kDemoMode) {
+        _signInOfflineDemo(
+          'apple.user@demo.invalid',
           displayName: 'Apple User',
         );
         return;
@@ -526,19 +517,10 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
         }
       }
     } catch (e) {
-      debugPrint('[AuthNotifier] refreshSession fallback: $e');
-      // In offline / demo sandbox: activate email verification on explicit refresh
-      if (_supabaseService.isDemoMode && state.user != null) {
-        final verifiedUser = supabase.User(
-          id: state.user!.id,
-          appMetadata: state.user!.appMetadata,
-          userMetadata: state.user!.userMetadata,
-          aud: state.user!.aud,
-          createdAt: state.user!.createdAt,
-          email: state.user!.email,
-          phone: state.user!.phone,
-          emailConfirmedAt: DateTime.now().toIso8601String(),
-        );
+      AppLogger.warn('AuthNotifier: refreshSession fallback', e);
+      // Offline demo only: treat an explicit refresh as verification.
+      if (kDemoMode && state.user != null) {
+        final verifiedUser = DemoSession.markVerified(state.user!);
         state = state.copyWith(user: verifiedUser, isLoading: false);
         AppHaptics.success();
         return true;
@@ -548,38 +530,23 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
     return state.isEmailVerified;
   }
 
-  void _enterDemoSession(
+  /// Offline demo only (see `demo_mode.dart`); compiled out of release.
+  void _signInOfflineDemo(
     String email, {
     String? displayName,
     String? phone,
     bool isVerified = true,
   }) {
-    final stubProfile = UserProfile(
-      id: 'demo-user-id',
-      displayName: displayName ?? email.split('@').first,
+    final demo = DemoSession.create(
       email: email,
+      displayName: displayName,
       phone: phone,
-      groupId: 'grp-demo',
-      currency: AppConstants.defaultCurrency,
-      themeMode: 'system',
-      hapticsEnabled: true,
-      aiConsent: true,
-      createdAt: DateTime.now().subtract(const Duration(days: 30)),
-      updatedAt: DateTime.now(),
+      isVerified: isVerified,
     );
     state = state.copyWith(
       status: AuthStatus.authenticated,
-      user: supabase.User(
-        id: 'demo-user-id',
-        appMetadata: const {},
-        userMetadata: const {},
-        aud: 'authenticated',
-        createdAt: DateTime.now().toIso8601String(),
-        email: email,
-        phone: phone,
-        emailConfirmedAt: isVerified ? DateTime.now().toIso8601String() : null,
-      ),
-      profile: stubProfile,
+      user: demo.user,
+      profile: demo.profile,
       isLoading: false,
       errorMessage: null,
     );

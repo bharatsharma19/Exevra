@@ -7,6 +7,8 @@ import '../models/group_model.dart';
 import '../services/supabase_service.dart';
 import '../core/utils/haptics.dart';
 import 'auth_provider.dart';
+import '../core/config/demo_mode.dart';
+import '../core/logging/app_logger.dart';
 
 enum ExpenseTypeFilter { all, personal, group }
 
@@ -366,7 +368,7 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       state = state.copyWith(errorMessage: null);
       AppHaptics.light();
       final auth = _ref.read(authNotifierProvider);
-      final userId = auth.user?.id ?? 'demo-user-id';
+      final userId = auth.user?.id ?? kDemoUserId;
       final groupId = isGroup
           ? (state.currentGroup?.id ?? auth.profile?.groupId)
           : null;
@@ -417,10 +419,10 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       state = state.copyWith(errorMessage: null);
       AppHaptics.light();
       final auth = _ref.read(authNotifierProvider);
-      final currentUserId = auth.user?.id ?? 'demo-user-id';
+      final currentUserId = auth.user?.id ?? kDemoUserId;
 
       if (!updatedExpense.canEdit(currentUserId) &&
-          currentUserId != 'demo-user-id') {
+          !isDemoUser(currentUserId)) {
         throw Exception(
           'Permission denied: You can only edit expenses you created.',
         );
@@ -460,11 +462,11 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       state = state.copyWith(errorMessage: null);
       final expense = state.expenses.firstWhere((e) => e.id == expenseId);
       final auth = _ref.read(authNotifierProvider);
-      final currentUserId = auth.user?.id ?? 'demo-user-id';
+      final currentUserId = auth.user?.id ?? kDemoUserId;
       final isGroupAdmin = state.currentGroup?.isAdmin(currentUserId) ?? true;
 
       if (!expense.canDelete(currentUserId, isGroupAdmin) &&
-          currentUserId != 'demo-user-id') {
+          !isDemoUser(currentUserId)) {
         throw Exception(
           expense.isPersonal
               ? 'Permission denied: Only the creator can delete personal expenses.'
@@ -577,18 +579,20 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
     }
   }
 
-  Future<bool> inviteMemberByEmail({
+  /// Creates a group invitation for [email].
+  ///
+  /// No email is sent from the app: the caller shares the invitation link.
+  /// Returns the invitation, or null when it could not be created.
+  Future<GroupInvitation?> createInvitation({
     required String email,
     String role = 'member',
   }) async {
     final group = state.currentGroup;
-    if (group == null) return false;
+    if (group == null) return null;
 
     try {
       state = state.copyWith(errorMessage: null);
       AppHaptics.light();
-      final auth = _ref.read(authNotifierProvider);
-      final inviterName = auth.profile?.displayName ?? 'A group member';
 
       final invite = await _service.createGroupInvitation(
         groupId: group.id,
@@ -597,24 +601,22 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       );
 
       if (invite != null) {
-        await _service.sendGroupInviteEmail(
-          invitation: invite,
-          inviteCode: group.inviteCode,
-          inviterName: inviterName,
-        );
         final currentInvites = [
           invite,
           ...state.pendingInvitations.where((i) => i.id != invite.id),
         ];
         state = state.copyWith(pendingInvitations: currentInvites);
         AppHaptics.success();
-        return true;
+        return invite;
       }
-      return false;
-    } catch (e) {
-      state = state.copyWith(errorMessage: 'Failed to send invite: $e');
+      state = state.copyWith(errorMessage: 'Could not create the invitation.');
       AppHaptics.error();
-      return false;
+      return null;
+    } catch (e) {
+      AppLogger.warn('ExpenseNotifier: createInvitation failed', e);
+      state = state.copyWith(errorMessage: 'Could not create the invitation.');
+      AppHaptics.error();
+      return null;
     }
   }
 

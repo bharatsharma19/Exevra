@@ -1,0 +1,136 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:expense_manager/core/config/app_config.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+/// Guards against secrets, server-only integrations and demo shortcuts
+/// creeping back into the client. Reads the sources from disk.
+void main() {
+  final libFiles =
+      Directory('lib')
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.dart'))
+          .toList()
+        ..sort((a, b) => a.path.compareTo(b.path));
+  final sources = {
+    for (final file in libFiles)
+      file.path.replaceAll(r'\', '/'): file.readAsStringSync(),
+  };
+  final pubspec = File('pubspec.yaml').readAsStringSync();
+
+  List<String> filesContaining(Pattern pattern) => [
+    for (final entry in sources.entries)
+      if (entry.value.contains(pattern)) entry.key,
+  ];
+
+  test('lib/ sources were found', () {
+    expect(sources, isNotEmpty);
+  });
+
+  group('pubspec.yaml', () {
+    test('does not depend on flutter_dotenv or mailer', () {
+      expect(pubspec, isNot(contains('flutter_dotenv')));
+      expect(pubspec, isNot(contains('mailer')));
+    });
+
+    test('does not bundle a .env asset', () {
+      expect(
+        RegExp(r'^\s*-\s*\.env\b', multiLine: true).hasMatch(pubspec),
+        isFalse,
+      );
+    });
+  });
+
+  group('lib/', () {
+    for (final marker in [
+      'flutter_dotenv',
+      'mailer',
+      'sk-ant',
+      'AIza',
+      'deepseek',
+      'openai',
+      'anthropic',
+      'gemini',
+      'smtp',
+    ]) {
+      test('contains no "$marker" (case-insensitive)', () {
+        expect(
+          filesContaining(RegExp(RegExp.escape(marker), caseSensitive: false)),
+          isEmpty,
+        );
+      });
+    }
+
+    test('has no private key material', () {
+      expect(filesContaining('PRIVATE KEY'), isEmpty);
+      expect(filesContaining('service_role'), isEmpty);
+    });
+
+    test('has no legacy demo shortcuts', () {
+      expect(filesContaining('isDemoMode'), isEmpty);
+      expect(filesContaining('_enterDemoSession'), isEmpty);
+      // The validator lists it as a placeholder marker to reject.
+      expect(filesContaining('xyzcompany'), [
+        'lib/core/config/app_config.dart',
+      ]);
+    });
+
+    test('reads build configuration only in app_config and demo_mode', () {
+      expect(filesContaining('String.fromEnvironment'), [
+        'lib/core/config/app_config.dart',
+      ]);
+      expect(filesContaining('bool.fromEnvironment'), [
+        'lib/core/config/demo_mode.dart',
+      ]);
+    });
+
+    test('demo mode is defined once and compiled out of release builds', () {
+      expect(filesContaining(RegExp(r'const bool kDemoMode\b')), [
+        'lib/core/config/demo_mode.dart',
+      ]);
+      expect(
+        sources['lib/core/config/demo_mode.dart'],
+        contains(
+          "const bool kDemoMode = !kReleaseMode && bool.fromEnvironment('DEMO');",
+        ),
+      );
+    });
+
+    test('demo sessions are only built behind a kDemoMode guard', () {
+      for (final path in filesContaining('DemoSession.')) {
+        expect(sources[path], contains('kDemoMode'), reason: path);
+      }
+    });
+
+    test('does not write directly to the console', () {
+      final offenders = [
+        for (final entry in sources.entries)
+          if (entry.key != 'lib/core/logging/app_logger.dart' &&
+              RegExp(r'\b(debugPrint|print)\(').hasMatch(entry.value))
+            entry.key,
+      ];
+      expect(offenders, isEmpty);
+    });
+  });
+
+  group('config/', () {
+    test('the example config only holds placeholders', () {
+      final example =
+          jsonDecode(File('config/dev.example.json').readAsStringSync())
+              as Map<String, Object?>;
+      final problems = AppConfig.validate(
+        supabaseUrl: example['SUPABASE_URL']! as String,
+        supabaseAnonKey: example['SUPABASE_ANON_KEY']! as String,
+        appLinkHost: example['APP_LINK_HOST']! as String,
+        isRelease: true,
+      );
+      expect(problems, hasLength(2));
+    });
+
+    test('the legacy .env example is gone', () {
+      expect(File('.env.example').existsSync(), isFalse);
+    });
+  });
+}

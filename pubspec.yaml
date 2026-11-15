@@ -49,8 +49,6 @@ dependencies:
   uuid: ^4.6.0
   flutter_markdown_plus: ^1.0.12
   local_auth: ^3.0.2
-  flutter_dotenv: ^5.2.1
-  mailer: ^7.2.0
 
 dev_dependencies:
   flutter_test:
@@ -80,8 +78,6 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  assets:
-    - assets/icons/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

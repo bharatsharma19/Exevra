@@ -1,13 +1,12 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../core/config/demo_mode.dart';
 import '../core/constants/app_constants.dart';
+import '../core/logging/app_logger.dart';
 import '../models/user_profile.dart';
 import '../models/group_model.dart';
 import '../models/expense_model.dart';
 import '../models/insight_model.dart';
-import 'email_service.dart';
 
 /// Supabase Client Wrapper and Enterprise Data Access Layer
 class SupabaseService {
@@ -19,13 +18,6 @@ class SupabaseService {
   SupabaseClient get client => Supabase.instance.client;
   User? get currentUser => client.auth.currentUser;
   bool get isAuthenticated => currentUser != null;
-
-  bool get isDemoMode {
-    final url =
-        (dotenv.isInitialized ? dotenv.env['SUPABASE_URL'] : null) ??
-        AppConstants.defaultSupabaseUrl;
-    return url.contains('xyzcompany');
-  }
 
   // In-memory demo fallback store when running without live Supabase credentials
   final List<Expense> _localExpenses = [];
@@ -53,7 +45,7 @@ class SupabaseService {
         return _localProfile;
       }
     } catch (e) {
-      debugPrint('[SupabaseService] fetchProfile fallback: $e');
+      AppLogger.warn('SupabaseService: fetchProfile fallback', e);
     }
 
     if (_localProfile != null && _localProfile!.id == userId) {
@@ -69,7 +61,7 @@ class SupabaseService {
     final stub = UserProfile(
       id: userId,
       displayName: resolvedDisplayName,
-      email: currentUser?.email ?? 'user@antigravity.io',
+      email: currentUser?.email ?? '',
       phone: currentUser?.phone,
       currency: AppConstants.defaultCurrency,
       themeMode: 'system',
@@ -92,7 +84,7 @@ class SupabaseService {
       _localProfile = profile;
       return profile;
     } catch (e) {
-      debugPrint('[SupabaseService] updateProfile fallback: $e');
+      AppLogger.warn('SupabaseService: updateProfile fallback', e);
       _localProfile = profile;
       return profile;
     }
@@ -103,7 +95,7 @@ class SupabaseService {
   // ---------------------------------------------------------------------------
 
   Future<List<ExpenseGroup>> fetchUserGroups() async {
-    final userId = currentUser?.id ?? 'demo-user-id';
+    final userId = currentUser?.id ?? kDemoUserId;
     try {
       final res = await client.rpc<dynamic>('get_user_groups');
       if (res is List) {
@@ -118,7 +110,7 @@ class SupabaseService {
         return groups;
       }
     } catch (e) {
-      debugPrint('[SupabaseService] fetchUserGroups RPC fallback: $e');
+      AppLogger.warn('SupabaseService: fetchUserGroups RPC fallback', e);
       try {
         final res = await client
             .from('group_members')
@@ -142,7 +134,7 @@ class SupabaseService {
           return groups;
         }
       } catch (e2) {
-        debugPrint('[SupabaseService] fetchUserGroups table fallback: $e2');
+        AppLogger.warn('SupabaseService: fetchUserGroups table fallback', e2);
       }
     }
 
@@ -152,14 +144,14 @@ class SupabaseService {
   }
 
   Future<void> switchActiveGroup(String? groupId) async {
-    final userId = currentUser?.id ?? 'demo-user-id';
+    final userId = currentUser?.id ?? kDemoUserId;
     try {
       await client
           .from('profiles')
           .update({'group_id': groupId})
           .eq('id', userId);
     } catch (e) {
-      debugPrint('[SupabaseService] switchActiveGroup fallback: $e');
+      AppLogger.warn('SupabaseService: switchActiveGroup fallback', e);
     }
     if (_localProfile != null) {
       _localProfile = _localProfile!.copyWith(groupId: groupId);
@@ -195,14 +187,14 @@ class SupabaseService {
         return grp;
       }
     } catch (e) {
-      debugPrint('[SupabaseService] fetchGroup fallback: $e');
+      AppLogger.warn('SupabaseService: fetchGroup fallback', e);
     }
     return _localGroups.where((g) => g.id == groupId).firstOrNull ??
         _localGroup;
   }
 
   Future<ExpenseGroup> createGroup(String name) async {
-    final userId = currentUser?.id ?? 'demo-user-id';
+    final userId = currentUser?.id ?? kDemoUserId;
     final now = DateTime.now();
     final newGroup = ExpenseGroup(
       id: 'grp-${now.millisecondsSinceEpoch}',
@@ -242,7 +234,7 @@ class SupabaseService {
       }
       return created;
     } catch (e) {
-      debugPrint('[SupabaseService] createGroup fallback: $e');
+      AppLogger.warn('SupabaseService: createGroup fallback', e);
       if (!_localGroups.any((g) => g.id == newGroup.id)) {
         _localGroups.add(newGroup);
       }
@@ -273,7 +265,7 @@ class SupabaseService {
         }
       }
     } catch (e) {
-      debugPrint('[SupabaseService] joinGroupByInvite fallback: $e');
+      AppLogger.warn('SupabaseService: joinGroupByInvite fallback', e);
     }
 
     final target =
@@ -287,7 +279,7 @@ class SupabaseService {
 
     if (target != null &&
         target.inviteCode.toLowerCase() == inviteCode.trim().toLowerCase()) {
-      final userId = currentUser?.id ?? 'demo-user-id';
+      final userId = currentUser?.id ?? kDemoUserId;
       if (_localProfile != null) {
         _localProfile = _localProfile!.copyWith(groupId: target.id);
       }
@@ -330,7 +322,7 @@ class SupabaseService {
       }
       return true;
     } catch (e) {
-      debugPrint('[SupabaseService] approveGroupMember: $e');
+      AppLogger.warn('SupabaseService: approveGroupMember', e);
       final idx = _localMembers.indexWhere(
         (m) => m.groupId == groupId && m.userId == memberUserId,
       );
@@ -353,7 +345,7 @@ class SupabaseService {
       );
       return true;
     } catch (e) {
-      debugPrint('[SupabaseService] removeGroupMember: $e');
+      AppLogger.warn('SupabaseService: removeGroupMember', e);
       return false;
     }
   }
@@ -367,11 +359,11 @@ class SupabaseService {
 
       return res.map(GroupMember.fromJson).toList();
     } catch (e) {
-      debugPrint('[SupabaseService] fetchGroupMembers fallback: $e');
+      AppLogger.warn('SupabaseService: fetchGroupMembers fallback', e);
     }
 
     if (_localMembers.isEmpty) {
-      final userId = currentUser?.id ?? 'demo-user-id';
+      final userId = currentUser?.id ?? kDemoUserId;
       _localMembers.add(
         GroupMember(
           id: 'mem-1',
@@ -389,7 +381,7 @@ class SupabaseService {
   }
 
   Future<String?> leaveGroup(String groupId) async {
-    final userId = currentUser?.id ?? 'demo-user-id';
+    final userId = currentUser?.id ?? kDemoUserId;
     String? nextGroupId;
     try {
       await client.from('group_members').delete().match({
@@ -416,7 +408,7 @@ class SupabaseService {
             .eq('id', userId);
       }
     } catch (e) {
-      debugPrint('[SupabaseService] leaveGroup fallback: $e');
+      AppLogger.warn('SupabaseService: leaveGroup fallback', e);
     }
 
     _localGroups.removeWhere((g) => g.id == groupId);
@@ -430,7 +422,7 @@ class SupabaseService {
   }
 
   Future<String?> deleteGroup(String groupId) async {
-    final userId = currentUser?.id ?? 'demo-user-id';
+    final userId = currentUser?.id ?? kDemoUserId;
     String? nextGroupId;
     try {
       await client.from('groups').delete().eq('id', groupId);
@@ -454,7 +446,7 @@ class SupabaseService {
             .eq('id', userId);
       }
     } catch (e) {
-      debugPrint('[SupabaseService] deleteGroup fallback: $e');
+      AppLogger.warn('SupabaseService: deleteGroup fallback', e);
     }
 
     _localGroups.removeWhere((g) => g.id == groupId);
@@ -476,7 +468,7 @@ class SupabaseService {
     required String email,
     String role = 'member',
   }) async {
-    final userId = currentUser?.id ?? 'demo-user-id';
+    final userId = currentUser?.id ?? kDemoUserId;
     try {
       final raw = await client.rpc<dynamic>(
         'create_group_invitation',
@@ -513,10 +505,12 @@ class SupabaseService {
         return inv;
       }
     } catch (e) {
-      debugPrint('[SupabaseService] createGroupInvitation RPC fallback: $e');
+      AppLogger.warn('SupabaseService: createGroupInvitation RPC fallback', e);
     }
 
-    // Demo/Offline Fallback
+    // Offline demo only: a locally generated token is not a real invitation,
+    // so outside demo mode a failed request reports failure.
+    if (!kDemoMode) return null;
     final now = DateTime.now();
     final group =
         _localGroups.where((g) => g.id == groupId).firstOrNull ?? _localGroup;
@@ -541,20 +535,6 @@ class SupabaseService {
     return inv;
   }
 
-  Future<bool> sendGroupInviteEmail({
-    required GroupInvitation invitation,
-    String? inviteCode,
-    String? inviterName,
-  }) async {
-    return EmailService.instance.sendGroupInvitation(
-      toEmail: invitation.email,
-      groupName: invitation.groupName ?? 'Shared Household Group',
-      inviterName: inviterName ?? invitation.inviterName ?? 'A member',
-      token: invitation.token,
-      inviteCode: inviteCode,
-    );
-  }
-
   Future<List<GroupInvitation>> fetchGroupInvitations(String groupId) async {
     try {
       final res = await client
@@ -576,7 +556,7 @@ class SupabaseService {
         return GroupInvitation.fromJson(map);
       }).toList();
     } catch (e) {
-      debugPrint('[SupabaseService] fetchGroupInvitations fallback: $e');
+      AppLogger.warn('SupabaseService: fetchGroupInvitations fallback', e);
     }
 
     return _localInvitations.where((i) => i.groupId == groupId).toList();
@@ -589,7 +569,7 @@ class SupabaseService {
           .update({'status': 'revoked'})
           .eq('id', invitationId);
     } catch (e) {
-      debugPrint('[SupabaseService] revokeGroupInvitation fallback: $e');
+      AppLogger.warn('SupabaseService: revokeGroupInvitation fallback', e);
     }
 
     final idx = _localInvitations.indexWhere((i) => i.id == invitationId);
@@ -624,7 +604,7 @@ class SupabaseService {
         return Map<String, dynamic>.from(res);
       }
     } catch (e) {
-      debugPrint('[SupabaseService] getInvitationDetails fallback: $e');
+      AppLogger.warn('SupabaseService: getInvitationDetails fallback', e);
     }
 
     final local = _localInvitations
@@ -668,7 +648,7 @@ class SupabaseService {
         }
       }
     } catch (e) {
-      debugPrint('[SupabaseService] acceptGroupInvitation fallback: $e');
+      AppLogger.warn('SupabaseService: acceptGroupInvitation fallback', e);
     }
 
     final local = _localInvitations
@@ -683,7 +663,7 @@ class SupabaseService {
         throw Exception('This invitation has been revoked');
       }
 
-      final userId = currentUser?.id ?? 'demo-user-id';
+      final userId = currentUser?.id ?? kDemoUserId;
       final grp =
           _localGroups.where((g) => g.id == local.groupId).firstOrNull ??
           _localGroup;
@@ -728,7 +708,7 @@ class SupabaseService {
     required double amount,
     String? notes,
   }) async {
-    final userId = currentUser?.id ?? 'demo-user-id';
+    final userId = currentUser?.id ?? kDemoUserId;
     try {
       final raw = await client.rpc<dynamic>(
         'record_settlement',
@@ -763,7 +743,7 @@ class SupabaseService {
         return settlement;
       }
     } catch (e) {
-      debugPrint('[SupabaseService] recordSettlement RPC fallback: $e');
+      AppLogger.warn('SupabaseService: recordSettlement RPC fallback', e);
     }
 
     final settlement = Settlement(
@@ -810,7 +790,7 @@ class SupabaseService {
         return Settlement.fromJson(map);
       }).toList();
     } catch (e) {
-      debugPrint('[SupabaseService] fetchSettlements fallback: $e');
+      AppLogger.warn('SupabaseService: fetchSettlements fallback', e);
     }
 
     return _localSettlements.where((s) => s.groupId == groupId).toList();
@@ -827,7 +807,7 @@ class SupabaseService {
     DateTime? startDate,
     DateTime? endDate,
   }) async {
-    final currentUid = currentUser?.id ?? 'demo-user-id';
+    final currentUid = currentUser?.id ?? kDemoUserId;
     try {
       var query = client.from('expenses').select('*, profiles(display_name)');
 
@@ -855,11 +835,11 @@ class SupabaseService {
       final expenses = response.map(Expense.fromJson).toList();
       return expenses;
     } catch (e) {
-      debugPrint('[SupabaseService] fetchExpenses fallback: $e');
+      AppLogger.warn('SupabaseService: fetchExpenses fallback', e);
     }
 
     // Seed mock local expenses ONLY when running in dummy demo mode (not live Supabase)
-    if (isDemoMode && _localExpenses.isEmpty) {
+    if (kDemoMode && _localExpenses.isEmpty) {
       _seedMockExpenses();
     }
 
@@ -870,7 +850,7 @@ class SupabaseService {
       }
       if (exp.isPersonal &&
           exp.userId != currentUid &&
-          currentUid != 'demo-user-id') {
+          !isDemoUser(currentUid)) {
         return false;
       }
       if (category != null &&
@@ -886,7 +866,7 @@ class SupabaseService {
   }
 
   Future<Expense> createExpense(Expense expense) async {
-    final userId = currentUser?.id ?? 'demo-user-id';
+    final userId = currentUser?.id ?? kDemoUserId;
     try {
       final res = await client
           .from('expenses')
@@ -907,7 +887,7 @@ class SupabaseService {
       _localExpenses.insert(0, created);
       return created;
     } catch (e) {
-      debugPrint('[SupabaseService] createExpense fallback: $e');
+      AppLogger.warn('SupabaseService: createExpense fallback', e);
       _localExpenses.insert(0, expense);
       return expense;
     }
@@ -935,7 +915,7 @@ class SupabaseService {
       if (idx != -1) _localExpenses[idx] = updated;
       return updated;
     } catch (e) {
-      debugPrint('[SupabaseService] updateExpense fallback: $e');
+      AppLogger.warn('SupabaseService: updateExpense fallback', e);
       final idx = _localExpenses.indexWhere((e) => e.id == expense.id);
       if (idx != -1) _localExpenses[idx] = expense;
       return expense;
@@ -946,7 +926,7 @@ class SupabaseService {
     try {
       await client.from('expenses').delete().eq('id', expenseId);
     } catch (e) {
-      debugPrint('[SupabaseService] deleteExpense fallback: $e');
+      AppLogger.warn('SupabaseService: deleteExpense fallback', e);
     }
     _localExpenses.removeWhere((e) => e.id == expenseId);
   }
@@ -979,7 +959,7 @@ class SupabaseService {
         }
       }
     } catch (e) {
-      debugPrint('[SupabaseService] getExpenseInsights RPC fallback: $e');
+      AppLogger.warn('SupabaseService: getExpenseInsights RPC fallback', e);
     }
 
     // High-performance client-side aggregation fallback
@@ -1072,7 +1052,7 @@ class SupabaseService {
       _localGroup = null;
       return true;
     } catch (e) {
-      debugPrint('[SupabaseService] deleteUserAccount fallback: $e');
+      AppLogger.warn('SupabaseService: deleteUserAccount fallback', e);
       _localExpenses.clear();
       _localProfile = null;
       _localGroup = null;
@@ -1082,7 +1062,7 @@ class SupabaseService {
 
   void _seedMockExpenses() {
     final now = DateTime.now();
-    final userId = currentUser?.id ?? 'demo-user-id';
+    final userId = currentUser?.id ?? kDemoUserId;
 
     _localExpenses.addAll([
       Expense(

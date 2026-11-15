@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'core/config/app_config.dart';
+import 'core/config/demo_mode.dart';
 import 'core/constants/app_constants.dart';
+import 'core/logging/app_logger.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/screens/app_lock_screen.dart';
+import 'features/startup/service_unavailable_app.dart';
 import 'providers/app_lock_provider.dart';
 import 'providers/auth_provider.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // 1. Enforce Portrait Orientation Lock
@@ -29,33 +32,32 @@ void main() async {
     ),
   );
 
-  // 3. Load Environment Configuration (.env with fallback to compile-time defines)
-  try {
-    await dotenv.load(fileName: '.env');
-  } catch (e) {
-    debugPrint(
-      '[main.dart] Dotenv load notice (using compile-time fallback): $e',
-    );
+  // 3. Validate the compile-time configuration. An invalid configuration
+  // stops here; only a non-release DEMO build may continue offline.
+  const config = AppConfig.environment;
+  final problems = config.problems;
+  final useDemoBackend = kDemoMode && problems.isNotEmpty;
+  if (problems.isNotEmpty && !useDemoBackend) {
+    AppLogger.error('Invalid build configuration: ${problems.join(' ')}');
+    runApp(ServiceUnavailableApp(problems: problems));
+    return;
   }
 
-  // 4. Initialize Supabase Backend Client (with resilient fallback for local offline execution)
-  final supabaseUrl =
-      (dotenv.isInitialized ? dotenv.env['SUPABASE_URL'] : null) ??
-      AppConstants.defaultSupabaseUrl;
-  final supabaseKey =
-      (dotenv.isInitialized ? dotenv.env['SUPABASE_ANON_KEY'] : null) ??
-      AppConstants.defaultSupabaseAnonKey;
-
+  // 4. Initialize the Supabase client (PKCE auth flow).
   try {
     await Supabase.initialize(
-      url: supabaseUrl,
-      publishableKey: supabaseKey,
+      url: useDemoBackend ? kDemoSupabaseUrl : config.supabaseUrl,
+      publishableKey: useDemoBackend
+          ? kDemoSupabaseAnonKey
+          : config.supabaseAnonKey,
       authOptions: const FlutterAuthClientOptions(
         authFlowType: AuthFlowType.pkce,
       ),
     );
-  } catch (e) {
-    debugPrint('[main.dart] Supabase initialization fallback notice: $e');
+  } catch (e, stackTrace) {
+    AppLogger.error('Supabase initialization failed', e, stackTrace);
+    runApp(const ServiceUnavailableApp());
+    return;
   }
 
   // 5. Launch Application with Riverpod State Container
@@ -63,20 +65,19 @@ void main() async {
     ProviderScope(
       // Failed providers surface their error instead of retrying silently.
       retry: (_, _) => null,
-      child: const AntigravityExpenseApp(),
+      child: const ExevraApp(),
     ),
   );
 }
 
-class AntigravityExpenseApp extends ConsumerStatefulWidget {
-  const AntigravityExpenseApp({super.key});
+class ExevraApp extends ConsumerStatefulWidget {
+  const ExevraApp({super.key});
 
   @override
-  ConsumerState<AntigravityExpenseApp> createState() =>
-      _AntigravityExpenseAppState();
+  ConsumerState<ExevraApp> createState() => _ExevraAppState();
 }
 
-class _AntigravityExpenseAppState extends ConsumerState<AntigravityExpenseApp>
+class _ExevraAppState extends ConsumerState<ExevraApp>
     with WidgetsBindingObserver {
   @override
   void initState() {

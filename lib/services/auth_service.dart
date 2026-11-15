@@ -1,8 +1,9 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../core/config/app_config.dart';
+import '../core/logging/app_logger.dart';
 
 /// Authentication Service handling Email/Password, Phone OTP, Google, and Apple Sign-Ins
 class AuthService {
@@ -39,7 +40,7 @@ class AuthService {
       );
       return response;
     } catch (e) {
-      debugPrint('[AuthService] signUpWithEmail error: $e');
+      AppLogger.warn('AuthService: signUpWithEmail error', e);
       rethrow;
     }
   }
@@ -55,7 +56,7 @@ class AuthService {
       );
       return response;
     } catch (e) {
-      debugPrint('[AuthService] signInWithEmail error: $e');
+      AppLogger.warn('AuthService: signInWithEmail error', e);
       rethrow;
     }
   }
@@ -68,7 +69,7 @@ class AuthService {
     try {
       await _client.auth.signInWithOtp(phone: phone.trim());
     } catch (e) {
-      debugPrint('[AuthService] sendPhoneOtp error: $e');
+      AppLogger.warn('AuthService: sendPhoneOtp error', e);
       rethrow;
     }
   }
@@ -85,7 +86,7 @@ class AuthService {
       );
       return response;
     } catch (e) {
-      debugPrint('[AuthService] verifyPhoneOtp error: $e');
+      AppLogger.warn('AuthService: verifyPhoneOtp error', e);
       rethrow;
     }
   }
@@ -94,23 +95,20 @@ class AuthService {
   // SOCIAL SIGN-INS: GOOGLE & APPLE
   // ---------------------------------------------------------------------------
 
-  static const String _googleWebClientId = String.fromEnvironment(
-    'GOOGLE_WEB_CLIENT_ID',
-  );
-  static const String _googleIosClientId = String.fromEnvironment(
-    'GOOGLE_IOS_CLIENT_ID',
-  );
   static const List<String> _googleScopes = ['email', 'profile'];
 
   Future<void>? _googleInit;
 
   /// Whether Google sign-in has the client configuration it needs.
-  bool get isGoogleSignInConfigured => _googleWebClientId.isNotEmpty;
+  bool get isGoogleSignInConfigured =>
+      AppConfig.environment.isGoogleSignInConfigured;
 
   Future<void> _ensureGoogleInitialized() {
     return _googleInit ??= GoogleSignIn.instance.initialize(
-      serverClientId: _googleWebClientId,
-      clientId: _googleIosClientId.isEmpty ? null : _googleIosClientId,
+      serverClientId: AppConfig.environment.googleWebClientId,
+      clientId: AppConfig.environment.googleIosClientId.isEmpty
+          ? null
+          : AppConfig.environment.googleIosClientId,
     );
   }
 
@@ -148,10 +146,10 @@ class AuthService {
       if (e.code == GoogleSignInExceptionCode.canceled) {
         return null;
       }
-      debugPrint('[AuthService] Google Sign-In: ${e.code}');
+      AppLogger.warn('AuthService: Google Sign-In', e.code);
       rethrow;
     } catch (e) {
-      debugPrint('[AuthService] Google Sign-In: $e');
+      AppLogger.warn('AuthService: Google Sign-In', e);
       rethrow;
     }
   }
@@ -175,7 +173,7 @@ class AuthService {
         idToken: idToken,
       );
     } catch (e) {
-      debugPrint('[AuthService] Apple Sign-In: $e');
+      AppLogger.warn('AuthService: Apple Sign-In', e);
       rethrow;
     }
   }
@@ -191,7 +189,7 @@ class AuthService {
         redirectTo: 'io.antigravity.expensemanager://reset-password',
       );
     } catch (e) {
-      debugPrint('[AuthService] sendPasswordResetEmail error: $e');
+      AppLogger.warn('AuthService: sendPasswordResetEmail error', e);
       rethrow;
     }
   }
@@ -202,7 +200,7 @@ class AuthService {
         UserAttributes(password: newPassword),
       );
     } catch (e) {
-      debugPrint('[AuthService] updatePassword error: $e');
+      AppLogger.warn('AuthService: updatePassword error', e);
       rethrow;
     }
   }
@@ -216,7 +214,7 @@ class AuthService {
       final response = await _client.auth.refreshSession();
       return response;
     } catch (e) {
-      debugPrint('[AuthService] refreshSession error: $e');
+      AppLogger.warn('AuthService: refreshSession error', e);
       rethrow;
     }
   }
@@ -225,7 +223,7 @@ class AuthService {
     try {
       await _client.auth.resend(type: OtpType.signup, email: email.trim());
     } catch (e) {
-      debugPrint('[AuthService] resendVerificationEmail error: $e');
+      AppLogger.warn('AuthService: resendVerificationEmail error', e);
       rethrow;
     }
   }
@@ -238,7 +236,7 @@ class AuthService {
     try {
       await _client.auth.signOut();
     } catch (e) {
-      debugPrint('[AuthService] signOut error: $e');
+      AppLogger.warn('AuthService: signOut error', e);
     }
   }
 }

@@ -1,11 +1,9 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
-import '../core/constants/app_constants.dart';
-import '../services/ai_chatbot_service.dart';
+import '../core/logging/app_logger.dart';
+import '../services/ai_chat_service.dart';
 import '../core/utils/haptics.dart';
-import 'auth_provider.dart';
-import 'expense_provider.dart';
 
 class ChatMessage {
   final String id;
@@ -74,24 +72,26 @@ class ChatState {
 }
 
 class ChatNotifier extends StateNotifier<ChatState> {
-  final AiChatbotService _aiService;
-  final Ref _ref;
+  final AiChatService _aiService;
 
-  ChatNotifier(this._aiService, this._ref) : super(const ChatState()) {
+  ChatNotifier(this._aiService) : super(const ChatState()) {
     _initWelcomeMessage();
   }
+
+  static const String assistantName = 'Exevra Assistant';
+  static const String genericFailureMessage =
+      'Something went wrong. Please try again.';
 
   void _initWelcomeMessage() {
     final welcome = ChatMessage(
       id: 'msg-welcome',
       text:
-          '👋 **Welcome to Antigravity AI Advisor**\n\n'
-          'I am your low-latency, privacy-first financial intelligence co-pilot. '
-          'I can analyze your category expenditures, suggest budget limits, simulate scenarios, and uncover spending leaks.\n\n'
-          'Tap any quick prompt below or ask me anything regarding your finances!',
+          '👋 **Welcome to the Exevra Assistant**\n\n'
+          'Ask about your spending, budgets or ways to save. '
+          'Tap a quick prompt below to get started.',
       isUser: false,
       timestamp: DateTime.now(),
-      modelUsed: 'Antigravity Intelligence Core',
+      modelUsed: assistantName,
       isStreaming: false,
     );
     state = state.copyWith(messages: [welcome]);
@@ -125,65 +125,37 @@ class ChatNotifier extends StateNotifier<ChatState> {
       errorMessage: null,
     );
 
+    String replyText;
+    String? failureMessage;
     try {
-      final auth = _ref.read(authNotifierProvider);
-      final expenseState = _ref.read(expenseProvider);
-      final aiConsent = auth.profile?.aiConsent ?? false;
-      final currency = auth.profile?.currency ?? AppConstants.defaultCurrency;
-
-      final stream = _aiService.generateResponseStream(
-        userPrompt: query,
-        aiConsent: aiConsent,
-        expenses: expenseState.expenses,
-        currencyCode: currency,
-      );
-
-      String accumulated = '';
-      String? modelUsed;
-
-      await for (final chunk in stream) {
-        accumulated += chunk.text;
-        if (chunk.modelUsed != null) {
-          modelUsed = chunk.modelUsed;
-        }
-
-        final updatedList = state.messages.map((m) {
-          if (m.id == assistantMsgId) {
-            return m.copyWith(
-              text: accumulated,
-              modelUsed: modelUsed,
-              isStreaming: !chunk.isComplete,
-            );
-          }
-          return m;
-        }).toList();
-
-        state = state.copyWith(
-          messages: updatedList,
-          activeModel: modelUsed,
-          isGenerating: !chunk.isComplete,
-        );
-      }
-
+      final reply = await _aiService.ask(query);
+      replyText = reply.text;
       AppHaptics.medium();
-    } catch (e) {
+    } on AiChatFailure catch (failure) {
+      replyText = failure.userMessage;
+      failureMessage = failure.userMessage;
+    } catch (e, stackTrace) {
+      AppLogger.error('Assistant request failed', e, stackTrace);
       AppHaptics.error();
-      final updatedList = state.messages.map((m) {
+      replyText = genericFailureMessage;
+      failureMessage = genericFailureMessage;
+    }
+
+    if (!mounted) return;
+    state = state.copyWith(
+      messages: state.messages.map((m) {
         if (m.id == assistantMsgId) {
           return m.copyWith(
-            text:
-                '⚠️ An error occurred while contacting AI services: ${e.toString()}',
+            text: replyText,
+            modelUsed: assistantName,
             isStreaming: false,
           );
         }
         return m;
-      }).toList();
-      state = state.copyWith(
-        messages: updatedList,
-        isGenerating: false,
-        errorMessage: e.toString(),
-      );
-    }
+      }).toList(),
+      isGenerating: false,
+      errorMessage: failureMessage,
+    );
   }
 
   void clearChat() {
@@ -192,11 +164,11 @@ class ChatNotifier extends StateNotifier<ChatState> {
   }
 }
 
-final aiChatbotServiceProvider = Provider<AiChatbotService>(
-  (ref) => AiChatbotService.instance,
+final aiChatServiceProvider = Provider<AiChatService>(
+  (ref) => const UnavailableAiChatService(),
 );
 
 final chatProvider = StateNotifierProvider<ChatNotifier, ChatState>((ref) {
-  final aiService = ref.watch(aiChatbotServiceProvider);
-  return ChatNotifier(aiService, ref);
+  final aiService = ref.watch(aiChatServiceProvider);
+  return ChatNotifier(aiService);
 });

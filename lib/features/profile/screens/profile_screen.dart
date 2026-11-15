@@ -12,6 +12,9 @@ import '../../../core/utils/haptics.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/expense_provider.dart';
 import '../../../providers/app_lock_provider.dart';
+import '../../../core/config/demo_mode.dart';
+import '../../../core/config/app_config.dart';
+import '../../../models/group_model.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -291,7 +294,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Send an official invitation link directly to the recipient\'s email address.',
+                    'Create an invitation for this email address, then share the link with them.',
                     style: TextStyle(fontSize: 13),
                   ),
                   const SizedBox(height: 16),
@@ -375,39 +378,63 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
                         setDialogState(() {
                           isSending = true;
-                          statusMessage = 'Dispatching invitation...';
+                          statusMessage = 'Creating invitation...';
                         });
 
-                        final success = await ref
+                        final invitation = await ref
                             .read(expenseProvider.notifier)
-                            .inviteMemberByEmail(
-                              email: email,
-                              role: selectedRole,
-                            );
+                            .createInvitation(email: email, role: selectedRole);
 
                         if (ctx.mounted) {
                           Navigator.of(ctx).pop();
                         }
 
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                success
-                                    ? 'Invitation dispatched to $email!'
-                                    : 'Could not send invitation. Please try again.',
-                              ),
-                              backgroundColor: success
-                                  ? AppColors.primaryEmerald
-                                  : AppColors.error,
-                            ),
-                          );
+                        // The dialog's own context is gone after pop; report
+                        // on the profile screen instead.
+                        if (mounted) {
+                          _showInvitationResult(invitation);
                         }
                       },
-                      child: const Text('Send Invitation'),
+                      child: const Text('Create Invitation'),
                     ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  /// Reports the outcome of creating an invitation. The app never emails
+  /// the invitee itself, so on success it offers the link to share.
+  void _showInvitationResult(GroupInvitation? invitation) {
+    final messenger = ScaffoldMessenger.of(context);
+    if (invitation == null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Could not create the invitation. Please try again.'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+    final link = AppConfig.environment.inviteLink(invitation.token).toString();
+    messenger.showSnackBar(
+      SnackBar(
+        content: const Text('Invitation created. Share the link with them.'),
+        backgroundColor: AppColors.primaryEmerald,
+        duration: const Duration(seconds: 8),
+        action: SnackBarAction(
+          label: 'Copy link',
+          textColor: Colors.white,
+          onPressed: () {
+            unawaited(Clipboard.setData(ClipboardData(text: link)));
+            messenger.showSnackBar(
+              const SnackBar(
+                content: Text('Invite link copied to clipboard!'),
+                duration: Duration(seconds: 2),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -419,7 +446,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }) {
     final expenseState = ref.read(expenseProvider);
     final authState = ref.read(authNotifierProvider);
-    final currentUserId = authState.user?.id ?? 'demo-user-id';
+    final currentUserId = authState.user?.id ?? kDemoUserId;
     final currency =
         authState.profile?.currency ?? AppConstants.defaultCurrency;
 
@@ -734,7 +761,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               authState.user?.email?.split('@').first ??
               'User');
     final group = expenseState.currentGroup;
-    final currentUserId = authState.user?.id ?? 'demo-user-id';
+    final currentUserId = authState.user?.id ?? kDemoUserId;
     final isGroupAdmin = group?.isAdmin(currentUserId) ?? false;
 
     return Scaffold(

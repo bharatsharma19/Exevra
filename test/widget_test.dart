@@ -15,19 +15,18 @@ import 'package:expense_manager/providers/expense_provider.dart';
 import 'package:expense_manager/providers/app_lock_provider.dart';
 import 'package:expense_manager/features/auth/screens/email_verification_screen.dart';
 import 'package:expense_manager/features/auth/screens/app_lock_screen.dart';
-import 'package:expense_manager/services/ai_chatbot_service.dart';
+import 'package:expense_manager/providers/chat_provider.dart';
+import 'package:expense_manager/services/ai_chat_service.dart';
 
 void main() {
-  group('1. Antigravity Core App & Theme Widget Tests', () {
+  group('1. Exevra Core App & Theme Widget Tests', () {
     testWidgets('App renders smoothly with initial smoke test', (
       WidgetTester tester,
     ) async {
-      await tester.pumpWidget(
-        const ProviderScope(child: AntigravityExpenseApp()),
-      );
+      await tester.pumpWidget(const ProviderScope(child: ExevraApp()));
 
       await tester.pump(const Duration(milliseconds: 500));
-      expect(find.byType(AntigravityExpenseApp), findsOneWidget);
+      expect(find.byType(ExevraApp), findsOneWidget);
       expect(find.byType(MaterialApp), findsOneWidget);
     });
   });
@@ -226,47 +225,35 @@ void main() {
     );
   });
 
-  group('6. AI Chatbot Domain Guardrails Tests', () {
-    final aiService = AiChatbotService.instance;
-
-    test('Permits valid financial and budgeting queries', () {
-      expect(
-        aiService.isFinancialQuery('How can I cut my grocery expense?'),
-        isTrue,
-      );
-      expect(
-        aiService.isFinancialQuery('What is my biggest spending category?'),
-        isTrue,
-      );
-      expect(
-        aiService.isFinancialQuery('Explain the 50/30/20 budget framework'),
-        isTrue,
-      );
-      expect(
-        aiService.isFinancialQuery('How much did we spend on utilities?'),
-        isTrue,
-      );
-      expect(
-        aiService.isFinancialQuery(
-          'Give me advice on saving money for a mortgage loan',
+  group('6. Assistant Availability Tests', () {
+    test('Unavailable assistant fails with a friendly typed message', () async {
+      const service = UnavailableAiChatService();
+      await expectLater(
+        service.ask('How can I cut my grocery expense?'),
+        throwsA(
+          isA<AiUnavailable>().having(
+            (f) => f.userMessage,
+            'userMessage',
+            'The assistant is getting an upgrade. Please check back soon.',
+          ),
         ),
-        isTrue,
       );
     });
 
-    test('Rejects non-financial queries', () {
+    test('Chat shows the friendly message instead of a fake answer', () async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+
+      await container.read(chatProvider.notifier).sendMessage('Hello');
+      final messages = container.read(chatProvider).messages;
+
+      expect(messages.last.isUser, isFalse);
+      expect(messages.last.isStreaming, isFalse);
       expect(
-        aiService.isFinancialQuery('Write a Python script to scrape a website'),
-        isFalse,
+        messages.last.text,
+        'The assistant is getting an upgrade. Please check back soon.',
       );
-      expect(
-        aiService.isFinancialQuery('What is the capital of Australia?'),
-        isFalse,
-      );
-      expect(
-        aiService.isFinancialQuery('Tell me a bedtime story about dragons'),
-        isFalse,
-      );
+      expect(container.read(chatProvider).isGenerating, isFalse);
     });
   });
 

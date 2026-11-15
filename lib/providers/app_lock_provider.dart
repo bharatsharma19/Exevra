@@ -1,11 +1,11 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 import '../core/constants/app_constants.dart';
 import '../core/utils/haptics.dart';
+import '../core/logging/app_logger.dart';
 
 class AppLockState {
   final bool isBiometricsEnabled;
@@ -70,7 +70,7 @@ class AppLockNotifier extends StateNotifier<AppLockState> {
       final hasBiometrics = await _localAuth.canCheckBiometrics;
       canCheck = isSupported || hasBiometrics;
     } catch (e) {
-      debugPrint('[AppLockNotifier] Biometrics capability check notice: $e');
+      AppLogger.warn('AppLockNotifier: Biometrics capability check notice', e);
       canCheck = false;
     }
 
@@ -80,7 +80,7 @@ class AppLockNotifier extends StateNotifier<AppLockState> {
       );
       enabled = storedVal == 'true';
     } catch (e) {
-      debugPrint('[AppLockNotifier] Secure storage read notice: $e');
+      AppLogger.warn('AppLockNotifier: Secure storage read notice', e);
       enabled = false;
     }
 
@@ -105,8 +105,9 @@ class AppLockNotifier extends StateNotifier<AppLockState> {
       state = state.copyWith(isBiometricsEnabled: enabled, isLocked: false);
       AppHaptics.selection();
     } catch (e) {
-      debugPrint(
-        '[AppLockNotifier] Error persisting biometrics preference: $e',
+      AppLogger.warn(
+        'AppLockNotifier: Error persisting biometrics preference',
+        e,
       );
     }
   }
@@ -159,7 +160,7 @@ class AppLockNotifier extends StateNotifier<AppLockState> {
   }
 
   void _onAuthenticationUnavailable(Object error) {
-    debugPrint('[AppLockNotifier] LocalAuth exception: $error');
+    AppLogger.warn('AppLockNotifier: LocalAuth exception', error);
     state = state.copyWith(
       isAuthenticating: false,
       errorMessage:

@@ -13,6 +13,7 @@ import '../../../models/expense_model.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/expense_provider.dart';
 import 'add_edit_expense_sheet.dart';
+import '../../../core/config/demo_mode.dart';
 
 class ExpensesScreen extends ConsumerStatefulWidget {
   const ExpensesScreen({super.key});
@@ -33,12 +34,12 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
   void _confirmDelete(Expense expense) {
     AppHaptics.heavy();
     final auth = ref.read(authNotifierProvider);
-    final currentUserId = auth.user?.id ?? 'demo-user-id';
+    final currentUserId = auth.user?.id ?? kDemoUserId;
     final isGroupAdmin =
         ref.read(expenseProvider).currentGroup?.isAdmin(currentUserId) ?? true;
 
     if (!expense.canDelete(currentUserId, isGroupAdmin) &&
-        currentUserId != 'demo-user-id') {
+        !isDemoUser(currentUserId)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -317,7 +318,7 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
     final catColor = AppColors.getCategoryColor(expense.category);
     final catIcon = AppConstants.getCategoryIcon(expense.category);
     final auth = ref.watch(authNotifierProvider);
-    final currentUserId = auth.user?.id ?? 'demo-user-id';
+    final currentUserId = auth.user?.id ?? kDemoUserId;
     final isGroupAdmin =
         ref.watch(expenseProvider).currentGroup?.isAdmin(currentUserId) ?? true;
 
@@ -328,8 +329,7 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
         padding: const EdgeInsets.all(14),
         onTap: () {
           AppHaptics.selection();
-          if (expense.canEdit(currentUserId) ||
-              currentUserId == 'demo-user-id') {
+          if (expense.canEdit(currentUserId) || isDemoUser(currentUserId)) {
             unawaited(AddEditExpenseSheet.show(context, expense: expense));
           } else {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -446,7 +446,7 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
                   },
                   itemBuilder: (ctx) => [
                     if (expense.canEdit(currentUserId) ||
-                        currentUserId == 'demo-user-id')
+                        isDemoUser(currentUserId))
                       const PopupMenuItem(
                         value: 'edit',
                         child: Row(
@@ -458,7 +458,7 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
                         ),
                       ),
                     if (expense.canDelete(currentUserId, isGroupAdmin) ||
-                        currentUserId == 'demo-user-id')
+                        isDemoUser(currentUserId))
                       const PopupMenuItem(
                         value: 'delete',
                         child: Row(

@@ -83,7 +83,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                 ),
                 Text(
-                  chatState.activeModel ?? 'Multi-Model Failover Active',
+                  chatState.activeModel ?? ChatNotifier.assistantName,
                   style: const TextStyle(
                     fontSize: 11,
                     color: AppColors.primaryCyan,
@@ -327,7 +327,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  msg.modelUsed ?? 'Antigravity Intelligence Core',
+                  msg.modelUsed ?? ChatNotifier.assistantName,
                   style: const TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
