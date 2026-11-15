@@ -30,6 +30,9 @@ abstract class UserScopedNotifier<T> extends Notifier<AsyncValue<T>> {
   /// out or while nothing has loaded for the signed-in user yet.
   String? get owner => _owner;
 
+  /// Whether a (re)load is on its way; its result will replace the state.
+  bool get isReloading => _loading;
+
   /// The state while signed out.
   AsyncValue<T> whenSignedOut();
 

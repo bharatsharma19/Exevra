@@ -371,6 +371,35 @@ void main() {
       expect(ids(), ['srv-1', 'e2', 'e1']);
     });
 
+    test(
+      'a realtime reload before the add is answered shows it once',
+      () async {
+        final notifier = await load();
+        final answer = Completer<void>();
+        backend.expenses.holdCreateAnswer = answer;
+
+        final adding = notifier.add(draft());
+        await settle();
+        // The row is on the server; a realtime change reloads the list
+        // before the create's answer arrives.
+        expect(
+          backend.expenses.rows.where((e) => e.title == 'Coffee'),
+          hasLength(1),
+        );
+        container.read(dataRevisionProvider.notifier).bump(DataKind.expenses);
+        await settle();
+
+        final during = container.read(expenseListProvider(personal)).value!;
+        expect(during.items.where((e) => e.title == 'Coffee'), hasLength(1));
+        expect(during.items, hasLength(3));
+
+        answer.complete();
+        expect(await adding, isNull);
+        await settle();
+        expect(ids(), ['srv-1', 'e2', 'e1']);
+      },
+    );
+
     test('a pending edit replaces the server copy of the same row', () async {
       final notifier = await load();
       final release = Completer<void>();
@@ -430,6 +459,45 @@ void main() {
       expect(state.items.first.id, 'p69');
       expect(state.items.last.id, 'p00');
     });
+
+    test(
+      'a reload that fails during "load more" does not leave it stuck',
+      () async {
+        backend.expenses.rows.clear();
+        for (var i = 0; i < 40; i++) {
+          backend.expenses.rows.add(
+            expenseOf(
+              'r${i.toString().padLeft(2, '0')}',
+              userId: 'u1',
+              spentAt: DateTime.utc(2026, 1, 1).add(Duration(hours: i)),
+            ),
+          );
+        }
+        final notifier = await load();
+        final held = Completer<ExpensePage>();
+        backend.expenses.heldFetches.add(held);
+        final more = notifier.loadMore();
+        expect(
+          container.read(expenseListProvider(personal)).value!.isLoadingMore,
+          isTrue,
+        );
+
+        backend.expenses.failReads = const AppFailure.offline();
+        expect(await notifier.reload(), isA<OfflineFailure>());
+        held.complete(const ExpensePage([], null));
+        await more;
+
+        var state = container.read(expenseListProvider(personal)).value!;
+        expect(state.isLoadingMore, isFalse);
+        expect(state.items, hasLength(30));
+
+        backend.expenses.failReads = null;
+        await notifier.loadMore();
+        state = container.read(expenseListProvider(personal)).value!;
+        expect(state.items, hasLength(40));
+        expect(state.items.map((e) => e.id).toSet(), hasLength(40));
+      },
+    );
 
     test('a failed page keeps the rows and offers retry', () async {
       backend.expenses.rows.clear();

@@ -613,6 +613,10 @@ class FakeExpenseRepository implements ExpenseRepository {
   /// When set, create, update and delete wait for it before running.
   Completer<void>? holdWrites;
 
+  /// When set, a create saves the row and then waits for it before
+  /// answering (the answer is slower than a realtime reload).
+  Completer<void>? holdCreateAnswer;
+
   bool _visible(String userId, ExpenseQuery query, Expense e) =>
       switch (query.scope) {
         PersonalScope() => e.isPersonal && e.userId == userId,
@@ -667,6 +671,7 @@ class FakeExpenseRepository implements ExpenseRepository {
         .toOptimistic(localId: 'srv-${++_ids}', userId: userId)
         .copyWith(isSyncing: false);
     rows.add(saved);
+    await holdCreateAnswer?.future;
     return saved;
   }
 
@@ -785,6 +790,9 @@ class FakeSettlementRepository implements SettlementRepository {
   int listCalls = 0;
   int pendingCalls = 0;
 
+  /// When non-empty, each `list` call waits for the next one, then reads.
+  final List<Completer<void>> heldLists = [];
+
   static int _newestFirst(Settlement a, Settlement b) {
     final t = b.createdAt.compareTo(a.createdAt);
     return t != 0 ? t : b.id.compareTo(a.id);
@@ -797,6 +805,7 @@ class FakeSettlementRepository implements SettlementRepository {
     int limit = 50,
   }) async {
     listCalls++;
+    if (heldLists.isNotEmpty) await heldLists.removeAt(0).future;
     await gate.pass();
     final sorted = rows.where((s) => s.groupId == groupId).toList()
       ..sort(_newestFirst);

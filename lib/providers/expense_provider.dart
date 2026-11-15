@@ -205,6 +205,12 @@ final expenseListRegistryProvider = Provider<ExpenseListRegistry>(
 ///   a newer load started is dropped, so only the latest load wins.
 /// * A page requested before one of this list's writes was confirmed may
 ///   predate it, so it is fetched again instead of being shown.
+/// * A next page is only appended to the list it continues; when the list
+///   was reloaded meanwhile the page is dropped (and "loading more" ends,
+///   also when that reload failed).
+/// * An add still waiting for its answer may already be on the server
+///   when a reload (for example after a realtime change) lands first; its
+///   row is not shown next to the optimistic one.
 /// * Writes show immediately, are replaced by the server's row on success
 ///   and rolled back on failure; the failure is returned and reported once.
 /// * Other lists, balances and insights reload through [dataRevisionProvider].
@@ -261,7 +267,7 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
       return latest;
     }
     return ExpenseListState(
-      items: _merge(page.items, _pending(latest)),
+      items: _merge(page.items, _pending(latest), known: _shown(latest)),
       next: page.next,
     );
   }
@@ -273,6 +279,12 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
   /// Rows still waiting for the server (optimistic adds and edits).
   static Iterable<Expense> _pending(ExpenseListState? state) =>
       state?.items.where((e) => e.isSyncing) ?? const <Expense>[];
+
+  /// Ids of the server rows [state] shows.
+  static Set<String> _shown(ExpenseListState? state) => {
+    for (final e in state?.items ?? const <Expense>[])
+      if (!e.isSyncing) e.id,
+  };
 
   /// Re-reads the list in place (as many rows as are loaded now), keeping
   /// the current rows visible. Returns the failure, or null.
@@ -293,7 +305,11 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
       if (confirmed != _confirmed) return reload();
       state = AsyncData(
         ExpenseListState(
-          items: _merge(page.items, _pending(state.value)),
+          items: _merge(
+            page.items,
+            _pending(state.value),
+            known: _shown(state.value),
+          ),
           next: page.next,
         ),
       );
@@ -325,8 +341,14 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
         after: cursor,
         limit: pageSize,
       );
-      if (!ref.mounted || generation != _generation) return;
-      final now = state.value ?? current;
+      if (!ref.mounted) return;
+      final now = state.value;
+      if (generation != _generation ||
+          now == null ||
+          !_sameCursor(now.next, cursor)) {
+        _endLoadingMore();
+        return;
+      }
       final known = {for (final e in now.items) e.id, ..._deleted};
       state = AsyncData(
         now.copyWith(
@@ -341,14 +363,28 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
       // The page may predate a write confirmed meanwhile.
       if (confirmed != _confirmed) unawaited(reload());
     } on AppFailure catch (failure) {
-      if (!ref.mounted || generation != _generation) return;
+      if (!ref.mounted) return;
+      final now = state.value;
+      if (generation != _generation ||
+          now == null ||
+          !_sameCursor(now.next, cursor)) {
+        _endLoadingMore();
+        return;
+      }
       state = AsyncData(
-        (state.value ?? current).copyWith(
-          isLoadingMore: false,
-          loadMoreFailure: failure,
-        ),
+        now.copyWith(isLoadingMore: false, loadMoreFailure: failure),
       );
     }
+  }
+
+  static bool _sameCursor(ExpenseCursor? a, ExpenseCursor b) =>
+      a != null && a.id == b.id && a.spentAt == b.spentAt;
+
+  /// Ends "loading more" for a page that was dropped.
+  void _endLoadingMore() {
+    final now = state.value;
+    if (!ref.mounted || now == null || !now.isLoadingMore) return;
+    state = AsyncData(now.copyWith(isLoadingMore: false));
   }
 
   /// Adds an expense. Returns the failure, or null when the server saved it.
@@ -610,8 +646,27 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
   /// [server] rows plus the rows still waiting for the server. A pending
   /// edit wins over the server's copy of the same id, and rows deleted
   /// through this list stay hidden.
-  List<Expense> _merge(List<Expense> server, Iterable<Expense> pending) {
+  ///
+  /// An optimistic add whose answer has not arrived may already be one of
+  /// the [server] rows. A row this list did not show before ([known]) with
+  /// the same content is taken to be it and is not shown twice; the answer
+  /// then replaces the optimistic row by the server's id.
+  List<Expense> _merge(
+    List<Expense> server,
+    Iterable<Expense> pending, {
+    Set<String> known = const {},
+  }) {
     final hidden = {..._deleted, for (final p in pending) p.id};
+    for (final p in pending) {
+      if (!p.id.startsWith(Expense.localIdPrefix)) continue;
+      for (final e in server) {
+        if (known.contains(e.id) || hidden.contains(e.id)) continue;
+        if (_sameContent(p, e)) {
+          hidden.add(e.id);
+          break;
+        }
+      }
+    }
     final list = [
       for (final e in server)
         if (!hidden.contains(e.id)) e,
@@ -622,6 +677,16 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
     }
     return list;
   }
+
+  /// Whether [server] holds what the optimistic [local] row was created
+  /// with (the server keeps instants to the second at least).
+  static bool _sameContent(Expense local, Expense server) =>
+      local.userId == server.userId &&
+      local.groupId == server.groupId &&
+      local.title == server.title &&
+      local.amount == server.amount &&
+      local.category == server.category &&
+      local.spentAt.difference(server.spentAt).inMilliseconds.abs() < 1000;
 
   /// Whether the list [key] shows [expense] (mirrors the server filters).
   static bool matches(ExpenseListKey key, Expense expense) {

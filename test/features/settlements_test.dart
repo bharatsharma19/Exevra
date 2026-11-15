@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:expense_manager/core/errors/failure_messages.dart';
 import 'package:expense_manager/features/groups/widgets/settlements_card.dart';
 import 'package:expense_manager/models/balance.dart';
 import 'package:expense_manager/models/group.dart';
 import 'package:expense_manager/models/money.dart';
 import 'package:expense_manager/models/settlement.dart';
+import 'package:expense_manager/providers/data_revision.dart';
 import 'package:expense_manager/providers/group_detail_providers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -163,6 +166,53 @@ void main() {
       expect(history.items.map((s) => s.id).toSet(), hasLength(61));
       expect(history.items.last.id, 'old-pending');
       expect(history.hasMore, isFalse);
+    });
+
+    test('a page that lands after the list reloaded leaves no gap', () async {
+      final notifier = container.read(settlementsProvider('g1').notifier);
+      container.listen(settlementsProvider('g1'), (_, _) {});
+      await notifier.loaded;
+
+      final held = Completer<void>();
+      backend.settlements.heldLists.add(held);
+      final more = notifier.loadMore();
+      await settle();
+
+      // Three newer payments arrive and the list reloads its first page.
+      for (var i = 0; i < 3; i++) {
+        backend.settlements.rows.add(
+          _settlement(
+            'n$i',
+            from: 'u2',
+            to: 'u1',
+            createdAt: DateTime.utc(2026, 11, 12).add(Duration(minutes: i)),
+          ),
+        );
+      }
+      container.read(dataRevisionProvider.notifier).bump(DataKind.settlements);
+      await settle();
+      expect(
+        container.read(settlementsProvider('g1')).value!.items.first.id,
+        'n2',
+      );
+
+      held.complete();
+      await more;
+      var history = container.read(settlementsProvider('g1')).value!;
+      expect(history.isLoadingMore, isFalse);
+
+      await notifier.loadMore();
+      history = container.read(settlementsProvider('g1')).value!;
+      final all = [...backend.settlements.rows]
+        ..sort((a, b) {
+          final t = b.createdAt.compareTo(a.createdAt);
+          return t != 0 ? t : b.id.compareTo(a.id);
+        });
+      expect(
+        history.items.map((s) => s.id),
+        all.take(history.items.length).map((s) => s.id),
+      );
+      expect(history.items, hasLength(64));
     });
   });
 

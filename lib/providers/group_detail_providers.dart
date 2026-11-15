@@ -169,12 +169,20 @@ class SettlementHistory {
 ///
 /// A recorded payment stays pending until the payee confirms it; only
 /// confirmed payments count in balances.
+///
+/// A page of older payments is only appended to the list it was asked
+/// for: when the list was reloaded meanwhile (a new first page, possibly
+/// with newer payments in front) the page is dropped, so the history never
+/// has a gap.
 class SettlementsNotifier extends UserScopedNotifier<SettlementHistory> {
   SettlementsNotifier(this.groupId);
 
   final String groupId;
 
   static const int pageSize = 50;
+
+  /// Moves whenever a load of the first page starts or lands.
+  int _generation = 0;
 
   SettlementRepository get _repo => ref.read(settlementRepositoryProvider);
 
@@ -184,6 +192,7 @@ class SettlementsNotifier extends UserScopedNotifier<SettlementHistory> {
 
   @override
   Future<SettlementHistory> fetch(String userId) async {
+    _generation++;
     ref.watch(dataRevisionProvider.select((r) => r.settlements));
     final rows = await ref
         .watch(settlementRepositoryProvider)
@@ -194,15 +203,37 @@ class SettlementsNotifier extends UserScopedNotifier<SettlementHistory> {
     );
   }
 
+  @override
+  void onLoaded(String userId, SettlementHistory value) => _generation++;
+
+  /// Whether a page that follows [cursor], asked for in [generation], may
+  /// be appended to [now].
+  bool _continues(SettlementHistory now, Settlement cursor, int generation) =>
+      generation == _generation &&
+      now.items.isNotEmpty &&
+      now.items.last.id == cursor.id;
+
+  /// Drops a page that no longer fits the list, ending its spinner.
+  void _dropPage() {
+    final now = state.value;
+    if (!ref.mounted || now == null || !now.isLoadingMore) return;
+    state = AsyncData(
+      SettlementHistory(items: now.items, hasMore: now.hasMore),
+    );
+  }
+
   /// Loads the next page of older payments.
   Future<void> loadMore() async {
     final current = state.value;
     if (current == null ||
         !current.hasMore ||
         current.isLoadingMore ||
-        current.items.isEmpty) {
+        current.items.isEmpty ||
+        isReloading) {
       return;
     }
+    final generation = _generation;
+    final cursor = current.items.last;
     state = AsyncData(
       SettlementHistory(
         items: current.items,
@@ -213,11 +244,15 @@ class SettlementsNotifier extends UserScopedNotifier<SettlementHistory> {
     try {
       final rows = await _repo.list(
         groupId,
-        after: current.items.last,
+        after: cursor,
         limit: pageSize + 1,
       );
       if (!ref.mounted) return;
-      final now = state.value ?? current;
+      final now = state.value;
+      if (now == null || !_continues(now, cursor, generation)) {
+        _dropPage();
+        return;
+      }
       final known = {for (final s in now.items) s.id};
       state = AsyncData(
         SettlementHistory(
@@ -230,7 +265,11 @@ class SettlementsNotifier extends UserScopedNotifier<SettlementHistory> {
       );
     } on AppFailure catch (failure) {
       if (!ref.mounted) return;
-      final now = state.value ?? current;
+      final now = state.value;
+      if (now == null || !_continues(now, cursor, generation)) {
+        _dropPage();
+        return;
+      }
       state = AsyncData(
         SettlementHistory(
           items: now.items,
