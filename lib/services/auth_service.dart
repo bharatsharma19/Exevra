@@ -373,8 +373,12 @@ class SupabaseAuthService implements AuthService {
       // server call only leaves the refresh token to expire.
       AppLogger.warn('Server sign-out failed', e.runtimeType);
     }
-    if (_googleInit != null) {
+    // Also after a cold start (Google not used yet in this run): the
+    // account chosen in an earlier run is forgotten too. Google Sign-In
+    // must be initialised before any other call.
+    if (_googleInit != null || _config.isGoogleSignInConfigured) {
       try {
+        await _ensureGoogleInitialized();
         await GoogleSignIn.instance.signOut();
       } on Object catch (e) {
         AppLogger.warn('Google sign-out failed', e.runtimeType);

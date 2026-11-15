@@ -12,6 +12,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// Google Sign-In that records how it was initialised.
 class _FakeGooglePlatform extends GoogleSignInPlatform {
   InitParameters? initParams;
+  int signOuts = 0;
 
   @override
   Future<void> init(InitParameters params) async => initParams = params;
@@ -46,7 +47,11 @@ class _FakeGooglePlatform extends GoogleSignInPlatform {
   ) async => null;
 
   @override
-  Future<void> signOut(SignOutParams params) async {}
+  Future<void> signOut(SignOutParams params) async {
+    // Google Sign-In must be initialised before any other call.
+    expect(initParams, isNotNull);
+    signOuts++;
+  }
 
   @override
   Future<void> disconnect(DisconnectParams params) async {}
@@ -100,5 +105,28 @@ void main() {
     expect(raw, isA<String>());
     expect(Nonce.sha256Hex(raw! as String), hashed);
     expect(tokenRequest?['id_token'], 'google-id-token');
+  });
+
+  test('signing out after a cold start also signs out of Google', () async {
+    final google = _FakeGooglePlatform();
+    GoogleSignInPlatform.instance = google;
+    // A new service is a new app run: Google was not used in it yet.
+    final service = SupabaseAuthService(
+      GoTrueClient(
+        url: 'https://project.supabase.example/auth/v1',
+        httpClient: MockClient((_) async => http.Response('{}', 200)),
+        autoRefreshToken: false,
+      ),
+      const AppConfig(
+        supabaseUrl: 'https://project.supabase.example',
+        supabaseAnonKey: 'anon',
+        googleWebClientId: 'web-client.apps.googleusercontent.com',
+      ),
+    );
+
+    await service.signOut();
+
+    expect(google.initParams, isNotNull);
+    expect(google.signOuts, 1);
   });
 }
