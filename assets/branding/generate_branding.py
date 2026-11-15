@@ -5,16 +5,23 @@ Usage (from the repository root, needs Pillow):
 
     python3 assets/branding/generate_branding.py
 
-Inputs:  assets/icons/app_icon.png (1024 x 1024 full-bleed launcher artwork).
+Input:   assets/icons/app_icon.png (1024 x 1024 source artwork: the "E" mark
+         on a dark rounded tile, shown as a mock-up on a grid backdrop; it
+         is only a source and is never used as an icon directly).
 Outputs: assets/branding/
+  icon_foreground.png          colour "E" mark on transparency, for the
+                               Android adaptive icon foreground layer
   icon_monochrome.png          white "E" mark on transparency, for the
                                Android 13+ themed (monochrome) icon layer
+  icon_full_bleed.png          colour "E" mark on a flat, opaque square in the
+                               app's dark background colour, for the legacy
+                               Android icon and the iOS app icon
   splash_logo.png              colour "E" mark for the native splash
   splash_logo_android12.png    colour "E" mark sized for the Android 12+
                                splash icon (1152 px canvas, mark inside the
                                768 px safe circle)
 
-The "E" mark is cut out of the dark rounded tile of the launcher artwork by
+The "E" mark is cut out of the dark rounded tile of the source artwork by
 brightness, so these files must be regenerated whenever app_icon.png changes.
 Afterwards run:
 
@@ -36,6 +43,15 @@ ALPHA_LOW, ALPHA_HIGH = 110, 190
 TILE_INTERIOR = (230, 230, 794, 794)
 # Approximate colour of the tile behind the mark, used to undo the blend.
 TILE_COLOUR = (9, 13, 24)
+# Icon background: AppColors.darkBackground, also the adaptive icon
+# background (adaptive_icon_background in pubspec.yaml).
+ICON_BACKGROUND = (0x07, 0x0B, 0x14)
+# Height of the mark on the 1024 px adaptive layers. flutter_launcher_icons
+# insets these layers by 16%, so the mark is about 40 dp tall and stays well
+# inside the 66 dp adaptive-icon safe zone.
+ADAPTIVE_MARK_HEIGHT = 560
+# Height of the mark on the 1024 px full-bleed icon.
+FULL_BLEED_MARK_HEIGHT = 600
 
 
 def _ramp(value: int) -> int:
@@ -88,9 +104,18 @@ def main() -> None:
     white = Image.new("RGBA", alpha.size, (255, 255, 255, 0))
     white.putalpha(alpha)
 
-    # Monochrome layer: same 1024 canvas and 16% inset as the foreground;
-    # the mark stays well inside the 66 dp adaptive-icon safe zone.
-    place(white, 1024, 560).save(OUT / "icon_monochrome.png", optimize=True)
+    # Adaptive layers: identical geometry, so the themed icon matches.
+    place(colour, 1024, ADAPTIVE_MARK_HEIGHT).save(
+        OUT / "icon_foreground.png", optimize=True
+    )
+    place(white, 1024, ADAPTIVE_MARK_HEIGHT).save(
+        OUT / "icon_monochrome.png", optimize=True
+    )
+    # Legacy Android and iOS: flat and opaque (iOS rejects transparency and
+    # applies its own corner mask), no frame, bevel or backdrop.
+    full = Image.new("RGBA", (1024, 1024), ICON_BACKGROUND + (255,))
+    full.alpha_composite(place(colour, 1024, FULL_BLEED_MARK_HEIGHT))
+    full.convert("RGB").save(OUT / "icon_full_bleed.png", optimize=True)
     # Pre-Android 12 and iOS splash (treated as a 4x image: about 192 dp).
     place(colour, 768, 400).save(OUT / "splash_logo.png", optimize=True)
     # Android 12+: 1152 px canvas, mark inside the 768 px circle.

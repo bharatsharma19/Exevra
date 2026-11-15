@@ -222,7 +222,8 @@ void main() {
       configureSentry(options, 'https://k@o1.ingest.sentry.io/1', 'r@1+1');
       expect(options.dsn, 'https://k@o1.ingest.sentry.io/1');
       expect(options.sendDefaultPii, isFalse);
-      expect(options.tracesSampleRate, 0.05);
+      expect(options.tracesSampleRate, isNull);
+      expect(options.isTracingEnabled(), isFalse);
       expect(options.attachScreenshot, isFalse);
       expect(options.attachViewHierarchy, isFalse);
       expect(options.environment, 'production');

@@ -59,17 +59,18 @@ dev_dependencies:
   flutter_launcher_icons: ^0.14.4
   mocktail: ^1.0.5
   alchemist: ^0.14.1
+  sentry_dart_plugin: ^3.4.0
 
-# Launcher icons: `dart run flutter_launcher_icons`. The monochrome layer
-# (Android 13+ themed icons) comes from assets/branding/generate_branding.py.
+# Launcher icons: `dart run flutter_launcher_icons`. All three images are
+# generated from the source artwork by assets/branding/generate_branding.py.
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
   remove_alpha_ios: true
-  image_path: "assets/icons/app_icon.png"
+  image_path: "assets/branding/icon_full_bleed.png"
   min_sdk_android: 24
   adaptive_icon_background: "#070B14"
-  adaptive_icon_foreground: "assets/icons/app_icon_foreground.png"
+  adaptive_icon_foreground: "assets/branding/icon_foreground.png"
   adaptive_icon_monochrome: "assets/branding/icon_monochrome.png"
 
 # Native launch screen: `dart run flutter_native_splash:create`.
@@ -88,6 +89,20 @@ flutter_native_splash:
   ios: true
   web: false
   fullscreen: false
+
+# Crash report symbols: after an obfuscated release build, run
+# `dart run sentry_dart_plugin` (see README, "Build and release"). It uploads
+# the split debug info and the obfuscation map. SENTRY_ORG and
+# SENTRY_AUTH_TOKEN come from the environment (never commit the token); pass
+# the release as --sentry-define=release=com.exevra.app@<version>+<build>.
+sentry:
+  project: exevra-android
+  upload_debug_symbols: true
+  symbols_path: build/symbols
+  dart_symbol_map_path: build/app/obfuscation.map.json
+  upload_sources: false
+  upload_source_maps: false
+  commits: "false"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

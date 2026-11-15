@@ -56,7 +56,11 @@ void configureSentry(
     ..dsn = dsn
     ..environment = AppConfig.appEnvironment
     ..sendDefaultPii = false
-    ..tracesSampleRate = 0.05
+    // Performance tracing stays off. The store privacy answers and
+    // ios/Runner/PrivacyInfo.xcprivacy declare crash and diagnostic data
+    // only; turning tracing on means declaring performance data as well.
+    ..tracesSampleRate = null
+    ..tracesSampler = null
     ..attachScreenshot = false
     ..attachViewHierarchy = false
     ..beforeSend = PiiScrubber.scrubEvent

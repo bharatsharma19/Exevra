@@ -39,6 +39,10 @@ void main() {
       );
     });
 
+    test('ships native symbol tables for Play Console', () {
+      expect(gradle, contains('debugSymbolLevel = "SYMBOL_TABLE"'));
+    });
+
     test('keeps app data out of backups and blocks cleartext', () {
       expect(manifest, contains('android:allowBackup="false"'));
       expect(manifest, contains('android:fullBackupContent="false"'));
@@ -111,6 +115,85 @@ void main() {
       expect(info, isNot(contains('Landscape')));
       expect(info, contains(r'$(GOOGLE_REVERSED_CLIENT_ID)'));
       expect(info, contains(r'$(GOOGLE_IOS_CLIENT_ID)'));
+    });
+
+    test('takes the universal link host from the build settings', () {
+      expect(
+        read('ios/Runner/Runner.entitlements'),
+        contains(r'<string>applinks:$(EXEVRA_APP_LINK_HOST)</string>'),
+      );
+      for (final config in ['Debug', 'Release']) {
+        expect(
+          read('ios/Flutter/$config.xcconfig'),
+          contains('EXEVRA_APP_LINK_HOST = exevra.app'),
+        );
+      }
+    });
+
+    test('answers the secure window channel', () {
+      expect(
+        read('ios/Runner/AppDelegate.swift'),
+        allOf(
+          contains('"exevra/secure_window"'),
+          contains('"setSecure"'),
+          contains('engineBridge.applicationRegistrar.messenger()'),
+        ),
+      );
+    });
+
+    test('privacy manifest declares diagnostics but no performance data', () {
+      final manifest = read('ios/Runner/PrivacyInfo.xcprivacy');
+      expect(manifest, contains('NSPrivacyCollectedDataTypeCrashData'));
+      expect(
+        manifest,
+        contains('NSPrivacyCollectedDataTypeOtherDiagnosticData'),
+      );
+      expect(
+        manifest,
+        isNot(contains('NSPrivacyCollectedDataTypePerformanceData')),
+      );
+    });
+  });
+
+  group('Branding', () {
+    test('launcher icons come from the generated flat artwork', () {
+      final pubspec = read('pubspec.yaml');
+      expect(
+        pubspec,
+        allOf(
+          contains('image_path: "assets/branding/icon_full_bleed.png"'),
+          contains(
+            'adaptive_icon_foreground: "assets/branding/icon_foreground.png"',
+          ),
+          contains(
+            'adaptive_icon_monochrome: "assets/branding/icon_monochrome.png"',
+          ),
+        ),
+      );
+      expect(
+        File('assets/icons/app_icon_foreground.png').existsSync(),
+        isFalse,
+      );
+    });
+  });
+
+  group('CI', () {
+    test('defines the required checks with read-only permissions', () {
+      final workflow = read('.github/workflows/ci.yml');
+      for (final job in [
+        'Flutter',
+        'Edge Functions',
+        'Database',
+        'Android release bundle',
+      ]) {
+        expect(workflow, contains('    name: $job\n'));
+      }
+      expect(workflow, contains('permissions:\n  contents: read\n'));
+      expect(
+        workflow,
+        contains('--obfuscate --split-debug-info=build/symbols'),
+      );
+      expect(workflow, contains('rm -f android/key.properties'));
     });
   });
 }

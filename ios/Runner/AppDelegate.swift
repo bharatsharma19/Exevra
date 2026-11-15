@@ -12,5 +12,32 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    registerSecureWindowChannel(messenger: engineBridge.applicationRegistrar.messenger())
+  }
+
+  /// Answers the "exevra/secure_window" channel that Android uses to set
+  /// FLAG_SECURE. iOS has no equivalent window flag (the app covers its
+  /// content when it becomes inactive instead), so `setSecure` succeeds
+  /// without doing anything rather than failing with MissingPluginException.
+  private func registerSecureWindowChannel(messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(name: "exevra/secure_window", binaryMessenger: messenger)
+    channel.setMethodCallHandler { call, result in
+      switch call.method {
+      case "setSecure":
+        guard let arguments = call.arguments as? [String: Any],
+          arguments["enabled"] is Bool
+        else {
+          result(
+            FlutterError(
+              code: "invalid_argument",
+              message: "setSecure expects a boolean 'enabled' argument.",
+              details: nil))
+          return
+        }
+        result(nil)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
   }
 }
