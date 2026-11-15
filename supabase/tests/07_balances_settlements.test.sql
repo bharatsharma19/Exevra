@@ -208,7 +208,7 @@ as $$ select s.id from tests.settlements as s where s.name = p_name $$;
 
 grant execute on all functions in schema tests to anon, authenticated;
 
-select plan(120);
+select plan(133);
 
 select tests.create_user('alice');
 select tests.create_user('bob');
@@ -558,6 +558,66 @@ select is(tests.net('Flat', 'nia'), -100::bigint, 'the removed member''s balance
 select is((public.leave_group(tests.gid('Flat')))->>'group_deleted', 'true',
           'the last approved member can always leave; the group is deleted');
 reset role;
+
+-- ===========================================================================
+-- A balance whose only counterparty is no longer a member never locks anyone into the group
+-- ===========================================================================
+-- Creditor side: the debtor's account is deleted.
+select tests.create_user('uma');
+select tests.create_user('vik');
+select tests.create_user('wes');
+select tests.create_group_as('uma', 'Loft', 'INR');
+select tests.add_member(tests.gid('Loft'), 'vik', 'member');
+select tests.add_member(tests.gid('Loft'), 'wes', 'member');
+select tests.add_expense('wes', 'Loft', 'Loft cleaning', 300);
+delete from auth.users where id = tests.uid('vik');
+select is(tests.net('Loft', null), -100::bigint, 'the deleted account''s share shows as Former member');
+select tests.authenticate_as('wes');
+select is((select string_agg(from_user::text || '>' || to_user::text || ':' || amount_minor, ',')
+           from public.get_group_settle_suggestions(tests.gid('Loft'))),
+          tests.uid('uma')::text || '>' || tests.uid('wes')::text || ':100',
+          'suggestions cover the current members only');
+reset role;
+select tests.settle('loft1', 'uma', 'Loft', 'wes', 100);
+select tests.authenticate_as('wes');
+select public.confirm_settlement(tests.sid('loft1'));
+select is((select count(*) from public.get_group_settle_suggestions(tests.gid('Loft'))), 0::bigint,
+          'nothing is left to settle between current members');
+reset role;
+select is(tests.net('Loft', 'wes'), 100::bigint, 'the share of the deleted account is still owed to the payer');
+select is(public.group_settleable_minor(tests.gid('Loft'), tests.uid('wes')), 0::bigint,
+          'no current member can settle that amount');
+select tests.authenticate_as('wes');
+select is((public.leave_group(tests.gid('Loft')))->>'net_minor', '100',
+          'a member owed money only by a deleted account can leave; the amount is reported');
+reset role;
+select is(tests.net('Loft', 'wes'), 100::bigint, 'the amount stays in the group''s balances');
+select is((select sum(net_minor) from public.group_balance_rows(tests.gid('Loft'))), 0::numeric,
+          'balances still sum to zero');
+
+-- Debtor side: the payer is no longer a member (a legacy departure, kept outside the RPCs).
+select tests.create_user('xan');
+select tests.create_user('yul');
+select tests.create_user('zed');
+select tests.create_user('ari');
+select tests.create_group_as('xan', 'Barn', 'INR');
+select tests.add_member(tests.gid('Barn'), 'yul', 'member');
+select tests.add_member(tests.gid('Barn'), 'zed', 'member');
+select tests.add_member(tests.gid('Barn'), 'ari', 'member');
+select tests.add_expense('yul', 'Barn', 'Barn paint', 400);
+select tests.remove_member(tests.gid('Barn'), 'yul');
+select tests.authenticate_as('zed');
+select is((select count(*) from public.get_group_settle_suggestions(tests.gid('Barn'))), 0::bigint,
+          'no suggestion pays someone who is no longer a member');
+select throws_ok($$ select public.record_settlement(tests.gid('Barn'), tests.uid('yul'), 100) $$, 'P0002', 'member_not_found',
+                 'a settlement to someone who is no longer a member is refused');
+select is((public.leave_group(tests.gid('Barn')))->>'net_minor', '-100',
+          'a member who owes money only to a former member can leave');
+select tests.authenticate_as('xan');
+select is((public.remove_member(tests.gid('Barn'), tests.uid('ari')))->>'removed', 'true',
+          'the admin can remove such a member without p_force');
+reset role;
+select is(tests.net('Barn', 'yul'), 300::bigint, 'the former member''s credit stays in the group''s balances');
 
 -- ===========================================================================
 -- The group currency is fixed once the group has expenses or settlements

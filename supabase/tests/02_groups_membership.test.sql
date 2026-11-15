@@ -108,7 +108,7 @@ $$;
 
 grant execute on all functions in schema tests to anon, authenticated;
 
-select plan(90);
+select plan(94);
 
 -- Invariant check used throughout: exactly one approved admin row per group, equal to groups.admin_id.
 create or replace function tests.admin_consistent()
@@ -399,6 +399,38 @@ reset role;
 set local role anon;
 select throws_ok($$ select public.create_group('Anon', 'INR') $$, '42501', null, 'anon cannot create groups');
 reset role;
+
+-- ---------------------------------------------------------------------------
+-- Concurrency: RPCs acting with the admin's authority serialise on the group row. Each one locks the
+-- group (SELECT ... FOR UPDATE) and reads admin_id from the locked row before acting, so for example
+-- a removal racing an admin transfer re-checks against the new admin instead of removing them.
+-- ---------------------------------------------------------------------------
+select is((select array_agg(p.proname::text order by p.proname) from pg_proc as p
+           where p.pronamespace = 'public'::regnamespace
+             and p.proname in ('approve_member', 'remove_member', 'transfer_admin', 'set_member_role', 'leave_group',
+                               'delete_group', 'rotate_invite_code', 'create_group_invitation',
+                               'revoke_group_invitation', 'accept_group_invitation')
+             and (p.prosrc !~ 'FROM public\.groups AS g WHERE g\.id = \S+ FOR UPDATE'
+                  or p.prosrc ~ 'is_group_admin\(')),
+          null, 'every admin-authority RPC locks the group row and checks admin_id on the locked row');
+
+-- Backstops: the admin row is never removed or demoted by remove_member or set_member_role, even if
+-- groups.admin_id and the admin row disagree.
+select tests.create_user('sam');
+select tests.create_user('tia');
+select tests.create_group_as('sam', 'Skew');
+select tests.add_member(tests.gid('Skew'), 'tia', 'member');
+update public.groups set admin_id = tests.uid('tia') where id = tests.gid('Skew');
+select tests.authenticate_as('tia');
+select throws_ok($$ select public.remove_member(tests.gid('Skew'), tests.uid('sam'), true) $$, 'P0001', 'cannot_remove_admin',
+                 'remove_member never deletes the admin row');
+select throws_ok($$ select public.set_member_role(tests.gid('Skew'), tests.uid('sam'), 'viewer') $$, '22023', 'invalid_role',
+                 'set_member_role never demotes the admin row');
+reset role;
+select is((select role from public.group_members where group_id = tests.gid('Skew') and user_id = tests.uid('sam')), 'admin',
+          'the admin row is unchanged');
+update public.groups set admin_id = tests.uid('sam') where id = tests.gid('Skew');
+
 select ok(tests.admin_consistent(), 'exactly one admin row per group, matching groups.admin_id (final)');
 
 select * from finish();

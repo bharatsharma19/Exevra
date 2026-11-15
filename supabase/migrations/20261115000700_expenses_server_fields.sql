@@ -86,14 +86,16 @@ ALTER TABLE public.expenses ALTER COLUMN updated_at SET DEFAULT now();
 -- -----------------------------------------------------------------------------
 -- Legacy data clean-up (before the constraints)
 -- -----------------------------------------------------------------------------
+-- Trim, cut to the limit, then trim again: the cut can end on whitespace.
 UPDATE public.expenses
-SET title = COALESCE(NULLIF(left(regexp_replace(title, '^\s+|\s+$', '', 'g'), 120), ''), 'Expense')
-WHERE title IS DISTINCT FROM COALESCE(NULLIF(left(regexp_replace(title, '^\s+|\s+$', '', 'g'), 120), ''), 'Expense');
+SET title = COALESCE(NULLIF(regexp_replace(left(regexp_replace(title, '^\s+|\s+$', '', 'g'), 120), '\s+$', ''), ''), 'Expense')
+WHERE title IS DISTINCT FROM
+      COALESCE(NULLIF(regexp_replace(left(regexp_replace(title, '^\s+|\s+$', '', 'g'), 120), '\s+$', ''), ''), 'Expense');
 
 UPDATE public.expenses
-SET note = NULLIF(left(regexp_replace(note, '^\s+|\s+$', '', 'g'), 500), '')
+SET note = NULLIF(regexp_replace(left(regexp_replace(note, '^\s+|\s+$', '', 'g'), 500), '\s+$', ''), '')
 WHERE note IS NOT NULL
-  AND note IS DISTINCT FROM NULLIF(left(regexp_replace(note, '^\s+|\s+$', '', 'g'), 500), '');
+  AND note IS DISTINCT FROM NULLIF(regexp_replace(left(regexp_replace(note, '^\s+|\s+$', '', 'g'), 500), '\s+$', ''), '');
 
 UPDATE public.expenses AS e
 SET category = COALESCE(

@@ -174,15 +174,19 @@ DECLARE
     v_uid uuid := auth.uid();
     v_email text := lower(btrim(p_email));
     v_token text;
+    v_admin_id uuid;
     v_row public.group_invitations%ROWTYPE;
 BEGIN
     IF v_uid IS NULL THEN
         RAISE EXCEPTION 'not_authenticated' USING ERRCODE = '42501';
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM public.groups AS g WHERE g.id = p_group_id) THEN
+    -- Lock the group first, so the admin check holds until the end of the transaction (a concurrent
+    -- transfer_admin waits, then revokes this invitation with the outgoing admin's others).
+    SELECT g.admin_id INTO v_admin_id FROM public.groups AS g WHERE g.id = p_group_id FOR UPDATE;
+    IF NOT FOUND THEN
         RAISE EXCEPTION 'group_not_found' USING ERRCODE = 'P0002';
     END IF;
-    IF NOT public.is_group_admin(p_group_id) THEN
+    IF v_admin_id IS DISTINCT FROM v_uid THEN
         RAISE EXCEPTION 'not_group_admin' USING ERRCODE = '42501';
     END IF;
     IF p_role IS NULL OR p_role NOT IN ('member', 'viewer') THEN
@@ -312,14 +316,23 @@ BEGIN
         RAISE EXCEPTION 'email_not_confirmed' USING ERRCODE = '42501';
     END IF;
 
+    -- Lock order: group, then invitation (as in transfer_admin and revoke_group_invitation).
     SELECT * INTO v_inv FROM public.group_invitations AS gi
-    WHERE gi.token_hash = public.hash_invitation_token(p_token)
-    FOR UPDATE;
+    WHERE gi.token_hash = public.hash_invitation_token(p_token);
     IF NOT FOUND THEN
         RAISE EXCEPTION 'invite_not_found' USING ERRCODE = 'P0002';
     END IF;
     IF v_inv.email <> v_email THEN
         RAISE EXCEPTION 'invite_email_mismatch' USING ERRCODE = '42501';
+    END IF;
+
+    SELECT * INTO v_group FROM public.groups AS g WHERE g.id = v_inv.group_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'group_not_found' USING ERRCODE = 'P0002';
+    END IF;
+    SELECT * INTO v_inv FROM public.group_invitations AS gi WHERE gi.id = v_inv.id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'invite_not_found' USING ERRCODE = 'P0002';
     END IF;
 
     CASE
@@ -331,11 +344,6 @@ BEGIN
             RAISE EXCEPTION 'invite_expired' USING ERRCODE = 'P0001';
         ELSE NULL;
     END CASE;
-
-    SELECT * INTO v_group FROM public.groups AS g WHERE g.id = v_inv.group_id FOR UPDATE;
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'group_not_found' USING ERRCODE = 'P0002';
-    END IF;
     -- An invitation carries the authority of the admin who sent it.
     IF v_inv.inviter_id IS DISTINCT FROM v_group.admin_id THEN
         RAISE EXCEPTION 'invite_revoked' USING ERRCODE = 'P0001',
@@ -425,17 +433,24 @@ SET search_path = ''
 AS $$
 DECLARE
     v_inv public.group_invitations%ROWTYPE;
+    v_admin_id uuid;
 BEGIN
     IF auth.uid() IS NULL THEN
         RAISE EXCEPTION 'not_authenticated' USING ERRCODE = '42501';
     END IF;
 
-    SELECT * INTO v_inv FROM public.group_invitations AS gi WHERE gi.id = p_invitation_id FOR UPDATE;
+    -- Lock order: group, then invitation (as in transfer_admin and accept_group_invitation).
+    SELECT * INTO v_inv FROM public.group_invitations AS gi WHERE gi.id = p_invitation_id;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'invite_not_found' USING ERRCODE = 'P0002';
     END IF;
-    IF NOT public.is_group_admin(v_inv.group_id) THEN
+    SELECT g.admin_id INTO v_admin_id FROM public.groups AS g WHERE g.id = v_inv.group_id FOR UPDATE;
+    IF v_admin_id IS DISTINCT FROM auth.uid() THEN
         RAISE EXCEPTION 'not_group_admin' USING ERRCODE = '42501';
+    END IF;
+    SELECT * INTO v_inv FROM public.group_invitations AS gi WHERE gi.id = p_invitation_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'invite_not_found' USING ERRCODE = 'P0002';
     END IF;
     IF v_inv.status <> 'pending' THEN
         RAISE EXCEPTION 'invite_not_pending' USING ERRCODE = 'P0001';

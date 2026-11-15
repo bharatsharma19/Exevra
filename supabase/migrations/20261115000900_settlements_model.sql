@@ -114,9 +114,9 @@ UPDATE public.settlements SET status = 'confirmed', confirmed_at = COALESCE(conf
 WHERE status IS NULL;
 
 UPDATE public.settlements
-SET note = NULLIF(left(regexp_replace(note, '^\s+|\s+$', '', 'g'), 200), '')
+SET note = NULLIF(regexp_replace(left(regexp_replace(note, '^\s+|\s+$', '', 'g'), 200), '\s+$', ''), '')
 WHERE note IS NOT NULL
-  AND note IS DISTINCT FROM NULLIF(left(regexp_replace(note, '^\s+|\s+$', '', 'g'), 200), '');
+  AND note IS DISTINCT FROM NULLIF(regexp_replace(left(regexp_replace(note, '^\s+|\s+$', '', 'g'), 200), '\s+$', ''), '');
 
 ALTER TABLE public.settlements ALTER COLUMN id SET DEFAULT gen_random_uuid();
 ALTER TABLE public.settlements ALTER COLUMN created_at SET DEFAULT now();

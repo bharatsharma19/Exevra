@@ -14,8 +14,16 @@
 --   through delete_group() or by the last approved member leaving; clients may rename a group they
 --   administer and nothing else. The invite code is not readable through the table.
 -- * groups.currency cannot change once the group has expenses or settlements.
--- * Leaving (or being removed) with a non-zero balance or a pending settlement is refused
---   (outstanding_balance), so the remaining members can always settle up with each other.
+-- * Leaving (or being removed) is refused (outstanding_balance) while the member has a pending
+--   settlement or a balance that can still be settled with the other approved members, so the
+--   remaining members can always settle up with each other. A balance whose only counterparties are
+--   people who are no longer approved members (deleted accounts, members who left or were removed
+--   with p_force, legacy ex-members) cannot be settled in the app and does not block anyone; it stays
+--   in the group's balances. See group_settleable_minor() in 20261115001000.
+-- * Concurrency: every RPC that changes membership or acts with the admin's authority first locks the
+--   group row (SELECT ... FOR UPDATE) and reads admin_id from the locked row, so admin transfers,
+--   removals, approvals, role changes, leaving and account deletion of the same group run one at a
+--   time and groups.admin_id always matches the single admin membership row.
 -- * Read access (get_auth_user_groups and the policies built on it) is limited to APPROVED members.
 --
 -- Legacy data: the clean-up keeps existing updated_at values; group_members foreign keys and the role
@@ -473,12 +481,15 @@ SET search_path = ''
 AS $$
 DECLARE
     v_uid uuid := auth.uid();
+    v_admin_id uuid;
     v_member public.group_members%ROWTYPE;
 BEGIN
     IF v_uid IS NULL THEN
         RAISE EXCEPTION 'not_authenticated' USING ERRCODE = '42501';
     END IF;
-    IF NOT public.is_group_admin(p_group_id) THEN
+    -- Lock the group first: membership RPCs of one group run one at a time.
+    SELECT g.admin_id INTO v_admin_id FROM public.groups AS g WHERE g.id = p_group_id FOR UPDATE;
+    IF v_admin_id IS DISTINCT FROM v_uid THEN
         RAISE EXCEPTION 'not_group_admin' USING ERRCODE = '42501';
     END IF;
     IF p_role IS NULL OR p_role NOT IN ('member', 'viewer') THEN
@@ -507,9 +518,11 @@ $$;
 
 -- Removes a member or rejects a pending request (admin only) and bans the user from rejoining with
 -- the group code. A later invitation from the admin lifts the ban.
--- An approved member with a non-zero balance or a pending settlement is only removed with
--- p_force => true (their balance then stays in the group's balances, see get_group_balances).
--- group_balance_rows() is created in the balances migration (20261115001000).
+-- An approved member with a pending settlement or a balance that can still be settled with the other
+-- approved members is only removed with p_force => true (their balance then stays in the group's
+-- balances, see get_group_balances). The admin row itself is never removed (cannot_remove_admin).
+-- group_balance_rows() and group_settleable_minor() are created in the balances migration
+-- (20261115001000).
 DROP FUNCTION IF EXISTS public.remove_member(uuid, uuid);
 CREATE OR REPLACE FUNCTION public.remove_member(p_group_id uuid, p_user_id uuid, p_force boolean DEFAULT false)
 RETURNS jsonb
@@ -519,14 +532,18 @@ SET search_path = ''
 AS $$
 DECLARE
     v_uid uuid := auth.uid();
+    v_admin_id uuid;
     v_member public.group_members%ROWTYPE;
     v_net bigint;
     v_pending bigint;
+    v_settleable bigint;
 BEGIN
     IF v_uid IS NULL THEN
         RAISE EXCEPTION 'not_authenticated' USING ERRCODE = '42501';
     END IF;
-    IF NOT public.is_group_admin(p_group_id) THEN
+    -- Lock the group first: membership RPCs of one group run one at a time.
+    SELECT g.admin_id INTO v_admin_id FROM public.groups AS g WHERE g.id = p_group_id FOR UPDATE;
+    IF v_admin_id IS DISTINCT FROM v_uid THEN
         RAISE EXCEPTION 'not_group_admin' USING ERRCODE = '42501';
     END IF;
     IF p_user_id = v_uid THEN
@@ -539,15 +556,20 @@ BEGIN
     IF NOT FOUND THEN
         RAISE EXCEPTION 'member_not_found' USING ERRCODE = 'P0002';
     END IF;
+    IF v_member.role = 'admin' THEN
+        RAISE EXCEPTION 'cannot_remove_admin' USING ERRCODE = 'P0001', HINT = 'Use transfer_admin.';
+    END IF;
 
     SELECT b.net_minor, b.pending_out_minor + b.pending_in_minor INTO v_net, v_pending
     FROM public.group_balance_rows(p_group_id) AS b
     WHERE b.user_id = p_user_id;
     v_net := COALESCE(v_net, 0);
     v_pending := COALESCE(v_pending, 0);
-    IF (v_net <> 0 OR v_pending <> 0) AND NOT COALESCE(p_force, false) THEN
+    v_settleable := public.group_settleable_minor(p_group_id, p_user_id);
+    IF (v_settleable <> 0 OR v_pending <> 0) AND NOT COALESCE(p_force, false) THEN
         RAISE EXCEPTION 'outstanding_balance' USING ERRCODE = 'P0001',
-            DETAIL = pg_catalog.format('net_minor=%s pending_minor=%s', v_net, v_pending),
+            DETAIL = pg_catalog.format('net_minor=%s settleable_minor=%s pending_minor=%s',
+                                       v_net, v_settleable, v_pending),
             HINT = 'Settle up first, or pass p_force => true to remove the member anyway.';
     END IF;
 
@@ -574,10 +596,13 @@ $$;
 
 -- Leaves a group. If the caller is the admin, admin passes to the longest-standing other approved
 -- member; if there is none, the group and all its data are deleted. Otherwise the caller must be
--- settled up: a non-zero balance or a pending settlement raises outstanding_balance (the remaining
--- members could not settle with them afterwards). An admin's pending invitations are revoked when
--- the admin role passes on.
--- group_balance_rows() is created in the balances migration (20261115001000).
+-- settled up with the other approved members: a pending settlement or a balance that can still be
+-- settled with them raises outstanding_balance (the remaining members could not settle with the
+-- caller afterwards). A balance owed to or by people who are no longer members does not block
+-- leaving; it stays in the group's balances and is reported as net_minor. An admin's pending
+-- invitations are revoked when the admin role passes on.
+-- group_balance_rows() and group_settleable_minor() are created in the balances migration
+-- (20261115001000).
 CREATE OR REPLACE FUNCTION public.leave_group(p_group_id uuid)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -591,11 +616,13 @@ DECLARE
     v_successor uuid;
     v_net bigint;
     v_pending bigint;
+    v_settleable bigint;
 BEGIN
     IF v_uid IS NULL THEN
         RAISE EXCEPTION 'not_authenticated' USING ERRCODE = '42501';
     END IF;
 
+    -- Lock the group first: membership RPCs of one group run one at a time.
     SELECT * INTO v_group FROM public.groups AS g WHERE g.id = p_group_id FOR UPDATE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'group_not_found' USING ERRCODE = 'P0002';
@@ -616,15 +643,20 @@ BEGIN
     IF v_group.admin_id = v_uid AND v_successor IS NULL THEN
         DELETE FROM public.groups WHERE id = p_group_id;
         PERFORM pg_catalog.set_config('exevra.membership_rpc', 'off', true);
-        RETURN jsonb_build_object('group_id', p_group_id, 'left', true, 'group_deleted', true, 'new_admin_id', NULL);
+        RETURN jsonb_build_object('group_id', p_group_id, 'left', true, 'group_deleted', true, 'new_admin_id', NULL,
+                                  'net_minor', 0);
     END IF;
 
     SELECT b.net_minor, b.pending_out_minor + b.pending_in_minor INTO v_net, v_pending
     FROM public.group_balance_rows(p_group_id) AS b
     WHERE b.user_id = v_uid;
-    IF COALESCE(v_net, 0) <> 0 OR COALESCE(v_pending, 0) <> 0 THEN
+    v_net := COALESCE(v_net, 0);
+    v_pending := COALESCE(v_pending, 0);
+    v_settleable := public.group_settleable_minor(p_group_id, v_uid);
+    IF v_settleable <> 0 OR v_pending <> 0 THEN
         RAISE EXCEPTION 'outstanding_balance' USING ERRCODE = 'P0001',
-            DETAIL = pg_catalog.format('net_minor=%s pending_minor=%s', COALESCE(v_net, 0), COALESCE(v_pending, 0)),
+            DETAIL = pg_catalog.format('net_minor=%s settleable_minor=%s pending_minor=%s',
+                                       v_net, v_settleable, v_pending),
             HINT = 'Settle up before leaving the group.';
     END IF;
 
@@ -639,7 +671,8 @@ BEGIN
     END IF;
 
     PERFORM pg_catalog.set_config('exevra.membership_rpc', 'off', true);
-    RETURN jsonb_build_object('group_id', p_group_id, 'left', true, 'group_deleted', false, 'new_admin_id', v_successor);
+    RETURN jsonb_build_object('group_id', p_group_id, 'left', true, 'group_deleted', false, 'new_admin_id', v_successor,
+                              'net_minor', v_net);
 END;
 $$;
 
@@ -691,13 +724,15 @@ SET search_path = ''
 AS $$
 DECLARE
     v_uid uuid := auth.uid();
+    v_admin_id uuid;
     v_target public.group_members%ROWTYPE;
 BEGIN
     IF v_uid IS NULL THEN
         RAISE EXCEPTION 'not_authenticated' USING ERRCODE = '42501';
     END IF;
-    PERFORM 1 FROM public.groups AS g WHERE g.id = p_group_id FOR UPDATE;
-    IF NOT public.is_group_admin(p_group_id) THEN
+    -- Lock the group first: membership RPCs of one group run one at a time.
+    SELECT g.admin_id INTO v_admin_id FROM public.groups AS g WHERE g.id = p_group_id FOR UPDATE;
+    IF v_admin_id IS DISTINCT FROM v_uid THEN
         RAISE EXCEPTION 'not_group_admin' USING ERRCODE = '42501';
     END IF;
     IF p_new_admin IS NULL OR p_new_admin = v_uid THEN
@@ -740,12 +775,15 @@ SET search_path = ''
 AS $$
 DECLARE
     v_uid uuid := auth.uid();
+    v_admin_id uuid;
     v_target public.group_members%ROWTYPE;
 BEGIN
     IF v_uid IS NULL THEN
         RAISE EXCEPTION 'not_authenticated' USING ERRCODE = '42501';
     END IF;
-    IF NOT public.is_group_admin(p_group_id) THEN
+    -- Lock the group first: membership RPCs of one group run one at a time.
+    SELECT g.admin_id INTO v_admin_id FROM public.groups AS g WHERE g.id = p_group_id FOR UPDATE;
+    IF v_admin_id IS DISTINCT FROM v_uid THEN
         RAISE EXCEPTION 'not_group_admin' USING ERRCODE = '42501';
     END IF;
     IF p_role IS NULL OR p_role NOT IN ('member', 'viewer') THEN
@@ -763,6 +801,9 @@ BEGIN
     END IF;
     IF v_target.status <> 'approved' THEN
         RAISE EXCEPTION 'member_pending' USING ERRCODE = 'P0001', HINT = 'Use approve_member.';
+    END IF;
+    IF v_target.role = 'admin' THEN
+        RAISE EXCEPTION 'invalid_role' USING ERRCODE = '22023', HINT = 'Use transfer_admin to change the admin.';
     END IF;
 
     PERFORM pg_catalog.set_config('exevra.membership_rpc', 'on', true);

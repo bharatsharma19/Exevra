@@ -16,6 +16,19 @@
 -- (what the net becomes once every pending settlement is confirmed), restricted to current approved
 -- members, so an in-flight settlement is never suggested or recorded twice.
 --
+-- Departed counterparties: rows of people who are no longer approved members (deleted accounts shown
+-- as 'Former member', members who left or were removed with p_force, legacy ex-members) stay in the
+-- balances but cannot record or confirm settlements, so the current members' balances need not sum
+-- to zero among themselves. group_settleable_minor(group, user) is the part of a member's projected
+-- balance that the other approved members can still settle with them:
+--   eff > 0: LEAST(eff, what the other approved members still owe in total)
+--   eff < 0: -LEAST(-eff, what the other approved members are still owed in total)
+-- leave_group and remove_member refuse (outstanding_balance) only while it is non-zero or a settlement
+-- is pending; the rest is left in the group's balances. Because the greedy suggestions match every
+-- approved debtor with every approved creditor until one side is exhausted, settling the suggestions
+-- always brings every member's settleable amount to zero, so nobody is locked into a group by a
+-- balance with someone who has gone.
+--
 -- RPCs (authenticated + service_role):
 --   get_group_balances(group)            approved member (viewers included)
 --   get_group_settle_suggestions(group)  approved member (viewers included)
@@ -80,6 +93,42 @@ AS $$
 $$;
 REVOKE ALL ON FUNCTION public.group_balance_rows(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.group_balance_rows(uuid) TO service_role;
+
+-- -----------------------------------------------------------------------------
+-- Internal: the part of a member's projected balance that the other approved members can still
+-- settle (signed like net_minor; 0 when nothing is left to settle with current members).
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.group_settleable_minor(p_group_id uuid, p_user_id uuid)
+RETURNS bigint
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+    WITH eff AS (
+        SELECT b.user_id, (b.net_minor + b.pending_out_minor - b.pending_in_minor) AS amount
+        FROM public.group_balance_rows(p_group_id) AS b
+    ),
+    mine AS (
+        SELECT COALESCE((SELECT e.amount FROM eff AS e WHERE e.user_id = p_user_id), 0) AS amount
+    ),
+    others AS (
+        SELECT COALESCE(sum(GREATEST(e.amount, 0)), 0) AS owed_to_them,
+               COALESCE(sum(GREATEST(-e.amount, 0)), 0) AS owed_by_them
+        FROM eff AS e
+        JOIN public.group_members AS gm
+          ON gm.group_id = p_group_id AND gm.user_id = e.user_id AND gm.status = 'approved'
+        WHERE e.user_id <> p_user_id
+    )
+    SELECT (CASE
+                WHEN m.amount > 0 THEN LEAST(m.amount, o.owed_by_them)
+                WHEN m.amount < 0 THEN -LEAST(-m.amount, o.owed_to_them)
+                ELSE 0
+            END)::bigint
+    FROM mine AS m, others AS o;
+$$;
+REVOKE ALL ON FUNCTION public.group_settleable_minor(uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.group_settleable_minor(uuid, uuid) TO service_role;
 
 -- -----------------------------------------------------------------------------
 -- get_group_balances

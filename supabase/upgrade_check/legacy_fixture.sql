@@ -1,8 +1,9 @@
 -- Legacy data for the upgrade check (run.sh). Loaded on top of the baseline migration only, i.e. the
 -- schema the hosted project had before the migration series. It covers the shapes the upgrade has to
--- convert: mixed-case emails and currencies, over-long names, short invite codes, numeric amounts,
--- plaintext invitation tokens, invitations sent by a non-admin, an active group the user does not
--- belong to, a user without a profile, and fixed created_at/updated_at values.
+-- convert: mixed-case emails and currencies, over-long names and titles (also cut at a space), short
+-- invite codes, numeric amounts, plaintext invitation tokens, invitations sent by a non-admin, an
+-- active group the user does not belong to, a user without a profile, a group expense paid by a
+-- user who already left the group, and fixed created_at/updated_at values.
 --
 -- It also reproduces the drift of databases first built from an older schema.sql: group_members
 -- foreign keys pointing at auth.users and a 'viewer' role default.
@@ -75,7 +76,8 @@ INSERT INTO public.expenses (id, user_id, group_id, title, amount, category, dat
  ('20000000-0000-0000-0000-000000000009', '00000000-0000-0000-0000-00000000000f', '10000000-0000-0000-0000-000000000005', 'Sushi', 1234.00, 'Food', now() - interval '4 days', NULL, NULL),
  ('20000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-00000000000c', '10000000-0000-0000-0000-000000000001', 'Paid by a viewer', 10.00, 'Shopping', now() - interval '1 days', NULL, NULL),
  ('20000000-0000-0000-0000-00000000000b', '00000000-0000-0000-0000-00000000000e', NULL, 'Tiny', 0.01, 'Personal', now(), NULL, NULL),
- ('20000000-0000-0000-0000-00000000000c', '00000000-0000-0000-0000-00000000000b', '10000000-0000-0000-0000-000000000003', 'Two admins expense', 10.00, 'Food', now() - interval '1 day', NULL, NULL);
+ ('20000000-0000-0000-0000-00000000000c', '00000000-0000-0000-0000-00000000000b', '10000000-0000-0000-0000-000000000003', 'Two admins expense', 10.00, 'Food', now() - interval '1 day', NULL, NULL),
+ ('20000000-0000-0000-0000-00000000000d', '00000000-0000-0000-0000-00000000000a', NULL, repeat('a', 119) || ' ' || repeat('b', 80), 1.00, 'Other', now() - interval '1 day', repeat('n', 499) || ' ' || repeat('m', 20), NULL);
 
 -- Settlements.
 INSERT INTO public.settlements (id, group_id, payer_id, payee_id, amount, date, notes) VALUES

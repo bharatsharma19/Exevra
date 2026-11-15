@@ -70,7 +70,10 @@ Known drift from older `schema.sql` versions (`group_members` foreign keys to `a
 
 Amounts are converted to minor units without clamping; an amount that would become less than one
 minor unit or more than 100,000,000,000 stops the push with `legacy_amount_out_of_range` (listing the
-row ids). Find such rows first in the SQL editor and correct or delete them deliberately:
+row ids). Over-long or padded text (titles, notes, names) needs no action: it is trimmed and cut to
+the new limits, with no whitespace left at the cut. Each migration is its own transaction, so a stop
+part-way leaves the earlier ones applied: run this query in the SQL editor first and correct or
+delete the rows it lists deliberately:
 
 ```sql
 with conv as (

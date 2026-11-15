@@ -12,6 +12,8 @@
 --      profile are deleted.
 --   Group expenses they paid, their split rows and settlements stay; when the auth user is deleted
 --   the foreign keys set the user columns to NULL and balances show them as 'Former member'.
+--   Every group the user belongs to or administers is locked first (the same group-row lock the
+--   membership RPCs take), so the admin hand-over cannot interleave with them.
 --   Idempotent: a second call finds nothing left to change and returns zero counts.
 --   Raises P0002 'user_not_found' when there is no auth user with that id (already deleted).
 --
@@ -100,12 +102,20 @@ BEGIN
 
     PERFORM pg_catalog.set_config('exevra.membership_rpc', 'on', true);
 
+    -- Lock every group the user belongs to or administers (in id order) before changing anything, so
+    -- a concurrent membership RPC on one of them (for example transfer_admin to this user) either
+    -- finishes first or waits; admin_id is re-read below after the locks are held.
+    PERFORM 1 FROM public.groups AS g
+    WHERE g.admin_id = p_user_id
+       OR g.id IN (SELECT gm.group_id FROM public.group_members AS gm WHERE gm.user_id = p_user_id)
+    ORDER BY g.id
+    FOR UPDATE;
+
     -- 1. Groups the user administers.
     FOR v_group_id IN
         SELECT g.id FROM public.groups AS g
         WHERE g.admin_id = p_user_id
         ORDER BY g.created_at, g.id
-        FOR UPDATE
     LOOP
         v_successor := public.pick_successor_admin(v_group_id, p_user_id);
         IF v_successor IS NULL THEN

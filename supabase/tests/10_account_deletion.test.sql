@@ -207,7 +207,7 @@ as $$ select s.id from tests.settlements as s where s.name = p_name $$;
 
 grant execute on all functions in schema tests to anon, authenticated;
 
-select plan(56);
+select plan(57);
 
 select tests.create_user('ann');
 select tests.create_user('ben');
@@ -389,6 +389,11 @@ select is((select admin_id from public.groups where id = tests.gid('Garden')), t
 select is((select count(*) from public.expenses where title = 'Seeds'), 1::bigint, 'with its expenses');
 select ok(exists (select 1 from pg_trigger where tgname = 'on_auth_user_deleted' and tgrelid = 'auth.users'::regclass),
           'auth.users has the deletion trigger');
+-- The admin hand-over serialises with the membership RPCs: the user's groups are locked (the same
+-- group-row lock those RPCs take) before the successor is chosen.
+select ok((select strpos(p.prosrc, 'ORDER BY g.id' || chr(10) || '    FOR UPDATE') between 1 and strpos(p.prosrc, 'pick_successor_admin(')
+           from pg_proc as p where p.oid = 'public.prepare_account_deletion(uuid)'::regprocedure),
+          'account deletion locks the user''s groups before handing over the admin role');
 
 select * from finish();
 rollback;

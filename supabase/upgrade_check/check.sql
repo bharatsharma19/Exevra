@@ -4,7 +4,7 @@
 begin;
 set local client_min_messages = warning;
 create extension if not exists pgtap with schema extensions;
-select plan(22);
+select plan(26);
 
 -- Timestamps of existing rows are kept: the conversion is not a user edit.
 select is((select count(*) from public.expenses where updated_at <> '2025-01-02 00:00:00+00'), 0::bigint,
@@ -26,6 +26,12 @@ select is((select amount_minor || ' ' || currency from public.expenses where id 
           '1234 JPY', 'a group expense in a zero-decimal currency converts exactly');
 select is((select amount_minor || ' ' || currency from public.settlements where id = '30000000-0000-0000-0000-000000000004'),
           '12 JPY', 'a settlement in a zero-decimal currency converts exactly');
+
+-- Over-long text is cut to the limit without leaving whitespace at the cut.
+select is((select title from public.expenses where id = '20000000-0000-0000-0000-00000000000d'), repeat('a', 119),
+          'a legacy title cut at a space has no trailing space');
+select is((select note from public.expenses where id = '20000000-0000-0000-0000-00000000000d'), repeat('n', 499),
+          'a legacy note cut at a space has no trailing space');
 
 -- Active-group pointers only point at groups the user is an approved member of.
 select is((select group_id from public.profiles where id = '00000000-0000-0000-0000-00000000000d'), null::uuid,
@@ -75,6 +81,50 @@ select is((select count(*) from public.groups as g
           0::bigint, 'every group has exactly one admin row, matching groups.admin_id');
 select is((select sum(net_minor) from public.groups as g, public.group_balance_rows(g.id)), 0::numeric,
           'balances of every group sum to zero');
+
+-- Legacy groups hold balances of people who are no longer members (they could leave freely before).
+-- Once every suggested settlement is recorded and confirmed, every approved member can leave.
+select ok(exists (select 1 from public.groups as g, public.group_balance_rows(g.id) as b
+                  where b.net_minor <> 0
+                    and not exists (select 1 from public.group_members as gm
+                                    where gm.group_id = g.id and gm.user_id = b.user_id and gm.status = 'approved')),
+          'the fixture has a balance held by someone who is no longer a member');
+do $$
+declare
+    v_group record;
+    v_s record;
+    v_id uuid;
+begin
+    for v_group in select g.id, g.admin_id from public.groups as g order by g.id loop
+        for i in 1 .. 50 loop
+            perform set_config('request.jwt.claims', json_build_object('sub', v_group.admin_id)::text, true);
+            select * into v_s from public.get_group_settle_suggestions(v_group.id) limit 1;
+            exit when not found;
+            perform set_config('request.jwt.claims', json_build_object('sub', v_s.from_user)::text, true);
+            v_id := (public.record_settlement(v_group.id, v_s.to_user, v_s.amount_minor)).id;
+            perform set_config('request.jwt.claims', json_build_object('sub', v_s.to_user)::text, true);
+            perform public.confirm_settlement(v_id);
+        end loop;
+    end loop;
+end;
+$$;
+create function pg_temp.leave_error(p_group uuid, p_user uuid)
+returns text
+language plpgsql
+as $$
+begin
+    perform set_config('request.jwt.claims', json_build_object('sub', p_user)::text, true);
+    perform public.leave_group(p_group);
+    raise exception 'probe_rollback';
+exception when others then
+    return nullif(sqlerrm, 'probe_rollback');
+end;
+$$;
+select is((select string_agg(gm.group_id || '/' || gm.user_id || ': ' || e.err, '; ')
+           from public.group_members as gm
+           cross join lateral (select pg_temp.leave_error(gm.group_id, gm.user_id) as err) as e
+           where gm.status = 'approved' and e.err is not null),
+          null, 'after settling every suggestion, every approved member can leave');
 
 select * from finish();
 rollback;

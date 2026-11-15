@@ -159,7 +159,8 @@ BEGIN
     END IF;
 
     IF v_code IS NOT NULL AND v_code ~ '^[0-9A-HJKMNP-TV-Z]{16}$' THEN
-        SELECT * INTO v_group FROM public.groups AS g WHERE g.invite_code = v_code;
+        -- FOR SHARE: waits for a concurrent admin action on the group (rotation, removal and ban).
+        SELECT * INTO v_group FROM public.groups AS g WHERE g.invite_code = v_code FOR SHARE;
     END IF;
 
     IF v_group.id IS NULL THEN
@@ -200,13 +201,16 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
+    v_admin_id uuid;
     v_code text;
     v_expires timestamptz;
 BEGIN
     IF auth.uid() IS NULL THEN
         RAISE EXCEPTION 'not_authenticated' USING ERRCODE = '42501';
     END IF;
-    IF NOT public.is_group_admin(p_group_id) THEN
+    -- Lock the group first, so the admin check holds until the end of the transaction.
+    SELECT g.admin_id INTO v_admin_id FROM public.groups AS g WHERE g.id = p_group_id FOR UPDATE;
+    IF v_admin_id IS DISTINCT FROM auth.uid() THEN
         RAISE EXCEPTION 'not_group_admin' USING ERRCODE = '42501';
     END IF;
 
