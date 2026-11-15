@@ -56,10 +56,32 @@ class LoadingButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
-    final (Color background, Color foreground) = switch (variant) {
-      LoadingButtonVariant.primary => (palette.accent, palette.textOnAccent),
-      LoadingButtonVariant.secondary => (Colors.transparent, palette.accent),
-      LoadingButtonVariant.destructive => (palette.danger, palette.onDanger),
+    // The state layer (hover, focus, press) of a filled variant is its
+    // container's "on" colour, not the label colour Material would derive
+    // from foregroundColor: that pulled the fill toward the label (white on
+    // the light accent fell to 4.4:1 when focused). The on-container colour
+    // moves the fill away from the label in both themes, like the theme's
+    // filled buttons.
+    final (
+      Color background,
+      Color foreground,
+      Color overlay,
+    ) = switch (variant) {
+      LoadingButtonVariant.primary => (
+        palette.accent,
+        palette.textOnAccent,
+        palette.onAccentContainer,
+      ),
+      LoadingButtonVariant.secondary => (
+        Colors.transparent,
+        palette.accent,
+        palette.accent,
+      ),
+      LoadingButtonVariant.destructive => (
+        palette.danger,
+        palette.onDanger,
+        palette.onDangerContainer,
+      ),
     };
 
     final child = Row(
@@ -115,6 +137,7 @@ class LoadingButton extends StatelessWidget {
               FilledButton.styleFrom(
                 backgroundColor: background,
                 foregroundColor: foreground,
+                overlayColor: overlay,
               ),
             ),
         child: child,

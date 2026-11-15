@@ -45,6 +45,15 @@ class AppTheme {
   static const double _focusOpacity = 0.1;
   static const double _pressOpacity = 0.1;
 
+  // Ink layers of InkWell-based controls (list tiles, chips, cards, the
+  // navigation bar). InkResponse keeps one highlight per state and stacks
+  // them, so a keyboard activation paints the focus tint, the pressed
+  // highlight and a splash at once, and a mouse press adds both on top of
+  // the hover tint. These alphas keep every text role at 4.5:1 and icons at
+  // 3:1 under the heaviest stack (see state_contrast_test).
+  static const double _inkPressOpacity = 0.06;
+  static const double _inkFocusOpacity = 0.12;
+
   /// Keyboard focus ring for filled and borderless controls (filled,
   /// elevated, destructive, text and icon buttons, the FAB).
   ///
@@ -188,15 +197,16 @@ class AppTheme {
       dividerColor: p.outlineVariant,
       disabledColor: p.textTertiary,
       hintColor: p.textTertiary,
-      focusColor: p.focusRing.withValues(alpha: 0.24),
+      focusColor: p.focusRing.withValues(alpha: _inkFocusOpacity),
       // Ink state layers of InkWell-based controls (list tiles, chips, the
       // FAB's press). Material's defaults are grey washes that pull light
       // surfaces toward their text (and lift dark ones toward theirs); a
       // faint textPrimary layer keeps every text role at 4.5:1 even with the
-      // pressed highlight and splash stacked (see state_contrast_test).
+      // hover, focus and pressed highlights and the splash stacked (see
+      // _inkPressOpacity and state_contrast_test).
       hoverColor: p.textPrimary.withValues(alpha: _hoverOpacity),
-      highlightColor: p.textPrimary.withValues(alpha: _pressOpacity),
-      splashColor: p.textPrimary.withValues(alpha: _pressOpacity),
+      highlightColor: p.textPrimary.withValues(alpha: _inkPressOpacity),
+      splashColor: p.textPrimary.withValues(alpha: _inkPressOpacity),
       materialTapTargetSize: MaterialTapTargetSize.padded,
       visualDensity: VisualDensity.standard,
       iconTheme: IconThemeData(color: p.textSecondary, size: AppSizes.icon),
@@ -394,6 +404,13 @@ class AppTheme {
       inputDecorationTheme: InputDecorationThemeData(
         filled: true,
         fillColor: p.surfaceVariant,
+        // Not the ink hoverColor above: a textPrimary wash on the field fill
+        // pulled the light hint under 4.5:1. A hovered field moves toward
+        // the page instead (lighter in light, darker in dark), away from its
+        // label, hint and text.
+        hoverColor: p.isDark
+            ? p.background.withValues(alpha: 0.5)
+            : p.surface.withValues(alpha: 0.7),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.lg,
           vertical: AppSpacing.lg,
