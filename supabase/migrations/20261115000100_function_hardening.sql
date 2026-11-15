@@ -13,7 +13,8 @@
 -- membership is never role-changed through ON CONFLICT, approving a non-pending member raises, the
 -- group invite code is only returned to the group admin, and leaving a group never moves a user
 -- who is in personal mode into another group. Later migrations replace several of these functions.
--- Idempotent: CREATE OR REPLACE + REVOKE/GRANT.
+-- Idempotent: each definition is skipped once a later migration has superseded it, so re-running
+-- this file never reverts newer function versions.
 -- =============================================================================
 
 -- New functions created by `postgres` in `public` must not be executable by `anon` by default.
@@ -38,6 +39,11 @@ $$;
 
 -- When a membership row is deleted, a profile whose active group was that group is pointed at the
 -- user's oldest remaining membership (deterministic order), or NULL (personal mode).
+DO $do$
+BEGIN
+    -- Skipped when a later migration has already replaced or removed this function.
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'group_members' AND column_name = 'status') THEN
+        EXECUTE $fn$
 CREATE OR REPLACE FUNCTION public.handle_member_removal()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -58,9 +64,18 @@ BEGIN
       AND p.group_id = OLD.group_id;
     RETURN OLD;
 END;
-$$;
+$$
+        $fn$;
+    END IF;
+END;
+$do$;
 
 -- Creates (or refreshes) the profile row for a new auth user.
+DO $do$
+BEGIN
+    -- Skipped when a later migration has already replaced or removed this function.
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint WHERE conname = 'profiles_avatar_url_https') THEN
+        EXECUTE $fn$
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -83,11 +98,20 @@ BEGIN
     ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email;
     RETURN NEW;
 END;
-$$;
+$$
+        $fn$;
+    END IF;
+END;
+$do$;
 
 -- -----------------------------------------------------------------------------
 -- RLS helper
 -- -----------------------------------------------------------------------------
+DO $do$
+BEGIN
+    -- Skipped when a later migration has already replaced or removed this function.
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'group_members' AND column_name = 'status') THEN
+        EXECUTE $fn$
 CREATE OR REPLACE FUNCTION public.get_auth_user_groups()
 RETURNS SETOF uuid
 LANGUAGE sql
@@ -96,11 +120,20 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
     SELECT gm.group_id FROM public.group_members AS gm WHERE gm.user_id = auth.uid();
-$$;
+$$
+        $fn$;
+    END IF;
+END;
+$do$;
 
 -- -----------------------------------------------------------------------------
 -- RPCs (same behaviour as the baseline; replaced by later migrations)
 -- -----------------------------------------------------------------------------
+DO $do$
+BEGIN
+    -- Skipped when a later migration has already replaced or removed this function.
+    IF to_regprocedure('public.join_group_by_invite(text)') IS NOT NULL THEN
+        EXECUTE $fn$
 CREATE OR REPLACE FUNCTION public.join_group_by_invite(p_invite_code text)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -132,8 +165,17 @@ BEGIN
 
     RETURN jsonb_build_object('success', true, 'group_id', v_group.id, 'group_name', v_group.name, 'role', v_role);
 END;
-$$;
+$$
+        $fn$;
+    END IF;
+END;
+$do$;
 
+DO $do$
+BEGIN
+    -- Skipped when a later migration has already replaced or removed this function.
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'group_invitations' AND column_name = 'token') THEN
+        EXECUTE $fn$
 CREATE OR REPLACE FUNCTION public.create_group_invitation(p_group_id uuid, p_email text, p_role text DEFAULT 'member')
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -179,8 +221,17 @@ BEGIN
         'expires_at', v_invitation.expires_at
     );
 END;
-$$;
+$$
+        $fn$;
+    END IF;
+END;
+$do$;
 
+DO $do$
+BEGIN
+    -- Skipped when a later migration has already replaced or removed this function.
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'group_invitations' AND column_name = 'token') THEN
+        EXECUTE $fn$
 CREATE OR REPLACE FUNCTION public.get_invitation_details(p_token text)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -217,8 +268,17 @@ BEGIN
         'expires_at', v_invite.expires_at
     );
 END;
-$$;
+$$
+        $fn$;
+    END IF;
+END;
+$do$;
 
+DO $do$
+BEGIN
+    -- Skipped when a later migration has already replaced or removed this function.
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'group_invitations' AND column_name = 'token') THEN
+        EXECUTE $fn$
 CREATE OR REPLACE FUNCTION public.accept_group_invitation(p_token text)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -262,8 +322,17 @@ BEGIN
 
     RETURN jsonb_build_object('success', true, 'group_id', v_group.id, 'group_name', v_group.name, 'role', v_invite.role);
 END;
-$$;
+$$
+        $fn$;
+    END IF;
+END;
+$do$;
 
+DO $do$
+BEGIN
+    -- Skipped when a later migration has already replaced or removed this function.
+    IF to_regprocedure('public.record_settlement(uuid, uuid, numeric, text)') IS NOT NULL THEN
+        EXECUTE $fn$
 CREATE OR REPLACE FUNCTION public.record_settlement(p_group_id uuid, p_payee_id uuid, p_amount numeric, p_notes text DEFAULT NULL)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -302,8 +371,17 @@ BEGIN
         'date', v_settlement.date
     );
 END;
-$$;
+$$
+        $fn$;
+    END IF;
+END;
+$do$;
 
+DO $do$
+BEGIN
+    -- Skipped when a later migration has already replaced or removed this function.
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'group_members' AND column_name = 'status') THEN
+        EXECUTE $fn$
 CREATE OR REPLACE FUNCTION public.get_user_groups()
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -333,8 +411,17 @@ BEGIN
 
     RETURN COALESCE(v_groups, '[]'::jsonb);
 END;
-$$;
+$$
+        $fn$;
+    END IF;
+END;
+$do$;
 
+DO $do$
+BEGIN
+    -- Skipped when a later migration has already replaced or removed this function.
+    IF to_regprocedure('public.approve_group_member(uuid, uuid)') IS NOT NULL THEN
+        EXECUTE $fn$
 CREATE OR REPLACE FUNCTION public.approve_group_member(p_group_id uuid, p_user_id uuid)
 RETURNS boolean
 LANGUAGE plpgsql
@@ -358,8 +445,17 @@ BEGIN
     END IF;
     RETURN true;
 END;
-$$;
+$$
+        $fn$;
+    END IF;
+END;
+$do$;
 
+DO $do$
+BEGIN
+    -- Skipped when a later migration has already replaced or removed this function.
+    IF to_regprocedure('public.get_expense_insights(text, uuid)') IS NOT NULL THEN
+        EXECUTE $fn$
 CREATE OR REPLACE FUNCTION public.get_expense_insights(p_timeframe text DEFAULT 'monthly', p_group_id uuid DEFAULT NULL)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -459,8 +555,17 @@ BEGIN
         'trend_data', COALESCE(v_trends, '[]'::jsonb)
     );
 END;
-$$;
+$$
+        $fn$;
+    END IF;
+END;
+$do$;
 
+DO $do$
+BEGIN
+    -- Skipped when a later migration has already replaced or removed this function.
+    IF to_regprocedure('public.delete_user_account()') IS NOT NULL THEN
+        EXECUTE $fn$
 CREATE OR REPLACE FUNCTION public.delete_user_account()
 RETURNS boolean
 LANGUAGE plpgsql
@@ -478,7 +583,11 @@ BEGIN
     DELETE FROM auth.users WHERE id = v_user_id;
     RETURN true;
 END;
-$$;
+$$
+        $fn$;
+    END IF;
+END;
+$do$;
 
 -- -----------------------------------------------------------------------------
 -- Privileges
@@ -507,6 +616,7 @@ BEGIN
         'public.get_expense_insights(text, uuid)',
         'public.delete_user_account()'
     ] LOOP
+        CONTINUE WHEN to_regprocedure(v_sig) IS NULL;
         EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon', v_sig);
         EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO authenticated, service_role', v_sig);
     END LOOP;
