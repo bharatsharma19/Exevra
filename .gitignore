@@ -44,5 +44,13 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# Environment variables
+# Environment variables and local configuration (never commit secrets)
 .env
+.env.*
+config/*.json
+!config/dev.example.json
+
+# Android signing material
+android/key.properties
+*.jks
+*.keystore
