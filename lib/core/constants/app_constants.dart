@@ -6,19 +6,7 @@ class AppConstants {
 
   static const String appName = 'Exevra';
   static const String appVersion = '1.0.0';
-  static const String defaultCurrency = 'INR';
-
-  // Supported Currencies (Default: INR for Indian Launch)
-  static const Map<String, String> currencies = {
-    'INR': '₹',
-    'USD': '\$',
-    'EUR': '€',
-    'GBP': '£',
-    'JPY': '¥',
-    'CAD': 'C\$',
-    'AUD': 'A\$',
-    'SGD': 'S\$',
-  };
+  // Currencies live in CurrencyInfo (lib/models/currency_info.dart).
 
   // Supported Categories with Associated Icons
   static const List<ExpenseCategoryInfo> categories = [

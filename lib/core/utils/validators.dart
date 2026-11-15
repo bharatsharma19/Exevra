@@ -6,7 +6,9 @@ class Validators {
     if (value == null || value.trim().isEmpty) {
       return 'Email address is required';
     }
-    final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
+    // Deliberately permissive (plus addressing, long TLDs); the server
+    // validates the address for real.
+    final emailRegex = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]{2,}$');
     if (!emailRegex.hasMatch(value.trim())) {
       return 'Please enter a valid email address';
     }
@@ -29,18 +31,6 @@ class Validators {
     return null;
   }
 
-  static String? validatePhone(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Phone number is required';
-    }
-    final cleaned = value.replaceAll(RegExp(r'[\s\-()]'), '');
-    final phoneRegex = RegExp(r'^\+?[1-9]\d{7,14}$');
-    if (!phoneRegex.hasMatch(cleaned)) {
-      return 'Please enter a valid international phone (e.g. +1234567890)';
-    }
-    return null;
-  }
-
   static String? validateOtp(String? value) {
     if (value == null || value.trim().isEmpty) {
       return 'Verification code is required';
@@ -48,22 +38,6 @@ class Validators {
     if (value.trim().length != 6 ||
         !RegExp(r'^\d{6}$').hasMatch(value.trim())) {
       return 'Please enter a 6-digit code';
-    }
-    return null;
-  }
-
-  static String? validateAmount(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Amount is required';
-    }
-    final trimmed = value.trim();
-    if (trimmed.startsWith('-')) {
-      return 'Amount must be greater than 0';
-    }
-    final cleaned = trimmed.replaceAll(RegExp(r'[^0-9.]'), '');
-    final amount = double.tryParse(cleaned);
-    if (amount == null || amount <= 0) {
-      return 'Amount must be greater than 0';
     }
     return null;
   }

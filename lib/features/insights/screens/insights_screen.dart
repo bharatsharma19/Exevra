@@ -5,13 +5,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/currency_formatter.dart';
 import '../../../core/utils/date_helpers.dart';
 import '../../../core/utils/haptics.dart';
-import '../../../providers/auth_provider.dart';
+import '../../../core/utils/money_format.dart';
+import '../../../models/currency_info.dart';
+import '../../../models/insights.dart';
+import '../../../models/money.dart';
+import '../../../providers/groups_provider.dart';
 import '../../../providers/insights_provider.dart';
+import '../../../providers/profile_provider.dart';
+import '../../shared/failure_retry.dart';
 
 class InsightsScreen extends ConsumerStatefulWidget {
   const InsightsScreen({super.key});
@@ -25,11 +29,35 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final insightState = ref.watch(insightProvider);
-    final auth = ref.watch(authNotifierProvider);
+    final timeframe = ref.watch(insightsTimeframeProvider);
+    final key = ref.watch(activeInsightsKeyProvider(timeframe));
+    final async = key == null
+        ? const AsyncLoading<ExpenseInsights>()
+        : ref.watch(insightsProvider(key));
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final currency = auth.profile?.currency ?? AppConstants.defaultCurrency;
-    final insight = insightState.insight;
+    final String fallbackCurrency =
+        ref.watch(activeGroupProvider)?.currency ??
+        ref.watch(preferredCurrencyProvider);
+    final insight =
+        async.value ??
+        ExpenseInsights.empty(
+          scope: key?.scope ?? InsightScope.personal,
+          timeframe: timeframe,
+          currency: fallbackCurrency,
+        );
+    final currency = insight.currency;
+    final trend = insight.buckets;
+    final highest = insight.highest;
+
+    Future<void> reload() async {
+      if (key == null) return;
+      ref.invalidate(insightsProvider(key));
+      try {
+        await ref.read(insightsProvider(key).future);
+      } on Object {
+        // Shown by the error state below.
+      }
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -39,19 +67,22 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
             icon: const Icon(Icons.refresh_rounded),
             onPressed: () {
               AppHaptics.light();
-              unawaited(ref.read(insightProvider.notifier).loadInsights());
+              unawaited(reload());
             },
           ),
         ],
       ),
-      body:
-          (insightState.isLoading &&
-              insightState.insight.expenseCount == 0 &&
-              insightState.insight.totalAmount == 0.0)
+      body: (async.hasError && async.value == null)
+          ? Center(
+              child: FailureRetry(
+                error: async.error!,
+                onRetry: () => unawaited(reload()),
+              ),
+            )
+          : async.value == null
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-              onRefresh: () =>
-                  ref.read(insightProvider.notifier).loadInsights(),
+              onRefresh: reload,
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
@@ -71,18 +102,18 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                         children: [
                           _buildTimeframePill(
                             'Weekly',
-                            'weekly',
-                            insightState.timeframe,
+                            InsightTimeframe.week,
+                            timeframe,
                           ),
                           _buildTimeframePill(
                             'Monthly',
-                            'monthly',
-                            insightState.timeframe,
+                            InsightTimeframe.month,
+                            timeframe,
                           ),
                           _buildTimeframePill(
                             'Yearly',
-                            'yearly',
-                            insightState.timeframe,
+                            InsightTimeframe.year,
+                            timeframe,
                           ),
                         ],
                       ),
@@ -102,7 +133,7 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Text(
-                                'TOTAL SPEND (${insightState.timeframe.toUpperCase()})',
+                                'TOTAL SPEND (${_timeframeLabel(timeframe)})',
                                 style: const TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w800,
@@ -122,7 +153,7 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Text(
-                                  '${insight.expenseCount} Records',
+                                  '${insight.count} Records',
                                   style: const TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w700,
@@ -134,10 +165,7 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            CurrencyFormatter.format(
-                              insight.totalAmount,
-                              currencyCode: currency,
-                            ),
+                            MoneyFormat.format(insight.total),
                             style: const TextStyle(
                               fontSize: 36,
                               fontWeight: FontWeight.w800,
@@ -153,19 +181,13 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                             children: [
                               _buildSubMetric(
                                 'Daily Average',
-                                CurrencyFormatter.format(
-                                  insight.averageDaily,
-                                  currencyCode: currency,
-                                ),
+                                MoneyFormat.format(insight.averageDaily),
                                 Icons.calendar_today_rounded,
                               ),
                               _buildSubMetric(
                                 'Top Expense',
-                                insight.highestExpense != null
-                                    ? CurrencyFormatter.format(
-                                        insight.highestExpense!.amount,
-                                        currencyCode: currency,
-                                      )
+                                highest != null
+                                    ? MoneyFormat.format(highest.amount)
                                     : 'None',
                                 Icons.arrow_upward_rounded,
                               ),
@@ -195,7 +217,7 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                       padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
                       child: SizedBox(
                         height: 220,
-                        child: insight.trendData.isEmpty
+                        child: trend.every((b) => b.total.isZero)
                             ? const Center(
                                 child: Text(
                                   'No trend data available for this range',
@@ -206,7 +228,6 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                   gridData: FlGridData(
                                     show: true,
                                     drawVerticalLine: false,
-                                    horizontalInterval: 50,
                                     getDrawingHorizontalLine: (val) => FlLine(
                                       color: isDark
                                           ? Colors.white10
@@ -226,9 +247,15 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                         showTitles: true,
                                         reservedSize: 44,
                                         getTitlesWidget: (val, meta) => Text(
-                                          CurrencyFormatter.formatCompact(
-                                            val,
-                                            currencyCode: currency,
+                                          MoneyFormat.compact(
+                                            Money(
+                                              (val *
+                                                      CurrencyInfo.of(
+                                                        currency,
+                                                      ).minorPerMajor)
+                                                  .round(),
+                                              currency,
+                                            ),
                                           ),
                                           style: TextStyle(
                                             color: isDark
@@ -243,17 +270,18 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                       sideTitles: SideTitles(
                                         showTitles: true,
                                         reservedSize: 28,
-                                        interval: (insight.trendData.length / 5)
-                                            .clamp(1.0, 10.0),
+                                        interval: (trend.length / 5).clamp(
+                                          1.0,
+                                          10.0,
+                                        ),
                                         getTitlesWidget: (val, meta) {
                                           final int idx = val.toInt();
-                                          if (idx >= 0 &&
-                                              idx < insight.trendData.length) {
-                                            final rawDate = insight
-                                                .trendData[idx]
-                                                .pointDate;
+                                          if (idx >= 0 && idx < trend.length) {
+                                            final rawDate = trend[idx].date;
                                             return Text(
-                                              '${rawDate.month}/${rawDate.day}',
+                                              timeframe == InsightTimeframe.year
+                                                  ? '${rawDate.month}/${rawDate.year % 100}'
+                                                  : '${rawDate.day}/${rawDate.month}',
                                               style: TextStyle(
                                                 color: isDark
                                                     ? AppColors.darkTextTertiary
@@ -271,15 +299,13 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                   borderData: FlBorderData(show: false),
                                   lineBarsData: [
                                     LineChartBarData(
-                                      spots: List.generate(
-                                        insight.trendData.length,
-                                        (i) {
-                                          return FlSpot(
-                                            i.toDouble(),
-                                            insight.trendData[i].total,
-                                          );
-                                        },
-                                      ),
+                                      spots: List.generate(trend.length, (i) {
+                                        return FlSpot(
+                                          i.toDouble(),
+                                          trend[i].total.amountMinor /
+                                              trend[i].total.info.minorPerMajor,
+                                        );
+                                      }),
                                       isCurved: true,
                                       curveSmoothness: 0.35,
                                       color: AppColors.primaryCyan,
@@ -326,7 +352,7 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                     GlassCard(
                       borderRadius: 20,
                       padding: const EdgeInsets.all(20),
-                      child: insight.categoryBreakdown.isEmpty
+                      child: insight.categories.isEmpty
                           ? const Center(
                               child: Text('No categorical expenses to chart'),
                             )
@@ -358,10 +384,9 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                       sectionsSpace: 3,
                                       centerSpaceRadius: 50,
                                       sections: List.generate(
-                                        insight.categoryBreakdown.length,
+                                        insight.categories.length,
                                         (i) {
-                                          final item =
-                                              insight.categoryBreakdown[i];
+                                          final item = insight.categories[i];
                                           final isTouched =
                                               i == _touchedPieIndex;
                                           final radius = isTouched
@@ -374,9 +399,10 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
 
                                           return PieChartSectionData(
                                             color: catColor,
-                                            value: item.total,
+                                            value: item.total.amountMinor
+                                                .toDouble(),
                                             title:
-                                                '${item.percentage.toStringAsFixed(0)}%',
+                                                '${(item.share * 100).toStringAsFixed(0)}%',
                                             radius: radius,
                                             titleStyle: TextStyle(
                                               fontSize: isTouched ? 14 : 11,
@@ -391,7 +417,7 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                 ),
                                 const SizedBox(height: 20),
                                 // Category Legends
-                                ...insight.categoryBreakdown.map((cat) {
+                                ...insight.categories.map((cat) {
                                   final color = AppColors.getCategoryColor(
                                     cat.category,
                                   );
@@ -418,10 +444,7 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                           ),
                                         ),
                                         Text(
-                                          CurrencyFormatter.format(
-                                            cat.total,
-                                            currencyCode: currency,
-                                          ),
+                                          MoneyFormat.format(cat.total),
                                           style: const TextStyle(
                                             fontWeight: FontWeight.w700,
                                             fontSize: 13,
@@ -429,7 +452,7 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                         ),
                                         const SizedBox(width: 8),
                                         Text(
-                                          '(${cat.percentage}%)',
+                                          '(${(cat.share * 100).toStringAsFixed(0)}%)',
                                           style: TextStyle(
                                             fontSize: 12,
                                             color: isDark
@@ -448,7 +471,7 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                     const SizedBox(height: 24),
 
                     // Highest Expense Spotlight
-                    if (insight.highestExpense != null) ...[
+                    if (highest != null) ...[
                       Text(
                         'Peak Transaction Spotlight',
                         style: TextStyle(
@@ -489,7 +512,7 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    insight.highestExpense!.title,
+                                    highest.title,
                                     style: const TextStyle(
                                       fontSize: 15,
                                       fontWeight: FontWeight.w700,
@@ -497,7 +520,7 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                   ),
                                   const SizedBox(height: 3),
                                   Text(
-                                    '${insight.highestExpense!.category} • ${DateHelpers.formatDate(insight.highestExpense!.date)}',
+                                    '${highest.category} • ${DateHelpers.formatDate(highest.spentAt)}',
                                     style: TextStyle(
                                       fontSize: 12,
                                       color: isDark
@@ -509,10 +532,7 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                               ),
                             ),
                             Text(
-                              CurrencyFormatter.format(
-                                insight.highestExpense!.amount,
-                                currencyCode: currency,
-                              ),
+                              MoneyFormat.format(highest.amount),
                               style: const TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.w800,
@@ -530,14 +550,28 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
     );
   }
 
-  Widget _buildTimeframePill(String label, String value, String current) {
+  static String _timeframeLabel(InsightTimeframe t) => switch (t) {
+    InsightTimeframe.week => 'LAST 7 DAYS',
+    InsightTimeframe.month => 'LAST 30 DAYS',
+    InsightTimeframe.year => 'LAST 12 MONTHS',
+  };
+
+  Widget _buildTimeframePill(
+    String label,
+    InsightTimeframe value,
+    InsightTimeframe current,
+  ) {
     final isSelected = value == current;
     final primaryColor = Theme.of(context).colorScheme.primary;
     final onPrimaryColor = Theme.of(context).colorScheme.onPrimary;
 
     return Expanded(
       child: GestureDetector(
-        onTap: () => ref.read(insightProvider.notifier).setTimeframe(value),
+        onTap: () {
+          if (value == current) return;
+          AppHaptics.selection();
+          ref.read(insightsTimeframeProvider.notifier).set(value);
+        },
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 9),
           decoration: BoxDecoration(

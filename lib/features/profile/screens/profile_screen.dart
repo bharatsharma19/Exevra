@@ -1,20 +1,32 @@
 import 'dart:async';
 
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/currency_formatter.dart';
+import '../../../core/errors/app_failure.dart';
+import '../../../core/errors/failure_messages.dart';
+import '../../../core/utils/date_helpers.dart';
 import '../../../core/utils/haptics.dart';
-import '../../../providers/auth_provider.dart';
-import '../../../providers/expense_provider.dart';
+import '../../../core/utils/money_format.dart';
+import '../../../core/utils/money_parser.dart';
+import '../../../core/utils/validators.dart';
+import '../../../data/repositories/group_repository.dart';
+import '../../../models/balance.dart';
+import '../../../models/currency_info.dart';
+import '../../../models/group.dart';
+import '../../../models/invitation.dart';
+import '../../../models/money.dart';
+import '../../../models/profile.dart';
+import '../../../models/settlement.dart';
 import '../../../providers/app_lock_provider.dart';
-import '../../../core/config/demo_mode.dart';
-import '../../../core/config/app_config.dart';
-import '../../../models/group_model.dart';
+import '../../../providers/auth_provider.dart';
+import '../../../providers/failure_reporter.dart';
+import '../../../providers/group_detail_providers.dart';
+import '../../../providers/groups_provider.dart';
+import '../../../providers/profile_provider.dart';
+import '../../shared/failure_retry.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -39,27 +51,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   void _showEditProfileDialog() {
-    final profile = ref.read(authNotifierProvider).profile;
-    _nameController.text = profile?.displayName ?? '';
-    _avatarUrlController.text =
-        (profile?.avatarUrl != null &&
-            !profile!.avatarUrl!.startsWith('preset:'))
-        ? profile.avatarUrl!
-        : '';
-    String? currentPreset =
-        (profile?.avatarUrl != null &&
-            profile!.avatarUrl!.startsWith('preset:'))
-        ? profile.avatarUrl!.replaceFirst('preset:', '')
-        : '🚀';
-
-    const presets = ['🚀', '⚛️', '💎', '🛡️', '🤖', '✨', '⚡', '🪐'];
+    final profile = ref.read(userProfileProvider);
+    if (profile == null) return;
+    _nameController.text = profile.displayName;
+    _avatarUrlController.text = profile.avatarUrl ?? '';
+    String? fieldError;
 
     unawaited(
       showDialog<void>(
         context: context,
         builder: (ctx) => StatefulBuilder(
           builder: (context, setDialogState) => AlertDialog(
-            title: const Text('Edit Profile & Avatar'),
+            title: const Text('Edit Profile'),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -67,68 +70,22 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 children: [
                   TextField(
                     controller: _nameController,
+                    maxLength: 60,
                     decoration: const InputDecoration(
                       labelText: 'Display Name',
                       prefixIcon: Icon(Icons.person_rounded),
                     ),
                   ),
-                  const SizedBox(height: 18),
-                  const Text(
-                    'Select Avatar Icon',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: presets.map((emoji) {
-                      final isSelected = currentPreset == emoji;
-                      return GestureDetector(
-                        onTap: () {
-                          setDialogState(() {
-                            currentPreset = emoji;
-                            _avatarUrlController.clear();
-                          });
-                        },
-                        child: Container(
-                          width: 44,
-                          height: 44,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: isSelected
-                                ? AppColors.primaryCyan.withValues(alpha: 0.25)
-                                : Colors.white.withValues(alpha: 0.05),
-                            border: Border.all(
-                              color: isSelected
-                                  ? AppColors.primaryCyan
-                                  : Colors.white12,
-                              width: isSelected ? 2 : 1,
-                            ),
-                          ),
-                          child: Text(
-                            emoji,
-                            style: const TextStyle(fontSize: 22),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
                   const SizedBox(height: 16),
                   TextField(
                     controller: _avatarUrlController,
-                    decoration: const InputDecoration(
-                      labelText: 'Or Custom Image URL',
-                      prefixIcon: Icon(Icons.link_rounded),
+                    keyboardType: TextInputType.url,
+                    decoration: InputDecoration(
+                      labelText: 'Profile Image URL (optional)',
+                      prefixIcon: const Icon(Icons.link_rounded),
                       hintText: 'https://...',
+                      errorText: fieldError,
                     ),
-                    onChanged: (val) {
-                      if (val.isNotEmpty && currentPreset != null) {
-                        setDialogState(() {
-                          currentPreset = null;
-                        });
-                      }
-                    },
                   ),
                 ],
               ),
@@ -140,36 +97,29 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               ),
               ElevatedButton(
                 onPressed: () async {
-                  if (profile != null) {
-                    final String? newAvatar =
-                        _avatarUrlController.text.trim().isNotEmpty
-                        ? _avatarUrlController.text.trim()
-                        : (currentPreset != null
-                              ? 'preset:$currentPreset'
-                              : profile.avatarUrl);
-
-                    final updated = profile.copyWith(
-                      displayName: _nameController.text.trim(),
-                      avatarUrl: newAvatar,
+                  final url = _avatarUrlController.text.trim();
+                  final update = ProfileUpdate(
+                    displayName: _nameController.text,
+                    avatarUrl: url.isEmpty ? null : url,
+                  );
+                  final invalid = update.validate();
+                  if (invalid != null) {
+                    setDialogState(
+                      () => fieldError = friendlyMessageForKey(invalid),
                     );
-                    Navigator.of(ctx).pop();
-                    await ref
-                        .read(authNotifierProvider.notifier)
-                        .updateProfile(updated);
-                    AppHaptics.success();
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Profile updated & synchronized with Supabase!',
-                          ),
-                          backgroundColor: AppColors.primaryEmerald,
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
-                    }
-                  } else {
-                    Navigator.of(ctx).pop();
+                    return;
+                  }
+                  Navigator.of(ctx).pop();
+                  final failure = await ref
+                      .read(profileProvider.notifier)
+                      .updateProfile(update);
+                  if (failure == null && mounted) {
+                    ScaffoldMessenger.of(this.context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Profile updated.'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
                   }
                 },
                 child: const Text('Save'),
@@ -183,35 +133,64 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
   void _showCreateGroupDialog() {
     _groupNameController.clear();
+    var currency = ref.read(preferredCurrencyProvider);
     unawaited(
       showDialog<void>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Create Household / Group'),
-          content: TextField(
-            controller: _groupNameController,
-            decoration: const InputDecoration(
-              labelText: 'Group Name',
-              hintText: 'e.g. Mercer Household',
-              prefixIcon: Icon(Icons.group_add_rounded),
+        builder: (ctx) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Create Household / Group'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: _groupNameController,
+                  maxLength: 60,
+                  decoration: const InputDecoration(
+                    labelText: 'Group Name',
+                    hintText: 'e.g. Mercer Household',
+                    prefixIcon: Icon(Icons.group_add_rounded),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // A group's currency is fixed once it is created.
+                DropdownButtonFormField<String>(
+                  initialValue: currency,
+                  decoration: const InputDecoration(
+                    labelText: 'Group currency',
+                    prefixIcon: Icon(Icons.currency_exchange_rounded),
+                  ),
+                  items: [
+                    for (final c in CurrencyInfo.all)
+                      DropdownMenuItem(
+                        value: c.code,
+                        child: Text('${c.code} (${c.symbol})'),
+                      ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) setDialogState(() => currency = value);
+                  },
+                ),
+              ],
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final name = _groupNameController.text.trim();
-                if (name.isNotEmpty) {
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  final name = _groupNameController.text.trim();
+                  if (name.isEmpty) return;
                   Navigator.of(ctx).pop();
-                  await ref.read(expenseProvider.notifier).createGroup(name);
-                }
-              },
-              child: const Text('Create'),
-            ),
-          ],
+                  await ref
+                      .read(groupsProvider.notifier)
+                      .createGroup(name, currency: currency);
+                },
+                child: const Text('Create'),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -229,7 +208,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             textCapitalization: TextCapitalization.characters,
             decoration: const InputDecoration(
               labelText: 'Invite Code',
-              hintText: 'e.g. INV-12345',
+              hintText: 'XXXX-XXXX-XXXX-XXXX',
               prefixIcon: Icon(Icons.vpn_key_rounded),
             ),
           ),
@@ -240,26 +219,21 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ),
             ElevatedButton(
               onPressed: () async {
-                String code = _inviteCodeController.text.trim();
-                if (code.isNotEmpty) {
-                  Navigator.of(ctx).pop();
-                  if (code.contains('invite?token=')) {
-                    final token = code
-                        .split('invite?token=')
-                        .last
-                        .split('&')
-                        .first
-                        .split(' ')
-                        .first;
-                    try {
-                      final normalizedToken = base64Url.normalize(token);
-                      final decoded = utf8.decode(
-                        base64Url.decode(normalizedToken),
-                      );
-                      code = decoded.split('|')[0];
-                    } catch (_) {}
-                  }
-                  await ref.read(expenseProvider.notifier).joinGroup(code);
+                final code = _inviteCodeController.text.trim();
+                if (code.isEmpty) return;
+                Navigator.of(ctx).pop();
+                final (request, _) = await ref
+                    .read(groupsProvider.notifier)
+                    .joinByCode(code);
+                if (request != null && mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'Request sent to ${request.groupName}. You can open '
+                        'the group once an admin approves you.',
+                      ),
+                    ),
+                  );
                 }
               },
               child: const Text('Join Group'),
@@ -271,10 +245,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   void _showInviteByEmailDialog() {
+    final group = ref.read(activeGroupProvider);
+    if (group == null || !group.isAdmin) return;
     final emailController = TextEditingController();
-    String selectedRole = 'member';
-    bool isSending = false;
-    String? statusMessage;
+    var selectedRole = GroupRole.member;
+    var isSending = false;
+    String? fieldError;
 
     unawaited(
       showDialog<void>(
@@ -283,9 +259,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           builder: (context, setDialogState) => AlertDialog(
             title: const Row(
               children: [
-                Icon(Icons.link_rounded, color: AppColors.primaryCyan),
+                Icon(Icons.mail_outline_rounded),
                 SizedBox(width: 8),
-                Text('Create Invite Link'),
+                Text('Invite by Email'),
               ],
             ),
             content: SingleChildScrollView(
@@ -294,21 +270,24 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Create an invitation for this email address, then share the link with them.',
+                    'We email an invitation link that only works for this '
+                    'address.',
                     style: TextStyle(fontSize: 13),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
                   TextField(
                     controller: emailController,
                     keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(
+                    autofillHints: const [AutofillHints.email],
+                    decoration: InputDecoration(
                       labelText: 'Recipient Email',
                       hintText: 'member@example.com',
-                      prefixIcon: Icon(Icons.alternate_email_rounded),
+                      prefixIcon: const Icon(Icons.alternate_email_rounded),
+                      errorText: fieldError,
                     ),
                   ),
                   const SizedBox(height: 14),
-                  DropdownButtonFormField<String>(
+                  DropdownButtonFormField<GroupRole>(
                     initialValue: selectedRole,
                     decoration: const InputDecoration(
                       labelText: 'Role',
@@ -316,16 +295,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     ),
                     items: const [
                       DropdownMenuItem(
-                        value: 'member',
-                        child: Text('Member (Add & Manage Expenses)'),
+                        value: GroupRole.member,
+                        child: Text('Member (adds and shares expenses)'),
                       ),
                       DropdownMenuItem(
-                        value: 'admin',
-                        child: Text('Admin (Full Control)'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'viewer',
-                        child: Text('Viewer (Read Only)'),
+                        value: GroupRole.viewer,
+                        child: Text('Viewer (read only)'),
                       ),
                     ],
                     onChanged: (val) {
@@ -334,16 +309,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       }
                     },
                   ),
-                  if (statusMessage != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      statusMessage!,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.primaryEmerald,
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -363,39 +328,34 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     )
                   : ElevatedButton(
                       onPressed: () async {
-                        final email = emailController.text.trim();
-                        if (email.isEmpty || !email.contains('@')) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Please enter a valid email address',
-                              ),
-                              backgroundColor: AppColors.error,
-                            ),
-                          );
+                        final email = emailController.text.trim().toLowerCase();
+                        final invalid = Validators.validateEmail(email);
+                        if (invalid != null) {
+                          setDialogState(() => fieldError = invalid);
                           return;
                         }
-
                         setDialogState(() {
                           isSending = true;
-                          statusMessage = 'Creating invitation...';
+                          fieldError = null;
                         });
 
-                        final invitation = await ref
-                            .read(expenseProvider.notifier)
-                            .createInvitation(email: email, role: selectedRole);
+                        final (sent, failure) = await ref
+                            .read(pendingInvitationsProvider(group.id).notifier)
+                            .send(email, role: selectedRole);
 
-                        if (ctx.mounted) {
-                          Navigator.of(ctx).pop();
+                        if (failure != null) {
+                          // Reported once by the shell; keep the dialog.
+                          if (ctx.mounted) {
+                            setDialogState(() => isSending = false);
+                          }
+                          return;
                         }
-
-                        // The dialog's own context is gone after pop; report
-                        // on the profile screen instead.
-                        if (mounted) {
-                          _showInvitationResult(invitation);
+                        if (ctx.mounted) Navigator.of(ctx).pop();
+                        if (mounted && sent != null) {
+                          _showInvitationResult(email, sent);
                         }
                       },
-                      child: const Text('Create Invitation'),
+                      child: const Text('Send Invitation'),
                     ),
             ],
           ),
@@ -404,20 +364,23 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
   }
 
-  /// Reports the outcome of creating an invitation. The app never emails
-  /// the invitee itself, so on success it shows the link to share. The link
-  /// stays available from the pending invitations list.
-  void _showInvitationResult(GroupInvitation? invitation) {
-    if (invitation == null) {
+  /// Reports the outcome honestly: "emailed" only when the server sent the
+  /// email; otherwise the share link so the admin can send it themselves.
+  void _showInvitationResult(String email, SentInvitation sent) {
+    final link = sent.shareUrl;
+    if (sent.sent || link == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not create the invitation. Please try again.'),
-          backgroundColor: AppColors.error,
+        SnackBar(
+          content: Text(
+            sent.sent
+                ? 'Invitation emailed to $email.'
+                : "The invitation was created but the email couldn't be sent. "
+                      'Ask the person to check the app later.',
+          ),
         ),
       );
       return;
     }
-    final link = AppConfig.environment.inviteLink(invitation.token).toString();
     unawaited(
       showDialog<void>(
         context: context,
@@ -428,8 +391,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Send this link to ${invitation.email}. It only works for '
-                'that email address.',
+                "We couldn't email it, so send this link to $email "
+                'yourself. It only works for that email address.',
                 style: const TextStyle(fontSize: 13),
               ),
               const SizedBox(height: 12),
@@ -463,25 +426,27 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
   }
 
+  /// Records a payment from the signed-in user to another member. It stays
+  /// pending until the payee confirms it.
   void _showSettleUpDialog({
     String? prefilledToUserId,
-    double? prefilledAmount,
+    Money? prefilledAmount,
   }) {
-    final expenseState = ref.read(expenseProvider);
-    final authState = ref.read(authNotifierProvider);
-    final currentUserId = userIdForChecks(authState.user?.id);
-    final currency =
-        authState.profile?.currency ?? AppConstants.defaultCurrency;
+    final group = ref.read(activeGroupProvider);
+    final currentUserId = ref.read(currentUserIdProvider);
+    if (group == null || currentUserId == null) return;
+    final currency = group.currency;
 
-    final otherMembers = expenseState.groupMembers
-        .where((m) => m.userId != currentUserId)
-        .toList();
+    final otherMembers =
+        (ref.read(groupMembersProvider(group.id)).value ??
+                const <GroupMember>[])
+            .where((m) => m.userId != currentUserId && !m.isPending)
+            .toList();
 
     if (otherMembers.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('No other members in this group to settle with.'),
-          backgroundColor: AppColors.warning,
         ),
       );
       return;
@@ -494,12 +459,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         : otherMembers.first.userId;
 
     final amountController = TextEditingController(
-      text: prefilledAmount != null && prefilledAmount > 0
-          ? prefilledAmount.toStringAsFixed(2)
+      text: prefilledAmount != null && prefilledAmount.isPositive
+          ? MoneyFormat.forInput(prefilledAmount)
           : '',
     );
-    final notesController = TextEditingController(text: 'Settled via Exevra');
+    final notesController = TextEditingController();
     bool isSubmitting = false;
+    String? amountError;
 
     unawaited(
       showDialog<void>(
@@ -508,9 +474,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           builder: (context, setDialogState) => AlertDialog(
             title: const Row(
               children: [
-                Icon(Icons.handshake_rounded, color: AppColors.primaryEmerald),
+                Icon(Icons.handshake_rounded),
                 SizedBox(width: 8),
-                Text('Settle Up Debt'),
+                Text('Record a Payment'),
               ],
             ),
             content: SingleChildScrollView(
@@ -519,7 +485,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Record a debt settlement payment between you and a group member.',
+                    'Record money you paid to a group member. It counts once '
+                    'they confirm they received it.',
                     style: TextStyle(fontSize: 13),
                   ),
                   const SizedBox(height: 16),
@@ -529,17 +496,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       labelText: 'Paid To',
                       prefixIcon: Icon(Icons.person_rounded),
                     ),
-                    items: otherMembers.map((m) {
-                      final name =
-                          (m.displayName != null &&
-                              m.displayName!.trim().isNotEmpty)
-                          ? m.displayName!
-                          : 'Member';
-                      return DropdownMenuItem(
-                        value: m.userId,
-                        child: Text(name),
-                      );
-                    }).toList(),
+                    items: otherMembers
+                        .map(
+                          (m) => DropdownMenuItem(
+                            value: m.userId,
+                            child: Text(m.label),
+                          ),
+                        )
+                        .toList(),
                     onChanged: (val) {
                       if (val != null) {
                         setDialogState(() => selectedRecipientId = val);
@@ -555,14 +519,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     decoration: InputDecoration(
                       labelText: 'Amount ($currency)',
                       prefixIcon: const Icon(Icons.payments_rounded),
-                      hintText: '0.00',
+                      hintText: '0',
+                      errorText: amountError,
                     ),
                   ),
                   const SizedBox(height: 14),
                   TextField(
                     controller: notesController,
+                    maxLength: 200,
                     decoration: const InputDecoration(
-                      labelText: 'Notes / Reference',
+                      labelText: 'Notes / Reference (optional)',
                       prefixIcon: Icon(Icons.note_alt_outlined),
                       hintText: 'e.g. Bank transfer, Cash, UPI',
                     ),
@@ -586,44 +552,45 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     )
                   : ElevatedButton(
                       onPressed: () async {
-                        final amount = double.tryParse(
-                          amountController.text.trim(),
+                        final parsed = MoneyParser.parse(
+                          amountController.text,
+                          currency: currency,
                         );
-                        if (amount == null || amount <= 0) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Please enter a valid amount'),
-                              backgroundColor: AppColors.error,
-                            ),
+                        if (parsed is MoneyParseError) {
+                          setDialogState(
+                            () => amountError = friendlyMessage(parsed.failure),
                           );
                           return;
                         }
+                        final amount = (parsed as MoneyParsed).value;
+                        setDialogState(() {
+                          isSubmitting = true;
+                          amountError = null;
+                        });
 
-                        setDialogState(() => isSubmitting = true);
-
-                        final ok = await ref
-                            .read(expenseProvider.notifier)
-                            .recordSettlement(
-                              toUserId: selectedRecipientId,
+                        final failure = await ref
+                            .read(settlementsProvider(group.id).notifier)
+                            .record(
+                              toUser: selectedRecipientId,
                               amount: amount,
-                              notes: notesController.text.trim(),
+                              note: notesController.text,
                             );
 
-                        if (ctx.mounted) {
-                          Navigator.of(ctx).pop();
+                        if (failure != null) {
+                          // Reported once by the shell; keep the dialog.
+                          if (ctx.mounted) {
+                            setDialogState(() => isSubmitting = false);
+                          }
+                          return;
                         }
-
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
+                        if (ctx.mounted) Navigator.of(ctx).pop();
+                        if (mounted) {
+                          ScaffoldMessenger.of(this.context).showSnackBar(
+                            const SnackBar(
                               content: Text(
-                                ok
-                                    ? 'Settlement payment recorded successfully!'
-                                    : 'Failed to record settlement payment.',
+                                'Payment recorded. It counts once the other '
+                                'person confirms it.',
                               ),
-                              backgroundColor: ok
-                                  ? AppColors.primaryEmerald
-                                  : AppColors.error,
                             ),
                           );
                         }
@@ -654,7 +621,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ElevatedButton(
               onPressed: () {
                 Navigator.of(ctx).pop();
-                unawaited(ref.read(expenseProvider.notifier).leaveGroup());
+                final group = ref.read(activeGroupProvider);
+                if (group != null) {
+                  unawaited(
+                    ref.read(groupsProvider.notifier).leaveGroup(group.id),
+                  );
+                }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.error,
@@ -685,7 +657,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ElevatedButton(
               onPressed: () {
                 Navigator.of(ctx).pop();
-                unawaited(ref.read(expenseProvider.notifier).deleteGroup());
+                final group = ref.read(activeGroupProvider);
+                if (group != null && group.isAdmin) {
+                  unawaited(
+                    ref.read(groupsProvider.notifier).deleteGroup(group.id),
+                  );
+                }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.error,
@@ -753,9 +730,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ElevatedButton(
               onPressed: () {
                 Navigator.of(ctx).pop();
-                unawaited(
-                  ref.read(authNotifierProvider.notifier).deleteAccount(),
-                );
+                unawaited(_deleteAccount());
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.error,
@@ -769,23 +744,95 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
   }
 
+  /// Deletes the account on the server behind a blocking progress dialog.
+  /// The session ends only after the server confirmed the deletion; on
+  /// failure nothing changes and the reason is shown.
+  Future<void> _deleteAccount() async {
+    final navigator = Navigator.of(context, rootNavigator: true);
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const PopScope(
+          canPop: false,
+          child: AlertDialog(
+            content: Row(
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(width: 16),
+                Expanded(child: Text('Deleting your account...')),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    final failure = await ref
+        .read(authNotifierProvider.notifier)
+        .deleteAccount();
+    if (navigator.mounted) navigator.pop();
+    if (failure != null && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyMessage(failure))));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authNotifierProvider);
-    final expenseState = ref.watch(expenseProvider);
     final appLockState = ref.watch(appLockProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final profile = authState.profile;
+    final profile = ref.watch(userProfileProvider);
+    final themeMode = ref.watch(themePreferenceProvider);
     final resolvedDisplayName =
-        (profile?.displayName != null && profile!.displayName.trim().isNotEmpty)
+        (profile != null && profile.displayName.trim().isNotEmpty)
         ? profile.displayName
         : (authState.user?.userMetadata?['full_name'] as String? ??
               authState.user?.email?.split('@').first ??
               'User');
-    final group = expenseState.currentGroup;
-    final currentUserId = userIdForChecks(authState.user?.id);
-    final isGroupAdmin = group?.isAdmin(currentUserId) ?? false;
+    final groupsState = ref.watch(groupsProvider).value;
+    final group = ref.watch(activeGroupProvider);
+    final currentUserId = ref.watch(currentUserIdProvider);
+    final isGroupAdmin = group?.isAdmin ?? false;
+    final membersAsync = group == null
+        ? const AsyncData<List<GroupMember>>([])
+        : ref.watch(groupMembersProvider(group.id));
+    final members = membersAsync.value ?? const <GroupMember>[];
+    final approvedMembers = members.where((m) => !m.isPending).toList();
+    final pendingMembers = members.where((m) => m.isPending).toList();
+    final balances = group == null
+        ? const <GroupBalance>[]
+        : ref.watch(groupBalancesProvider(group.id)).value ??
+              const <GroupBalance>[];
+    final suggestions = group == null
+        ? const <SettleSuggestion>[]
+        : ref.watch(settleSuggestionsProvider(group.id)).value ??
+              const <SettleSuggestion>[];
+    final settlements = group == null
+        ? const <Settlement>[]
+        : ref.watch(settlementsProvider(group.id)).value ??
+              const <Settlement>[];
+    final pendingInvitations = group == null || !group.isAdmin
+        ? const <GroupInvitation>[]
+        : ref.watch(pendingInvitationsProvider(group.id)).value ??
+              const <GroupInvitation>[];
+    String nameOf(String? userId) {
+      if (userId == null) return 'Former member';
+      if (userId == currentUserId) return 'You';
+      for (final m in members) {
+        if (m.userId == userId) return m.label;
+      }
+      for (final b in balances) {
+        if (b.userId == userId) return b.displayName;
+      }
+      return 'Member';
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('Account & Settings')),
@@ -807,13 +854,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     ),
                     child:
                         (profile?.avatarUrl != null &&
-                            profile!.avatarUrl!.startsWith('preset:'))
-                        ? Text(
-                            profile.avatarUrl!.replaceFirst('preset:', ''),
-                            style: const TextStyle(fontSize: 28),
-                          )
-                        : (profile?.avatarUrl != null &&
-                              profile!.avatarUrl!.startsWith('http'))
+                            profile!.avatarUrl!.startsWith('https://'))
                         ? ClipOval(
                             child: Image.network(
                               profile.avatarUrl!,
@@ -875,9 +916,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          profile?.email ??
-                              authState.user?.email ??
-                              'alex.mercer@antigravity.io',
+                          profile?.email ?? authState.user?.email ?? '',
                           style: TextStyle(
                             fontSize: 13,
                             color: isDark
@@ -885,18 +924,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                 : AppColors.lightTextTertiary,
                           ),
                         ),
-                        if (profile?.phone != null) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            profile!.phone!,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: isDark
-                                  ? AppColors.darkTextTertiary
-                                  : AppColors.lightTextTertiary,
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                   ),
@@ -938,7 +965,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            'My Groups (${expenseState.userGroups.length})',
+                            'My Groups (${groupsState?.groups.length ?? 0})',
                             style: const TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.w700,
@@ -982,8 +1009,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     children: [
                       ChoiceChip(
                         label: const Text('Personal (No Group)'),
-                        selected: expenseState.currentGroup == null,
-                        avatar: expenseState.currentGroup == null
+                        selected: group == null,
+                        avatar: group == null
                             ? const Icon(
                                 Icons.check_circle_rounded,
                                 size: 16,
@@ -994,15 +1021,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                 size: 16,
                                 color: Colors.grey,
                               ),
-                        onSelected: (_) => ref
-                            .read(expenseProvider.notifier)
-                            .switchGroup(null),
+                        onSelected: (_) =>
+                            ref.read(groupsProvider.notifier).switchScope(null),
                       ),
-                      ...expenseState.userGroups.map((g) {
-                        final isSelected =
-                            expenseState.currentGroup?.id == g.id;
+                      ...?groupsState?.groups.map((g) {
+                        final isSelected = group?.id == g.id;
                         return ChoiceChip(
-                          label: Text(g.name),
+                          // A pending request opens once an admin approves.
+                          label: Text(
+                            g.isPending ? '${g.name} (pending)' : g.name,
+                          ),
                           selected: isSelected,
                           avatar: isSelected
                               ? const Icon(
@@ -1015,9 +1043,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                   size: 16,
                                   color: Colors.grey,
                                 ),
-                          onSelected: (_) => ref
-                              .read(expenseProvider.notifier)
-                              .switchGroup(g.id),
+                          onSelected: g.isPending
+                              ? null
+                              : (_) => ref
+                                    .read(groupsProvider.notifier)
+                                    .switchScope(g.id),
                         );
                       }),
                     ],
@@ -1073,123 +1103,135 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Text(
-                          'Invite Code: ',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isDark
-                                ? AppColors.darkTextSecondary
-                                : AppColors.lightTextSecondary,
+                    if (isGroupAdmin && group.displayInviteCode != null) ...[
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Text(
+                            'Invite Code: ',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: isDark
+                                  ? AppColors.darkTextSecondary
+                                  : AppColors.lightTextSecondary,
+                            ),
                           ),
-                        ),
-                        SelectableText(
-                          group.inviteCode,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.5,
-                            color: AppColors.primaryCyan,
+                          SelectableText(
+                            group.displayInviteCode!,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.5,
+                              color: AppColors.primaryCyan,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.copy_rounded,
-                            size: 16,
-                            color: AppColors.primaryCyan,
-                          ),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          onPressed: () {
-                            unawaited(
-                              Clipboard.setData(
-                                ClipboardData(text: group.inviteCode),
-                              ),
-                            );
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Group invite code copied to clipboard!',
-                                ),
-                                duration: Duration(seconds: 2),
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Invite Actions: per-member invitation vs group link
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: _showInviteByEmailDialog,
+                          const SizedBox(width: 8),
+                          IconButton(
                             icon: const Icon(
-                              Icons.person_add_alt_1_rounded,
+                              Icons.copy_rounded,
                               size: 16,
+                              color: AppColors.primaryCyan,
                             ),
-                            label: const Text('Invite Member'),
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: OutlinedButton.icon(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
                             onPressed: () {
-                              AppHaptics.selection();
-                              final exp = DateTime.now()
-                                  .add(const Duration(days: 7))
-                                  .millisecondsSinceEpoch;
-                              final token = base64Url.encode(
-                                utf8.encode('${group.inviteCode}|$exp'),
-                              );
-                              final link = AppConfig.environment.inviteLink(
-                                token,
-                              );
-                              final shareText =
-                                  'Join my group "${group.name}" on Exevra!\n\nClick this link to join:\n$link';
                               unawaited(
                                 Clipboard.setData(
-                                  ClipboardData(text: shareText),
+                                  ClipboardData(text: group.displayInviteCode!),
                                 ),
                               );
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                   content: Text(
-                                    'Invite link copied to clipboard!',
+                                    'Group invite code copied to clipboard!',
                                   ),
-                                  backgroundColor: AppColors.primaryCyan,
-                                  duration: Duration(seconds: 3),
+                                  duration: Duration(seconds: 2),
                                 ),
                               );
                             },
-                            icon: const Icon(Icons.share_rounded, size: 16),
-                            label: const Text('Share Link'),
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
+                          ),
+                        ],
+                      ),
+                    ],
+                    if (isGroupAdmin) ...[
+                      const SizedBox(height: 14),
+
+                      // Invite Actions: email invitation vs invite code
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: _showInviteByEmailDialog,
+                              icon: const Icon(
+                                Icons.person_add_alt_1_rounded,
+                                size: 16,
+                              ),
+                              label: const Text('Invite Member'),
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 10,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () async {
+                                AppHaptics.selection();
+                                // A fresh code also stops the old one working.
+                                try {
+                                  final code = await ref
+                                      .read(groupRepositoryProvider)
+                                      .rotateInviteCode(group.id);
+                                  await ref
+                                      .read(groupsProvider.notifier)
+                                      .refresh();
+                                  final text =
+                                      'Join my group "${group.name}" on Exevra '
+                                      'with the invite code ${code.display}. '
+                                      'An admin approves new members.';
+                                  await Clipboard.setData(
+                                    ClipboardData(text: text),
+                                  );
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'New invite code copied. The previous '
+                                        'code no longer works.',
+                                      ),
+                                    ),
+                                  );
+                                } on AppFailure catch (failure) {
+                                  ref
+                                      .read(failureReporterProvider.notifier)
+                                      .report(failure);
+                                }
+                              },
+                              icon: const Icon(Icons.share_rounded, size: 16),
+                              label: const Text('New Code'),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 10,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
 
                     // Pending Invitations List (if any)
-                    if (expenseState.pendingInvitations.isNotEmpty) ...[
+                    if (pendingInvitations.isNotEmpty) ...[
                       const SizedBox(height: 18),
                       Text(
-                        'Pending Invitations (${expenseState.pendingInvitations.length})',
+                        'Pending Invitations (${pendingInvitations.length})',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
@@ -1202,11 +1244,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       ListView.separated(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
-                        itemCount: expenseState.pendingInvitations.length,
+                        itemCount: pendingInvitations.length,
                         separatorBuilder: (context, index) =>
                             const SizedBox(height: 6),
                         itemBuilder: (context, index) {
-                          final inv = expenseState.pendingInvitations[index];
+                          final inv = pendingInvitations[index];
                           return Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 12,
@@ -1247,7 +1289,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                       Text(
-                                        'Role: ${inv.role} • Expires: ${inv.expiresAt.day}/${inv.expiresAt.month}',
+                                        'Role: ${inv.role.name} • Expires: ${DateHelpers.formatShortDate(inv.expiresAt)}',
                                         style: TextStyle(
                                           fontSize: 11,
                                           color: isDark
@@ -1260,22 +1302,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                 ),
                                 IconButton(
                                   icon: const Icon(
-                                    Icons.copy_rounded,
-                                    size: 18,
-                                    color: AppColors.primaryCyan,
-                                  ),
-                                  tooltip: 'Copy Invite Link',
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                  onPressed: () => _copyInviteLink(
-                                    AppConfig.environment
-                                        .inviteLink(inv.token)
-                                        .toString(),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                IconButton(
-                                  icon: const Icon(
                                     Icons.cancel_outlined,
                                     size: 18,
                                     color: AppColors.error,
@@ -1284,8 +1310,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                   padding: EdgeInsets.zero,
                                   constraints: const BoxConstraints(),
                                   onPressed: () => ref
-                                      .read(expenseProvider.notifier)
-                                      .revokeInvitation(inv.id),
+                                      .read(
+                                        pendingInvitationsProvider(
+                                          group.id,
+                                        ).notifier,
+                                      )
+                                      .revoke(inv.id),
                                 ),
                               ],
                             ),
@@ -1294,10 +1324,20 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       ),
                     ],
 
-                    if (expenseState.groupMembers.isNotEmpty) ...[
+                    if (membersAsync.hasError && members.isEmpty) ...[
+                      const SizedBox(height: 12),
+                      FailureRetry(
+                        error: membersAsync.error!,
+                        compact: true,
+                        onRetry: () =>
+                            ref.invalidate(groupMembersProvider(group.id)),
+                      ),
+                    ],
+                    if (members.isNotEmpty) ...[
                       const SizedBox(height: 18),
                       Text(
-                        'Group Members (${expenseState.groupMembers.length})',
+                        'Group Members (${approvedMembers.length})'
+                        '${pendingMembers.isEmpty ? '' : ' • ${pendingMembers.length} waiting'}',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
@@ -1310,12 +1350,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       ListView.separated(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
-                        itemCount: expenseState.groupMembers.length,
+                        itemCount: members.length,
                         separatorBuilder: (context, index) =>
                             const SizedBox(height: 8),
                         itemBuilder: (context, index) {
-                          final m = expenseState.groupMembers[index];
-                          final isViewer = m.isViewerOnly;
+                          final m = members[index];
+                          final isViewer = m.isPending;
+                          final membersNotifier = ref.read(
+                            groupMembersProvider(group.id).notifier,
+                          );
                           return Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 12,
@@ -1360,7 +1403,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        m.displayName ?? 'User',
+                                        m.userId == currentUserId
+                                            ? '${m.label} (you)'
+                                            : m.label,
                                         style: const TextStyle(
                                           fontSize: 13,
                                           fontWeight: FontWeight.w700,
@@ -1372,8 +1417,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                         m.isAdmin
                                             ? 'Admin'
                                             : (isViewer
-                                                  ? 'Viewer (Pending Review)'
-                                                  : 'Member (Can Add)'),
+                                                  ? 'Waiting for approval'
+                                                  : (m.isViewer
+                                                        ? 'Viewer (read only)'
+                                                        : 'Member (can add)')),
                                         style: TextStyle(
                                           fontSize: 11,
                                           fontWeight: FontWeight.w600,
@@ -1392,16 +1439,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                   if (isViewer)
                                     ElevatedButton.icon(
                                       onPressed: () async {
-                                        final ok = await ref
-                                            .read(expenseProvider.notifier)
-                                            .approveGroupMember(m.userId);
-                                        if (ok && context.mounted) {
+                                        final failure = await membersNotifier
+                                            .approve(m.userId);
+                                        if (failure == null &&
+                                            context.mounted) {
                                           ScaffoldMessenger.of(
                                             context,
                                           ).showSnackBar(
                                             SnackBar(
                                               content: Text(
-                                                '${m.displayName ?? "Member"} approved! They can now record expenses.',
+                                                '${m.label} approved. They can now add expenses.',
                                               ),
                                               backgroundColor:
                                                   AppColors.primaryEmerald,
@@ -1438,8 +1485,50 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                         ),
                                       ),
                                     ),
+                                  if (!isViewer && !m.isAdmin)
+                                    PopupMenuButton<String>(
+                                      tooltip: 'Change role',
+                                      icon: const Icon(
+                                        Icons.manage_accounts_outlined,
+                                        size: 20,
+                                      ),
+                                      onSelected: (value) {
+                                        unawaited(switch (value) {
+                                          'member' => membersNotifier.setRole(
+                                            m.userId,
+                                            GroupRole.member,
+                                          ),
+                                          'viewer' => membersNotifier.setRole(
+                                            m.userId,
+                                            GroupRole.viewer,
+                                          ),
+                                          _ => membersNotifier.transferAdmin(
+                                            m.userId,
+                                          ),
+                                        });
+                                      },
+                                      itemBuilder: (_) => [
+                                        if (m.isViewer)
+                                          const PopupMenuItem(
+                                            value: 'member',
+                                            child: Text('Make member'),
+                                          )
+                                        else
+                                          const PopupMenuItem(
+                                            value: 'viewer',
+                                            child: Text('Make viewer'),
+                                          ),
+                                        const PopupMenuItem(
+                                          value: 'admin',
+                                          child: Text(
+                                            'Make admin (you stay a member)',
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   const SizedBox(width: 8),
                                   IconButton(
+                                    tooltip: isViewer ? 'Reject' : 'Remove',
                                     icon: const Icon(
                                       Icons.person_remove_rounded,
                                       size: 20,
@@ -1448,16 +1537,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                     padding: EdgeInsets.zero,
                                     constraints: const BoxConstraints(),
                                     onPressed: () async {
-                                      final ok = await ref
-                                          .read(expenseProvider.notifier)
-                                          .removeGroupMember(m.userId);
-                                      if (ok && context.mounted) {
+                                      final failure = await membersNotifier
+                                          .remove(m.userId);
+                                      if (failure == null && context.mounted) {
                                         ScaffoldMessenger.of(
                                           context,
                                         ).showSnackBar(
                                           SnackBar(
                                             content: Text(
-                                              '${m.displayName ?? "Member"} removed from group.',
+                                              '${m.label} removed from the group.',
                                             ),
                                             backgroundColor: AppColors.error,
                                           ),
@@ -1531,15 +1619,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                             ),
                           ],
                         ),
-                        TextButton.icon(
-                          onPressed: () => _showSettleUpDialog(),
-                          icon: const Icon(Icons.handshake_rounded, size: 16),
-                          label: const Text('Settle Up'),
-                        ),
+                        if (group.canRead)
+                          TextButton.icon(
+                            onPressed: () => _showSettleUpDialog(),
+                            icon: const Icon(Icons.handshake_rounded, size: 16),
+                            label: const Text('Settle Up'),
+                          ),
                       ],
                     ),
                     const SizedBox(height: 10),
-                    if (expenseState.settlements.isEmpty) ...[
+                    if (suggestions.isEmpty) ...[
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(14),
@@ -1578,13 +1667,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       ListView.separated(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
-                        itemCount: expenseState.settlements.length,
+                        itemCount: suggestions.length,
                         separatorBuilder: (context, index) =>
                             const SizedBox(height: 8),
                         itemBuilder: (context, index) {
-                          final debt = expenseState.settlements[index];
-                          final iOwe = debt.fromUserId == currentUserId;
-                          final owedToMe = debt.toUserId == currentUserId;
+                          final debt = suggestions[index];
+                          final iOwe = debt.fromUser == currentUserId;
+                          final owedToMe = debt.toUser == currentUserId;
 
                           return Container(
                             padding: const EdgeInsets.symmetric(
@@ -1635,22 +1724,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                     children: [
                                       Text(
                                         iOwe
-                                            ? 'You owe ${debt.toUserName}'
+                                            ? 'You owe ${nameOf(debt.toUser)}'
                                             : (owedToMe
-                                                  ? '${debt.fromUserName} owes you'
-                                                  : '${debt.fromUserName} owes ${debt.toUserName}'),
+                                                  ? '${nameOf(debt.fromUser)} owes you'
+                                                  : '${nameOf(debt.fromUser)} owes ${nameOf(debt.toUser)}'),
                                         style: const TextStyle(
                                           fontSize: 13,
                                           fontWeight: FontWeight.w700,
                                         ),
                                       ),
                                       Text(
-                                        CurrencyFormatter.format(
-                                          debt.amount,
-                                          currencyCode:
-                                              authState.profile?.currency ??
-                                              AppConstants.defaultCurrency,
-                                        ),
+                                        MoneyFormat.format(debt.amount),
                                         style: TextStyle(
                                           fontSize: 14,
                                           fontWeight: FontWeight.w800,
@@ -1671,7 +1755,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                 if (iOwe)
                                   ElevatedButton(
                                     onPressed: () => _showSettleUpDialog(
-                                      prefilledToUserId: debt.toUserId,
+                                      prefilledToUserId: debt.toUser,
                                       prefilledAmount: debt.amount,
                                     ),
                                     style: ElevatedButton.styleFrom(
@@ -1692,11 +1776,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       ),
                     ],
 
-                    // Recent Settlements History
-                    if (expenseState.settlementHistory.isNotEmpty) ...[
+                    // Settlement payments: pending ones wait for the payee.
+                    if (settlements.isNotEmpty) ...[
                       const SizedBox(height: 14),
                       Text(
-                        'Recent Settlement Payments (${expenseState.settlementHistory.length})',
+                        'Payments (${settlements.length})',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
@@ -1706,29 +1790,63 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      ...expenseState.settlementHistory.take(3).map((s) {
+                      ...settlements.take(10).map((s) {
+                        final notifier = ref.read(
+                          settlementsProvider(group.id).notifier,
+                        );
+                        final canConfirm =
+                            s.isPending && s.toUser == currentUserId;
+                        final canVoid =
+                            !s.isVoided &&
+                            (s.fromUser == currentUserId ||
+                                s.toUser == currentUserId ||
+                                isGroupAdmin);
+                        final status = switch (s.status) {
+                          SettlementStatus.pending =>
+                            'waiting for confirmation',
+                          SettlementStatus.confirmed => 'confirmed',
+                          SettlementStatus.voided => 'voided',
+                        };
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 4),
                           child: Row(
                             children: [
-                              const Icon(
-                                Icons.check_circle_outline_rounded,
+                              Icon(
+                                s.isConfirmed
+                                    ? Icons.check_circle_outline_rounded
+                                    : (s.isPending
+                                          ? Icons.schedule_rounded
+                                          : Icons.block_rounded),
                                 size: 14,
-                                color: AppColors.primaryEmerald,
                               ),
                               const SizedBox(width: 6),
                               Expanded(
                                 child: Text(
-                                  'Payment of ${CurrencyFormatter.format(s.amount, currencyCode: authState.profile?.currency ?? AppConstants.defaultCurrency)}${s.notes != null ? " • ${s.notes}" : ""}',
+                                  '${nameOf(s.fromUser)} paid ${nameOf(s.toUser)} '
+                                  '${MoneyFormat.format(s.amount)} • $status'
+                                  '${s.note != null ? " • ${s.note}" : ""}',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: isDark
                                         ? AppColors.darkTextTertiary
                                         : AppColors.lightTextTertiary,
                                   ),
+                                  maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
+                              if (canConfirm)
+                                TextButton(
+                                  onPressed: () =>
+                                      unawaited(notifier.confirm(s.id)),
+                                  child: const Text('Confirm'),
+                                ),
+                              if (canVoid)
+                                TextButton(
+                                  onPressed: () =>
+                                      unawaited(notifier.voidPayment(s.id)),
+                                  child: const Text('Void'),
+                                ),
                             ],
                           ),
                         );
@@ -1831,40 +1949,36 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       color: AppColors.primaryCyan,
                     ),
                     title: const Text(
-                      'Active Currency',
+                      'Default Currency',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                     trailing: DropdownButton<String>(
-                      value: profile?.currency ?? AppConstants.defaultCurrency,
+                      value: ref.watch(preferredCurrencyProvider),
                       underline: const SizedBox(),
-                      onChanged: (val) {
-                        if (val != null) {
-                          AppHaptics.selection();
-                          unawaited(
-                            ref
-                                .read(authNotifierProvider.notifier)
-                                .setCurrency(val),
-                          );
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                'Active currency updated to $val and synced with cloud.',
-                              ),
-                              backgroundColor: AppColors.primaryEmerald,
-                              duration: const Duration(seconds: 2),
+                      // Used for new personal expenses; groups keep their
+                      // own currency.
+                      onChanged: profile == null
+                          ? null
+                          : (val) {
+                              if (val == null) return;
+                              AppHaptics.selection();
+                              unawaited(
+                                ref
+                                    .read(profileProvider.notifier)
+                                    .setCurrency(val),
+                              );
+                            },
+                      items: CurrencyInfo.all
+                          .map(
+                            (c) => DropdownMenuItem(
+                              value: c.code,
+                              child: Text('${c.code} (${c.symbol})'),
                             ),
-                          );
-                        }
-                      },
-                      items: AppConstants.currencies.entries.map((e) {
-                        return DropdownMenuItem(
-                          value: e.key,
-                          child: Text('${e.key} (${e.value})'),
-                        );
-                      }).toList(),
+                          )
+                          .toList(),
                     ),
                   ),
                   const Divider(height: 1),
@@ -1883,40 +1997,28 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    trailing: DropdownButton<String>(
-                      value: profile?.themeMode ?? 'system',
+                    trailing: DropdownButton<ThemePreference>(
+                      value: themeMode,
                       underline: const SizedBox(),
                       onChanged: (val) {
-                        if (val != null) {
-                          AppHaptics.selection();
-                          unawaited(
-                            ref
-                                .read(authNotifierProvider.notifier)
-                                .setThemeMode(val),
-                          );
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                'Theme mode updated to $val and synced with cloud.',
-                              ),
-                              backgroundColor: AppColors.primaryEmerald,
-                              duration: const Duration(seconds: 2),
-                            ),
-                          );
-                        }
+                        if (val == null) return;
+                        AppHaptics.selection();
+                        unawaited(
+                          ref.read(profileProvider.notifier).setThemeMode(val),
+                        );
                       },
                       items: const [
                         DropdownMenuItem(
-                          value: 'system',
+                          value: ThemePreference.system,
                           child: Text('System'),
                         ),
                         DropdownMenuItem(
-                          value: 'dark',
-                          child: Text('Dark Space'),
+                          value: ThemePreference.dark,
+                          child: Text('Dark'),
                         ),
                         DropdownMenuItem(
-                          value: 'light',
-                          child: Text('Light Platinum'),
+                          value: ThemePreference.light,
+                          child: Text('Light'),
                         ),
                       ],
                     ),
@@ -1939,14 +2041,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     ),
                     value: profile?.hapticsEnabled ?? true,
                     activeThumbColor: AppColors.primaryEmerald,
-                    onChanged: (val) {
-                      AppHaptics.selection();
-                      unawaited(
-                        ref
-                            .read(authNotifierProvider.notifier)
-                            .setHapticsEnabled(val),
-                      );
-                    },
+                    onChanged: profile == null
+                        ? null
+                        : (val) {
+                            AppHaptics.selection();
+                            unawaited(
+                              ref
+                                  .read(profileProvider.notifier)
+                                  .setHapticsEnabled(val),
+                            );
+                          },
                   ),
                   const Divider(height: 1),
 
@@ -1970,14 +2074,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     ),
                     value: profile?.aiConsent ?? false,
                     activeThumbColor: AppColors.primaryRose,
-                    onChanged: (val) {
-                      AppHaptics.selection();
-                      unawaited(
-                        ref
-                            .read(authNotifierProvider.notifier)
-                            .setAiConsent(val),
-                      );
-                    },
+                    onChanged: profile == null
+                        ? null
+                        : (val) {
+                            AppHaptics.selection();
+                            unawaited(
+                              ref
+                                  .read(profileProvider.notifier)
+                                  .setAiConsent(val),
+                            );
+                          },
                   ),
                 ],
               ),

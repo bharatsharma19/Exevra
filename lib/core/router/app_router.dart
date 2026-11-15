@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import '../../providers/auth_provider.dart';
 import '../../features/auth/screens/login_screen.dart';
 import '../../features/auth/screens/register_screen.dart';
-import '../../features/auth/screens/phone_otp_screen.dart';
 import '../../features/auth/screens/forgot_password_screen.dart';
 import '../../features/auth/screens/reset_password_screen.dart';
 import '../../features/auth/screens/email_verification_screen.dart';
@@ -85,16 +84,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isAuthRoute =
           loc == '/login' ||
           loc == '/register' ||
-          loc == '/phone-auth' ||
           loc == '/forgot-password' ||
           loc == '/reset-password';
 
       // Routes that an already authenticated & verified user should NOT stay on
       final isAuthScreenToExit =
-          loc == '/login' ||
-          loc == '/register' ||
-          loc == '/phone-auth' ||
-          loc == '/forgot-password';
+          loc == '/login' || loc == '/register' || loc == '/forgot-password';
 
       final isInviteRoute = loc.startsWith('/invite');
 
@@ -174,14 +169,6 @@ final routerProvider = Provider<GoRouter>((ref) {
           context: context,
           state: state,
           child: const EmailVerificationScreen(),
-        ),
-      ),
-      GoRoute(
-        path: '/phone-auth',
-        pageBuilder: (context, state) => _buildAnimatedPage(
-          context: context,
-          state: state,
-          child: const PhoneOtpScreen(),
         ),
       ),
       GoRoute(

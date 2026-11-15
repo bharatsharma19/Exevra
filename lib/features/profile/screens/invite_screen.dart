@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,9 +7,13 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/haptics.dart';
+import '../../../core/errors/app_failure.dart';
+import '../../../core/errors/failure_messages.dart';
+import '../../../data/repositories/invitation_repository.dart';
+import '../../../models/invitation.dart';
 import '../../../providers/auth_provider.dart';
-import '../../../providers/expense_provider.dart';
-import '../../../services/supabase_service.dart';
+import '../../../providers/group_detail_providers.dart';
+import '../../../providers/groups_provider.dart';
 
 class InviteScreen extends ConsumerStatefulWidget {
   final String token;
@@ -21,153 +24,60 @@ class InviteScreen extends ConsumerStatefulWidget {
 }
 
 class _InviteScreenState extends ConsumerState<InviteScreen> {
-  bool _isLoading = true;
   bool _isAccepting = false;
-  String? _error;
 
-  String? _groupName;
-  String? _inviterName;
-  String? _recipientEmail;
-  String? _status;
-  DateTime? _expiresAt;
-  bool _isLegacyCode = false;
-  String? _legacyCode;
+  /// A failed accept or decline, shown on this screen.
+  AppFailure? _actionFailure;
 
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_loadInvitationDetails());
-  }
+  String get _token => widget.token.trim();
 
-  Future<void> _loadInvitationDetails() async {
+  Future<void> _acceptInvitation() async {
     setState(() {
-      _isLoading = true;
-      _error = null;
+      _isAccepting = true;
+      _actionFailure = null;
     });
-
-    final token = widget.token.trim();
-    if (token.isEmpty) {
+    AppHaptics.light();
+    final failure = await ref
+        .read(groupsProvider.notifier)
+        .acceptInvitation(_token);
+    if (!mounted) return;
+    if (failure != null) {
       setState(() {
-        _isLoading = false;
-        _error = 'Invitation link is missing a security token.';
+        _isAccepting = false;
+        _actionFailure = failure;
       });
       return;
     }
-
-    try {
-      // 1. First attempt to query cryptographic token via RPC / table
-      final details = await SupabaseService.instance.getInvitationDetails(
-        token,
-      );
-
-      if (details != null) {
-        final expiresAtStr = details['expires_at'] as String?;
-        final expiresAt = expiresAtStr != null
-            ? DateTime.tryParse(expiresAtStr)
-            : null;
-        final isExpired =
-            details['is_expired'] == true ||
-            (expiresAt != null && DateTime.now().isAfter(expiresAt));
-
-        setState(() {
-          _groupName = details['group_name'] as String? ?? 'Shared Group';
-          _inviterName = details['inviter_name'] as String? ?? 'A member';
-          _recipientEmail = details['email'] as String?;
-          _status = isExpired
-              ? 'expired'
-              : (details['status'] as String? ?? 'pending');
-          _expiresAt = expiresAt;
-          _isLoading = false;
-        });
-        return;
-      }
-
-      // 2. If not found in invitations table, fallback to legacy base64 format (code|exp)
-      _tryLegacyToken(token);
-    } catch (e) {
-      _tryLegacyToken(token);
-    }
+    final name =
+        ref.read(invitationDetailsProvider(_token)).value?.groupName ??
+        'the group';
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('You joined $name.')));
+    context.go('/dashboard');
   }
 
-  void _tryLegacyToken(String rawToken) {
-    try {
-      final normalizedToken = base64Url.normalize(rawToken);
-      final decoded = utf8.decode(base64Url.decode(normalizedToken));
-      final parts = decoded.split('|');
-
-      if (parts.length >= 2) {
-        final code = parts[0];
-        final exp = int.tryParse(parts[1]) ?? 0;
-        final isExpired = DateTime.now().millisecondsSinceEpoch > exp;
-
-        setState(() {
-          _isLegacyCode = true;
-          _legacyCode = code;
-          _groupName = 'Expense Group ($code)';
-          _inviterName = 'A group member';
-          _status = isExpired ? 'expired' : 'pending';
-          _expiresAt = DateTime.fromMillisecondsSinceEpoch(exp);
-          _isLoading = false;
-        });
-        return;
-      }
-    } catch (_) {}
-
+  Future<void> _declineInvitation() async {
     setState(() {
-      _isLoading = false;
-      _error = 'This invitation link is invalid or has expired.';
+      _isAccepting = true;
+      _actionFailure = null;
     });
-  }
-
-  Future<void> _acceptInvitation() async {
-    setState(() => _isAccepting = true);
-    AppHaptics.light();
-
     try {
-      bool success = false;
-
-      if (_isLegacyCode && _legacyCode != null) {
-        success = await ref
-            .read(expenseProvider.notifier)
-            .joinGroup(_legacyCode!);
-      } else {
-        success = await ref
-            .read(expenseProvider.notifier)
-            .acceptInvitation(widget.token.trim());
-      }
-
-      if (success && mounted) {
-        AppHaptics.success();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Successfully joined ${_groupName ?? "the group"}!'),
-            backgroundColor: AppColors.primaryEmerald,
-          ),
-        );
-        context.go('/dashboard');
-      } else if (mounted) {
-        setState(() {
-          _isAccepting = false;
-          _error =
-              'Could not accept invitation. It may have expired or already been accepted.';
-        });
-        AppHaptics.error();
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isAccepting = false;
-          _error = e.toString().replaceAll('Exception:', '').trim();
-        });
-        AppHaptics.error();
-      }
+      await ref.read(invitationRepositoryProvider).decline(_token);
+      if (mounted) context.go('/dashboard');
+    } on AppFailure catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _isAccepting = false;
+        _actionFailure = failure;
+      });
+      AppHaptics.error();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final authState = ref.watch(authNotifierProvider);
-    final isAuthenticated = authState.isAuthenticated;
+    final isAuthenticated = ref.watch(currentUserIdProvider) != null;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
@@ -201,7 +111,34 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
     bool isAuthenticated,
     bool isDark,
   ) {
-    if (_isLoading) {
+    // Details are only shown to the signed-in invitee (the server checks
+    // the invitation email), so a signed-out visitor sees sign-in first.
+    final AsyncValue<InvitationDetails?> async = _token.isEmpty
+        ? const AsyncError(
+            AppFailure.business('invite_not_found'),
+            StackTrace.empty,
+          )
+        : isAuthenticated
+        ? ref.watch(invitationDetailsProvider(_token))
+        : const AsyncData(null);
+    final details = async.value;
+    final failure = _actionFailure ?? async.error;
+    final String? error = failure == null
+        ? null
+        : friendlyMessage(
+            failure is AppFailure ? failure : const AppFailure.unknown(),
+          );
+    final groupName = details?.groupName;
+    final inviterName = details?.inviterName ?? 'A group admin';
+    final status = details?.status;
+    final expiresAt = details?.expiresAt.toLocal();
+    // Invitations are bound to the invited address, which is the
+    // signed-in user's own email once details load.
+    final recipientEmail = details == null
+        ? null
+        : ref.watch(authNotifierProvider).user?.email;
+
+    if (async.isLoading && details == null) {
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -220,7 +157,7 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
       );
     }
 
-    if (_error != null) {
+    if (error != null) {
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -243,11 +180,25 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            _error!,
+            error,
             style: const TextStyle(fontSize: 14, color: AppColors.error),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 24),
+          if (_actionFailure != null) ...[
+            OutlinedButton(
+              onPressed: () => setState(() => _actionFailure = null),
+              child: const Text('Back'),
+            ),
+            const SizedBox(height: 8),
+          ] else if (isAuthenticated && _token.isNotEmpty) ...[
+            OutlinedButton(
+              onPressed: () =>
+                  ref.invalidate(invitationDetailsProvider(_token)),
+              child: const Text('Retry'),
+            ),
+            const SizedBox(height: 8),
+          ],
           ElevatedButton(
             onPressed: () => context.go('/dashboard'),
             child: const Text('Go to Dashboard'),
@@ -256,9 +207,13 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
       );
     }
 
-    final isExpired = _status == 'expired';
-    final isAlreadyAccepted = _status == 'accepted';
-    final isRevoked = _status == 'revoked';
+    final isExpired =
+        status == InvitationStatus.expired ||
+        (expiresAt != null && DateTime.now().isAfter(expiresAt));
+    final isAlreadyAccepted = status == InvitationStatus.accepted;
+    final isRevoked =
+        status == InvitationStatus.revoked ||
+        status == InvitationStatus.declined;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -327,7 +282,7 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
                     ? 'This invitation link has expired. Please ask an admin or member to send a new invite.'
                     : (isRevoked
                           ? 'This invitation has been cancelled by the group admin.'
-                          : '$_inviterName has invited you to join their shared group on Exevra.')),
+                          : '$inviterName has invited you to join their shared group on Exevra.')),
           style: TextStyle(
             fontSize: 14,
             color: isDark
@@ -364,7 +319,7 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _groupName ?? 'Shared Group',
+                          groupName ?? 'Shared Group',
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
@@ -373,7 +328,7 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
                           overflow: TextOverflow.ellipsis,
                         ),
                         Text(
-                          'Invited by $_inviterName',
+                          'Invited by $inviterName',
                           style: TextStyle(
                             fontSize: 12,
                             color: isDark
@@ -386,7 +341,7 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
                   ),
                 ],
               ),
-              if (_recipientEmail != null) ...[
+              if (recipientEmail != null) ...[
                 const Divider(height: 24),
                 Row(
                   children: [
@@ -400,7 +355,7 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Invited Email: $_recipientEmail',
+                        'Invited Email: $recipientEmail',
                         style: TextStyle(
                           fontSize: 12,
                           color: isDark
@@ -413,7 +368,7 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
                   ],
                 ),
               ],
-              if (_expiresAt != null) ...[
+              if (expiresAt != null) ...[
                 const SizedBox(height: 6),
                 Row(
                   children: [
@@ -427,8 +382,8 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
                     const SizedBox(width: 8),
                     Text(
                       isExpired
-                          ? 'Expired on ${_expiresAt!.day}/${_expiresAt!.month}/${_expiresAt!.year}'
-                          : 'Valid until ${_expiresAt!.day}/${_expiresAt!.month}/${_expiresAt!.year}',
+                          ? 'Expired on ${expiresAt.day}/${expiresAt.month}/${expiresAt.year}'
+                          : 'Valid until ${expiresAt.day}/${expiresAt.month}/${expiresAt.year}',
                       style: TextStyle(
                         fontSize: 12,
                         color: isExpired
@@ -473,7 +428,7 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
                 ),
           const SizedBox(height: 12),
           TextButton(
-            onPressed: () => context.go('/dashboard'),
+            onPressed: _isAccepting ? null : _declineInvitation,
             child: const Text('Decline'),
           ),
         ] else ...[

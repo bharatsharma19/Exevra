@@ -7,12 +7,19 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/currency_formatter.dart';
 import '../../../core/utils/date_helpers.dart';
 import '../../../core/utils/haptics.dart';
+import '../../../core/utils/money_format.dart';
+import '../../../models/balance.dart';
+import '../../../models/expense.dart';
+import '../../../models/insights.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/expense_provider.dart';
+import '../../../providers/group_detail_providers.dart';
+import '../../../providers/groups_provider.dart';
 import '../../../providers/insights_provider.dart';
+import '../../../providers/profile_provider.dart';
+import '../../shared/failure_retry.dart';
 import '../../expenses/screens/add_edit_expense_sheet.dart';
 
 class DashboardScreen extends ConsumerWidget {
@@ -27,9 +34,10 @@ class DashboardScreen extends ConsumerWidget {
 
   void _showGroupSwitcher(BuildContext context, WidgetRef ref) {
     AppHaptics.selection();
-    final expenseState = ref.read(expenseProvider);
-    final userGroups = expenseState.userGroups;
-    final currentGroupId = expenseState.currentGroup?.id;
+    final groupsState = ref.read(groupsProvider).value;
+    // Pending join requests cannot be opened until an admin approves.
+    final userGroups = groupsState?.approvedGroups ?? const [];
+    final currentGroupId = ref.read(activeGroupProvider)?.id;
 
     unawaited(
       showModalBottomSheet<void>(
@@ -91,7 +99,7 @@ class DashboardScreen extends ConsumerWidget {
                   onTap: () {
                     Navigator.of(ctx).pop();
                     unawaited(
-                      ref.read(expenseProvider.notifier).switchGroup(null),
+                      ref.read(groupsProvider.notifier).switchScope(null),
                     );
                   },
                 ),
@@ -122,7 +130,7 @@ class DashboardScreen extends ConsumerWidget {
                     onTap: () {
                       Navigator.of(ctx).pop();
                       unawaited(
-                        ref.read(expenseProvider.notifier).switchGroup(g.id),
+                        ref.read(groupsProvider.notifier).switchScope(g.id),
                       );
                     },
                   );
@@ -150,25 +158,62 @@ class DashboardScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final authState = ref.watch(authNotifierProvider);
-    final expenseState = ref.watch(expenseProvider);
-    final insightState = ref.watch(insightProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final profile = authState.profile;
+    final profile = ref.watch(userProfileProvider);
     final resolvedDisplayName =
-        (profile?.displayName != null && profile!.displayName.trim().isNotEmpty)
+        (profile != null && profile.displayName.trim().isNotEmpty)
         ? profile.displayName
         : (authState.user?.userMetadata?['full_name'] as String? ??
               authState.user?.email?.split('@').first ??
               'User');
-    final currency = profile?.currency ?? AppConstants.defaultCurrency;
-    final group = expenseState.currentGroup;
+    final group = ref.watch(activeGroupProvider);
+    final String currency =
+        group?.currency ?? ref.watch(preferredCurrencyProvider);
+    final currentUserId = ref.watch(currentUserIdProvider);
 
-    final currentUserId = authState.user?.id;
-    final totalSpent = expenseState.userTotalOutflow(currentUserId);
-    final personalSpent = expenseState.personalSpent;
-    final groupSpent = expenseState.groupSpent;
-    final recentExpenses = expenseState.expenses.take(5).toList();
+    // Totals come from the server (last 30 local days of the active
+    // scope), never from the partially loaded list.
+    final insightsKey = ref.watch(
+      activeInsightsKeyProvider(InsightTimeframe.month),
+    );
+    final insightsAsync = insightsKey == null
+        ? const AsyncLoading<ExpenseInsights>()
+        : ref.watch(insightsProvider(insightsKey));
+    final insight =
+        insightsAsync.value ??
+        ExpenseInsights.empty(
+          scope: InsightScope.personal,
+          timeframe: InsightTimeframe.month,
+          currency: currency,
+        );
+
+    final listKey = ref.watch(scopeExpenseKeyProvider);
+    final listAsync = listKey == null
+        ? const AsyncLoading<ExpenseListState>()
+        : ref.watch(expenseListProvider(listKey));
+    final recentExpenses =
+        listAsync.value?.items.take(5).toList() ?? const <Expense>[];
+
+    final suggestions = group == null || !group.canRead
+        ? const <SettleSuggestion>[]
+        : ref.watch(settleSuggestionsProvider(group.id)).value ??
+              const <SettleSuggestion>[];
+    final members = ref.watch(activeGroupMembersProvider).value ?? const [];
+    String nameOf(String userId) {
+      for (final m in members) {
+        if (m.userId == userId) return m.label;
+      }
+      return 'Member';
+    }
+
+    Future<void> refreshAll() async {
+      if (insightsKey != null) ref.invalidate(insightsProvider(insightsKey));
+      if (group != null) ref.invalidate(settleSuggestionsProvider(group.id));
+      if (listKey != null) {
+        await ref.read(expenseListProvider(listKey).notifier).reload();
+      }
+    }
 
     return Scaffold(
       body: Stack(
@@ -201,10 +246,7 @@ class DashboardScreen extends ConsumerWidget {
 
           SafeArea(
             child: RefreshIndicator(
-              onRefresh: () async {
-                await ref.read(expenseProvider.notifier).loadAll();
-                await ref.read(insightProvider.notifier).loadInsights();
-              },
+              onRefresh: refreshAll,
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
@@ -307,7 +349,7 @@ class DashboardScreen extends ConsumerWidget {
                                     MainAxisAlignment.spaceBetween,
                                 children: [
                                   const Text(
-                                    'TOTAL OUTFLOW',
+                                    'LAST 30 DAYS',
                                     style: TextStyle(
                                       fontSize: 11,
                                       fontWeight: FontWeight.w800,
@@ -327,7 +369,7 @@ class DashboardScreen extends ConsumerWidget {
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Text(
-                                      currency,
+                                      insight.currency,
                                       style: const TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w800,
@@ -339,10 +381,7 @@ class DashboardScreen extends ConsumerWidget {
                               ),
                               const SizedBox(height: 10),
                               Text(
-                                    CurrencyFormatter.format(
-                                      totalSpent,
-                                      currencyCode: currency,
-                                    ),
+                                    MoneyFormat.format(insight.total),
                                     style: const TextStyle(
                                       fontSize: 38,
                                       fontWeight: FontWeight.w800,
@@ -375,7 +414,7 @@ class DashboardScreen extends ConsumerWidget {
                                             ),
                                             const SizedBox(width: 6),
                                             const Text(
-                                              'Personal',
+                                              'Daily average',
                                               style: TextStyle(
                                                 fontSize: 12,
                                                 color: Colors.white70,
@@ -385,9 +424,8 @@ class DashboardScreen extends ConsumerWidget {
                                         ),
                                         const SizedBox(height: 2),
                                         Text(
-                                          CurrencyFormatter.format(
-                                            personalSpent,
-                                            currencyCode: currency,
+                                          MoneyFormat.format(
+                                            insight.averageDaily,
                                           ),
                                           style: const TextStyle(
                                             fontSize: 14,
@@ -421,7 +459,7 @@ class DashboardScreen extends ConsumerWidget {
                                             ),
                                             const SizedBox(width: 6),
                                             const Text(
-                                              'Group Share',
+                                              'Expenses',
                                               style: TextStyle(
                                                 fontSize: 12,
                                                 color: Colors.white70,
@@ -431,10 +469,7 @@ class DashboardScreen extends ConsumerWidget {
                                         ),
                                         const SizedBox(height: 2),
                                         Text(
-                                          CurrencyFormatter.format(
-                                            groupSpent,
-                                            currencyCode: currency,
-                                          ),
+                                          '${insight.count}',
                                           style: const TextStyle(
                                             fontSize: 14,
                                             fontWeight: FontWeight.w700,
@@ -528,8 +563,7 @@ class DashboardScreen extends ConsumerWidget {
                       ],
                     ).animate().fadeIn(delay: 250.ms),
 
-                    if (group != null &&
-                        expenseState.settlements.isNotEmpty) ...[
+                    if (group != null && suggestions.isNotEmpty) ...[
                       const SizedBox(height: 18),
                       GlassCard(
                         borderRadius: 20,
@@ -571,9 +605,9 @@ class DashboardScreen extends ConsumerWidget {
                               ],
                             ),
                             const SizedBox(height: 10),
-                            ...expenseState.settlements.take(2).map((d) {
-                              final iOwe = d.fromUserId == currentUserId;
-                              final owedToMe = d.toUserId == currentUserId;
+                            ...suggestions.take(2).map((d) {
+                              final iOwe = d.fromUser == currentUserId;
+                              final owedToMe = d.toUser == currentUserId;
                               return Padding(
                                 padding: const EdgeInsets.symmetric(
                                   vertical: 4,
@@ -598,10 +632,10 @@ class DashboardScreen extends ConsumerWidget {
                                     Expanded(
                                       child: Text(
                                         iOwe
-                                            ? 'You owe ${d.toUserName}'
+                                            ? 'You owe ${nameOf(d.toUser)}'
                                             : (owedToMe
-                                                  ? '${d.fromUserName} owes you'
-                                                  : '${d.fromUserName} owes ${d.toUserName}'),
+                                                  ? '${nameOf(d.fromUser)} owes you'
+                                                  : '${nameOf(d.fromUser)} owes ${nameOf(d.toUser)}'),
                                         style: const TextStyle(
                                           fontSize: 12,
                                           fontWeight: FontWeight.w600,
@@ -610,10 +644,7 @@ class DashboardScreen extends ConsumerWidget {
                                       ),
                                     ),
                                     Text(
-                                      CurrencyFormatter.format(
-                                        d.amount,
-                                        currencyCode: currency,
-                                      ),
+                                      MoneyFormat.format(d.amount),
                                       style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.w700,
@@ -691,10 +722,7 @@ class DashboardScreen extends ConsumerWidget {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  CurrencyFormatter.format(
-                                    insightState.insight.averageDaily,
-                                    currencyCode: currency,
-                                  ),
+                                  MoneyFormat.format(insight.averageDaily),
                                   style: const TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w800,
@@ -729,16 +757,7 @@ class DashboardScreen extends ConsumerWidget {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  insightState
-                                          .insight
-                                          .categoryBreakdown
-                                          .isNotEmpty
-                                      ? insightState
-                                            .insight
-                                            .categoryBreakdown
-                                            .first
-                                            .category
-                                      : 'None',
+                                  insight.topCategory?.category ?? 'None',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
@@ -785,8 +804,17 @@ class DashboardScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: 12),
 
-                    if (expenseState.isLoading &&
-                        expenseState.expenses.isEmpty) ...[
+                    if (listAsync.hasError && recentExpenses.isEmpty) ...[
+                      GlassCard(
+                        borderRadius: 20,
+                        padding: const EdgeInsets.all(8),
+                        child: FailureRetry(
+                          error: listAsync.error!,
+                          onRetry: () => unawaited(refreshAll()),
+                        ),
+                      ),
+                    ] else if (listAsync.isLoading &&
+                        recentExpenses.isEmpty) ...[
                       const GlassCard(
                         borderRadius: 20,
                         padding: EdgeInsets.all(24),
@@ -868,7 +896,7 @@ class DashboardScreen extends ConsumerWidget {
                                       ),
                                       const SizedBox(height: 2),
                                       Text(
-                                        '${expense.category} • ${DateHelpers.formatTime(expense.date)} • ${DateHelpers.formatRelative(expense.date)}',
+                                        '${expense.category} • ${DateHelpers.formatTime(expense.spentAt)} • ${DateHelpers.formatRelative(expense.spentAt)}',
                                         style: TextStyle(
                                           fontSize: 11,
                                           color: isDark
@@ -880,10 +908,7 @@ class DashboardScreen extends ConsumerWidget {
                                   ),
                                 ),
                                 Text(
-                                  CurrencyFormatter.format(
-                                    expense.amount,
-                                    currencyCode: currency,
-                                  ),
+                                  MoneyFormat.format(expense.amount),
                                   style: const TextStyle(
                                     fontSize: 15,
                                     fontWeight: FontWeight.w800,

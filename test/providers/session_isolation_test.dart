@@ -1,0 +1,232 @@
+import 'package:expense_manager/core/constants/app_constants.dart';
+import 'package:expense_manager/core/errors/app_failure.dart';
+import 'package:expense_manager/core/storage/preferences.dart';
+import 'package:expense_manager/models/expense.dart';
+import 'package:expense_manager/models/group.dart';
+import 'package:expense_manager/models/profile.dart';
+import 'package:expense_manager/providers/auth_provider.dart';
+import 'package:expense_manager/providers/chat_provider.dart';
+import 'package:expense_manager/providers/expense_provider.dart';
+import 'package:expense_manager/providers/failure_reporter.dart';
+import 'package:expense_manager/providers/groups_provider.dart';
+import 'package:expense_manager/providers/profile_provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import '../support/fakes.dart';
+
+void main() {
+  // Haptics and other platform calls need the test binding.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  group('user A to user B', () {
+    late TestBackend backend;
+    late ProviderContainer container;
+
+    setUp(() async {
+      backend = TestBackend(signedInAs: 'A');
+      backend.profiles.profiles['A'] = profileOf(
+        'A',
+        activeGroupId: 'gA',
+      ).copyWith(themeMode: ThemePreference.dark);
+      backend.profiles.profiles['B'] = profileOf('B');
+      backend.groups.groupsByUser['A'] = [groupOf('gA', adminId: 'A')];
+      backend.groups.groupsByUser['B'] = [groupOf('gB', adminId: 'B')];
+      backend.expenses.rows.addAll([
+        expenseOf('a-personal', userId: 'A', title: 'A secret'),
+        expenseOf('a-group', userId: 'A', groupId: 'gA'),
+        expenseOf('b-personal', userId: 'B'),
+      ]);
+      container = await backend.container(
+        prefs: {
+          AppConstants.keyThemeMode: 'light',
+          UserPrefs.key('A', UserPrefs.haptics): false,
+          // A legacy global key that held one user's data.
+          AppConstants.keyCurrency: 'USD',
+        },
+      );
+      addTearDown(container.dispose);
+    });
+
+    /// Keeps every user-scoped provider alive, as the screens do.
+    void watchAll() {
+      container
+        ..listen(profileProvider, (_, _) {})
+        ..listen(userProfileProvider, (_, _) {})
+        ..listen(groupsProvider, (_, _) {})
+        ..listen(activeGroupProvider, (_, _) {})
+        ..listen(scopeExpenseKeyProvider, (_, _) {})
+        ..listen(expenseFilterProvider, (_, _) {})
+        ..listen(chatProvider, (_, _) {});
+    }
+
+    Future<List<Expense>> scopeItems() async {
+      final key = container.read(scopeExpenseKeyProvider);
+      if (key == null) return const [];
+      container.listen(expenseListProvider(key), (_, _) {});
+      return (await container.read(expenseListProvider(key).future)).items;
+    }
+
+    test('no data of A is visible after B signs in', () async {
+      watchAll();
+      await container.read(groupsProvider.future);
+      await settle();
+
+      // A is loaded.
+      expect(container.read(currentUserIdProvider), 'A');
+      expect(container.read(userProfileProvider)?.id, 'A');
+      expect(container.read(activeGroupProvider)?.id, 'gA');
+      final aKey = container.read(scopeExpenseKeyProvider)!;
+      expect((await scopeItems()).map((e) => e.id), ['a-personal', 'a-group']);
+      container.read(expenseFilterProvider.notifier).setSearch('secret');
+      await container.read(chatProvider.notifier).sendMessage('hi A');
+      expect(container.read(chatProvider).messages.length, greaterThan(1));
+
+      // A signs out.
+      await container.read(authNotifierProvider.notifier).signOut();
+      await settle();
+
+      expect(container.read(currentUserIdProvider), isNull);
+      expect(container.read(userProfileProvider), isNull);
+      expect(container.read(activeGroupProvider), isNull);
+      expect(container.read(scopeExpenseKeyProvider), isNull);
+      expect(container.read(groupsProvider).value?.groups ?? const [], isEmpty);
+      // A's list (if anything still holds it) is emptied.
+      expect(container.read(expenseListProvider(aKey)).value?.items, isEmpty);
+
+      // Per-user preferences are gone; the device theme (A's choice,
+      // copied from the server) stays.
+      final prefs = container.read(sharedPreferencesProvider);
+      expect(prefs.getKeys().where((k) => k.startsWith('u.A.')), isEmpty);
+      expect(prefs.containsKey(AppConstants.keyCurrency), isFalse);
+      expect(prefs.getString(AppConstants.keyThemeMode), 'dark');
+      expect(container.read(themePreferenceProvider), ThemePreference.dark);
+
+      // B signs in.
+      backend.auth.signIn('B');
+      await settle();
+      await container.read(groupsProvider.future);
+      await settle();
+
+      expect(container.read(currentUserIdProvider), 'B');
+      expect(container.read(userProfileProvider)?.id, 'B');
+      expect(container.read(groupsProvider).value!.groups.map((g) => g.id), [
+        'gB',
+      ]);
+      expect(container.read(activeGroupProvider), isNull);
+      expect(container.read(expenseFilterProvider), const ExpenseFilter());
+      expect(container.read(chatProvider).messages, isEmpty);
+      expect(
+        container.read(chatProvider).messages.any((m) => m.text == 'hi A'),
+        isFalse,
+      );
+      final items = await scopeItems();
+      expect(items.map((e) => e.id), ['b-personal']);
+      expect(items.any((e) => e.userId == 'A'), isFalse);
+      expect(container.read(scopeExpenseKeyProvider)!.userId, 'B');
+    });
+  });
+
+  group('active scope', () {
+    late TestBackend backend;
+    late ProviderContainer container;
+
+    setUp(() async {
+      backend = TestBackend(signedInAs: 'A');
+      backend.profiles.profiles['A'] = profileOf('A');
+      backend.groups.groupsByUser['A'] = [
+        groupOf('g1', adminId: 'A'),
+        groupOf(
+          'pending',
+          adminId: 'Z',
+          role: GroupRole.viewer,
+          status: MemberStatus.pending,
+        ),
+      ];
+      container = await backend.container();
+      addTearDown(container.dispose);
+      container.listen(groupsProvider, (_, _) {});
+      await container.read(groupsProvider.future);
+      await settle();
+    });
+
+    test('switching writes the server once', () async {
+      final failure = await container
+          .read(groupsProvider.notifier)
+          .switchScope('g1');
+      expect(failure, isNull);
+      expect(backend.groups.activeGroupWrites, ['g1']);
+      expect(container.read(activeGroupProvider)?.id, 'g1');
+      expect(container.read(userProfileProvider)?.activeGroupId, 'g1');
+
+      // Selecting the same scope again does not write.
+      await container.read(groupsProvider.notifier).switchScope('g1');
+      expect(backend.groups.activeGroupWrites, ['g1']);
+
+      // Back to personal mode (null is a real value, not "unchanged").
+      await container.read(groupsProvider.notifier).switchScope(null);
+      expect(backend.groups.activeGroupWrites, ['g1', null]);
+      expect(container.read(activeGroupProvider), isNull);
+      expect(container.read(userProfileProvider)?.activeGroupId, isNull);
+    });
+
+    test('a failed switch restores the previous scope', () async {
+      backend.groups.failSetActive = const AppFailure.permissionDenied(
+        key: 'not_group_member',
+      );
+      final failure = await container
+          .read(groupsProvider.notifier)
+          .switchScope('g1');
+      expect(failure, isA<PermissionDeniedFailure>());
+      expect(container.read(activeGroupProvider), isNull);
+      expect(
+        container.read(failureReporterProvider)?.failure,
+        isA<PermissionDeniedFailure>(),
+      );
+    });
+
+    test('a saved pending group is not opened', () async {
+      final state = container.read(groupsProvider).value!;
+      expect(state.pendingGroups.map((g) => g.id), ['pending']);
+      expect(state.approvedGroups.map((g) => g.id), ['g1']);
+      expect(container.read(activeGroupProvider), isNull);
+    });
+  });
+
+  group('profile', () {
+    test('a failed preference update rolls back', () async {
+      final backend = TestBackend(signedInAs: 'A');
+      backend.profiles.profiles['A'] = profileOf('A');
+      final container = await backend.container();
+      addTearDown(container.dispose);
+      container.listen(profileProvider, (_, _) {});
+      await container.read(profileProvider.future);
+      await settle();
+
+      backend.profiles.failUpdates = const AppFailure.offline();
+      final failure = await container
+          .read(profileProvider.notifier)
+          .setCurrency('USD');
+
+      expect(failure, isA<OfflineFailure>());
+      expect(container.read(userProfileProvider)?.currency, 'INR');
+    });
+
+    test('updates send only the changed column', () async {
+      final backend = TestBackend(signedInAs: 'A');
+      backend.profiles.profiles['A'] = profileOf('A');
+      final container = await backend.container();
+      addTearDown(container.dispose);
+      container.listen(profileProvider, (_, _) {});
+      await container.read(profileProvider.future);
+      await settle();
+      backend.profiles.updates.clear();
+
+      await container.read(profileProvider.notifier).setHapticsEnabled(false);
+
+      expect(backend.profiles.updates.single.$2.fields, {
+        'haptics_enabled': false,
+      });
+    });
+  });
+}

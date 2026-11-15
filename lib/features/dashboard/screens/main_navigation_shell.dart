@@ -4,9 +4,9 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/utils/haptics.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../providers/expense_provider.dart';
-import '../../../providers/insights_provider.dart';
-import '../../../providers/chat_provider.dart';
+import '../../../core/errors/failure_messages.dart';
+import '../../../providers/failure_reporter.dart';
+import '../../../providers/group_detail_providers.dart';
 
 class MainNavigationShell extends ConsumerWidget {
   final StatefulNavigationShell navigationShell;
@@ -26,8 +26,11 @@ class MainNavigationShell extends ConsumerWidget {
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message, style: const TextStyle(color: Colors.white)),
-        backgroundColor: Colors.red.shade600,
+        content: Text(
+          message,
+          style: TextStyle(color: Theme.of(context).colorScheme.onError),
+        ),
+        backgroundColor: Theme.of(context).colorScheme.error,
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -35,24 +38,14 @@ class MainNavigationShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    ref.listen<ExpenseState>(expenseProvider, (prev, next) {
-      if (next.errorMessage != null &&
-          (prev?.errorMessage != next.errorMessage)) {
-        _showError(context, next.errorMessage!);
-      }
-    });
+    // Keeps the active group's realtime channel open while signed in.
+    ref.watch(groupRealtimeProvider);
 
-    ref.listen<InsightState>(insightProvider, (prev, next) {
-      if (next.errorMessage != null &&
-          (prev?.errorMessage != next.errorMessage)) {
-        _showError(context, next.errorMessage!);
-      }
-    });
-
-    ref.listen<ChatState>(chatProvider, (prev, next) {
-      if (next.errorMessage != null &&
-          (prev?.errorMessage != next.errorMessage)) {
-        _showError(context, next.errorMessage!);
+    // Every background failure (save, delete, switch group...) is shown
+    // here exactly once, as friendly copy.
+    ref.listen<ReportedFailure?>(failureReporterProvider, (prev, next) {
+      if (next != null && next.sequence != prev?.sequence) {
+        _showError(context, friendlyMessage(next.failure));
       }
     });
 

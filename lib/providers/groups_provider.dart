@@ -1,0 +1,249 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../core/errors/app_failure.dart';
+import '../core/utils/haptics.dart';
+import '../data/repositories/group_repository.dart';
+import '../data/repositories/invitation_repository.dart';
+import '../data/repositories/profile_repository.dart';
+import '../models/group.dart';
+import '../models/json_reader.dart';
+import '../models/profile.dart';
+import 'auth_provider.dart';
+import 'failure_reporter.dart';
+import 'profile_provider.dart';
+
+/// The user's groups and the active scope.
+class GroupsState {
+  const GroupsState({this.groups = const [], this.activeGroupId, this.userId});
+
+  final List<Group> groups;
+
+  /// Whose groups these are; null when signed out.
+  final String? userId;
+
+  /// The active group, or null for personal mode. Always an approved
+  /// membership of [groups].
+  final String? activeGroupId;
+
+  Group? get activeGroup {
+    final id = activeGroupId;
+    if (id == null) return null;
+    for (final g in groups) {
+      if (g.id == id) return g;
+    }
+    return null;
+  }
+
+  bool get isPersonal => activeGroup == null;
+
+  List<Group> get approvedGroups => groups.where((g) => g.isApproved).toList();
+  List<Group> get pendingGroups => groups.where((g) => g.isPending).toList();
+
+  GroupsState copyWith({List<Group>? groups, Object? activeGroupId = unset}) {
+    return GroupsState(
+      groups: groups ?? this.groups,
+      activeGroupId: pick<String?>(activeGroupId, this.activeGroupId),
+      userId: userId,
+    );
+  }
+}
+
+/// Groups of the signed-in user plus the active scope (personal or one
+/// group). The scope is stored on the server with `set_active_group`, and
+/// each switch writes exactly once.
+class GroupsNotifier extends AsyncNotifier<GroupsState> {
+  GroupRepository get _repo => ref.read(groupRepositoryProvider);
+
+  @override
+  Future<GroupsState> build() async {
+    final userId = ref.watch(currentUserIdProvider);
+    if (userId == null) return const GroupsState();
+    final repo = ref.watch(groupRepositoryProvider);
+
+    final results = await Future.wait<Object?>([
+      repo.fetchMyGroups(),
+      ref.read(profileProvider.future),
+    ]);
+    final groups = results[0]! as List<Group>;
+    final saved = (results[1] as UserProfile?)?.activeGroupId;
+    return GroupsState(
+      groups: groups,
+      activeGroupId: _resolve(groups, saved),
+      userId: userId,
+    );
+  }
+
+  /// The saved active group if it is still an approved membership.
+  static String? _resolve(List<Group> groups, String? saved) {
+    if (saved == null) return null;
+    final match = groups.where((g) => g.id == saved && g.isApproved);
+    return match.isEmpty ? null : saved;
+  }
+
+  void _report(AppFailure failure) {
+    if (ref.mounted) ref.read(failureReporterProvider.notifier).report(failure);
+    AppHaptics.error();
+  }
+
+  /// Re-reads the group list, keeping the active scope when still valid.
+  Future<AppFailure?> refresh() async {
+    try {
+      final groups = await _repo.fetchMyGroups();
+      if (!ref.mounted) return null;
+      final current = state.value ?? const GroupsState();
+      state = AsyncData(
+        current.copyWith(
+          groups: groups,
+          activeGroupId: _resolve(groups, current.activeGroupId),
+        ),
+      );
+      return null;
+    } on AppFailure catch (failure) {
+      _report(failure);
+      return failure;
+    }
+  }
+
+  /// Switches to [groupId] (null = personal). Writes the profile once; on
+  /// failure the previous scope is restored.
+  Future<AppFailure?> switchScope(String? groupId) async {
+    final current = state.value;
+    if (current == null || current.activeGroupId == groupId) return null;
+    AppHaptics.selection();
+    state = AsyncData(current.copyWith(activeGroupId: groupId));
+    try {
+      await _repo.setActiveGroup(groupId);
+      if (ref.mounted) {
+        ref.read(profileProvider.notifier).setActiveGroupLocally(groupId);
+      }
+      return null;
+    } on AppFailure catch (failure) {
+      if (ref.mounted) {
+        state = AsyncData(
+          (state.value ?? current).copyWith(
+            activeGroupId: current.activeGroupId,
+          ),
+        );
+      }
+      _report(failure);
+      return failure;
+    }
+  }
+
+  /// Creates a group and makes it active. Returns the failure or null.
+  Future<AppFailure?> createGroup(
+    String name, {
+    required String currency,
+  }) async {
+    try {
+      final id = await _repo.createGroup(name: name, currency: currency);
+      final refreshed = await refresh();
+      if (refreshed != null) return refreshed;
+      final switched = await switchScope(id);
+      if (switched == null) AppHaptics.success();
+      return switched;
+    } on AppFailure catch (failure) {
+      _report(failure);
+      return failure;
+    }
+  }
+
+  /// Sends a join request with an invite code. The group shows as
+  /// pending until an admin approves.
+  Future<(JoinRequest?, AppFailure?)> joinByCode(String code) async {
+    try {
+      final request = await _repo.joinByCode(code);
+      await refresh();
+      AppHaptics.success();
+      return (request, null);
+    } on AppFailure catch (failure) {
+      _report(failure);
+      return (null, failure);
+    }
+  }
+
+  /// Accepts an email invitation; the server makes that group active.
+  Future<AppFailure?> acceptInvitation(String token) async {
+    try {
+      final groupId = await ref
+          .read(invitationRepositoryProvider)
+          .accept(token);
+      await refresh();
+      if (!ref.mounted) return null;
+      final current = state.value ?? const GroupsState();
+      state = AsyncData(
+        current.copyWith(activeGroupId: _resolve(current.groups, groupId)),
+      );
+      ref.read(profileProvider.notifier).setActiveGroupLocally(groupId);
+      AppHaptics.success();
+      return null;
+    } on AppFailure catch (failure) {
+      _report(failure);
+      return failure;
+    }
+  }
+
+  /// Leaves [groupId]. The server picks the next active group.
+  Future<AppFailure?> leaveGroup(String groupId) =>
+      _removeGroup(() => _repo.leaveGroup(groupId));
+
+  /// Deletes [groupId] and all its data (admin only).
+  Future<AppFailure?> deleteGroup(String groupId) =>
+      _removeGroup(() => _repo.deleteGroup(groupId));
+
+  Future<AppFailure?> _removeGroup(Future<Object?> Function() action) async {
+    try {
+      await action();
+      await _reloadFromServer();
+      AppHaptics.medium();
+      return null;
+    } on AppFailure catch (failure) {
+      _report(failure);
+      return failure;
+    }
+  }
+
+  /// Re-reads groups and the server's active group after a membership
+  /// change made on the server.
+  Future<void> _reloadFromServer() async {
+    final userId = ref.read(currentUserIdProvider);
+    if (userId == null) return;
+    final results = await Future.wait<Object?>([
+      _repo.fetchMyGroups(),
+      ref.read(profileRepositoryProvider).fetch(userId),
+    ]);
+    if (!ref.mounted) return;
+    final groups = results[0]! as List<Group>;
+    final saved = (results[1] as UserProfile?)?.activeGroupId;
+    final active = _resolve(groups, saved);
+    state = AsyncData(
+      GroupsState(groups: groups, activeGroupId: active, userId: userId),
+    );
+    ref.read(profileProvider.notifier).setActiveGroupLocally(active);
+  }
+
+  /// Membership changed elsewhere (transfer admin, approval): refresh.
+  Future<void> membershipChanged() => refresh();
+}
+
+final groupsProvider = AsyncNotifierProvider<GroupsNotifier, GroupsState>(
+  GroupsNotifier.new,
+);
+
+/// Whether the signed-in user's groups have loaded (or failed to load),
+/// so scope-dependent lists know whether to wait.
+final groupsReadyProvider = Provider<bool>((ref) {
+  final userId = ref.watch(currentUserIdProvider);
+  final groups = ref.watch(groupsProvider);
+  if (groups.hasError && !groups.isLoading) return true;
+  return groups.value?.userId == userId && !groups.isLoading;
+});
+
+/// The active group of the signed-in user, or null in personal mode, while
+/// loading, or when the loaded groups belong to someone else.
+final activeGroupProvider = Provider<Group?>((ref) {
+  final userId = ref.watch(currentUserIdProvider);
+  final value = ref.watch(groupsProvider).value;
+  if (userId == null || value == null || value.userId != userId) return null;
+  return value.activeGroup;
+});
