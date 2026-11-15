@@ -206,7 +206,7 @@ as $$ select s.id from tests.settlements as s where s.name = p_name $$;
 
 grant execute on all functions in schema tests to anon, authenticated;
 
-select plan(81);
+select plan(87);
 
 select tests.create_user('ann');
 select tests.create_user('ben');
@@ -304,8 +304,17 @@ select is((public.get_ai_spending_context('UTC', 90, '2026-04-15T12:00:00Z')->'c
 
 -- Validation and consent.
 select throws_ok($$ select public.get_ai_spending_context('Mars/Base', 30) $$, '22023', 'invalid_timezone', 'unknown time zones are rejected');
-select throws_ok($$ select public.get_ai_spending_context('UTC', 0) $$, '22023', 'invalid_days', 'p_days must be at least 1');
-select throws_ok($$ select public.get_ai_spending_context('UTC', 367) $$, '22023', 'invalid_days', 'p_days is capped at 366');
+select throws_ok($$ select public.get_ai_spending_context('UTC', 0) $$, '22023', 'invalid_range', 'p_days must be at least 1');
+select throws_ok($$ select public.get_ai_spending_context('UTC', 367) $$, '22023', 'invalid_range', 'p_days is capped at 366');
+select throws_ok($$ select public.get_ai_spending_context('UTC', null) $$, '22023', 'invalid_range', 'p_days cannot be NULL');
+select throws_ok($$ select public.get_ai_spending_context('UTC', 90, 'infinity') $$, '22023', 'invalid_date', 'p_as_of cannot be infinity');
+select throws_ok($$ select public.get_ai_spending_context('UTC', 90, '-infinity') $$, '22023', 'invalid_date', 'p_as_of cannot be -infinity');
+select throws_ok($$ select public.get_ai_spending_context('UTC', 366, '1999-12-31T09:00:00Z') $$, '22023', 'invalid_date',
+                 'p_as_of cannot be before 2000');
+select throws_ok($$ select public.get_ai_spending_context('UTC', 366, now() + interval '400 days') $$, '22023', 'invalid_date',
+                 'p_as_of cannot be more than a year ahead');
+select is((public.get_ai_spending_context('UTC', 366, '2000-06-15T00:00:00Z')->>'start_date'), '1999-06-16',
+          'the earliest accepted reference instant still works');
 select tests.authenticate_as('cat');
 select throws_ok($$ select public.get_ai_spending_context('UTC', 30) $$, 'P0001', 'consent_required',
                  'no spending context without AI consent (the business key the ai-chat function maps to consent_required)');

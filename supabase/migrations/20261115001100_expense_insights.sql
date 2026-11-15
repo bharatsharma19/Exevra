@@ -11,7 +11,9 @@
 --               Every bucket is present (zero-filled).
 --   p_tz        IANA zone from pg_timezone_names; NULL = the caller's profile time zone.
 --               Buckets use date_trunc on (spent_at AT TIME ZONE p_tz).
---   p_as_of     reference instant (default now()); "today" is its local date.
+--   p_as_of     reference instant (default now()); "today" is its local date. Must be finite, not
+--               before 2000-01-01 (in any zone) and at most one year after now() (22023 invalid_date).
+-- The bucket window is checked (1..366 days, 22023 invalid_range) before any series is generated.
 -- Amounts are never added across currencies: the result holds one block per currency, the primary
 -- currency first (group currency, or the caller's profile currency in personal scope).
 -- Replaces the old get_expense_insights(text, uuid), dropped earlier in this series.
@@ -53,6 +55,15 @@ BEGIN
     IF p_timeframe IS NULL OR p_timeframe NOT IN ('week', 'month', 'year') THEN
         RAISE EXCEPTION 'invalid_timeframe' USING ERRCODE = '22023';
     END IF;
+    -- The reference instant: finite, not before 2000-01-01 anywhere, at most a year ahead (the same
+    -- range as expenses.spent_at). NULL = now().
+    IF p_as_of IS NOT NULL
+       AND (NOT pg_catalog.isfinite(p_as_of)
+            OR p_as_of < '2000-01-01T00:00:00+14'::timestamptz
+            OR p_as_of > pg_catalog.now() + interval '1 year') THEN
+        RAISE EXCEPTION 'invalid_date' USING ERRCODE = '22023',
+            DETAIL = 'p_as_of must be between 2000-01-01 and one year from now.';
+    END IF;
 
     v_tz := NULLIF(pg_catalog.btrim(p_tz), '');
     IF v_tz IS NULL THEN
@@ -93,6 +104,12 @@ BEGIN
         v_unit := 'month';
     END IF;
     v_days := v_end - v_start + 1;
+    -- Guard before generate_series: the window is at most 366 local days (12 months + the current one
+    -- never exceed it), whatever the inputs.
+    IF v_days IS NULL OR v_days NOT BETWEEN 1 AND 366 THEN
+        RAISE EXCEPTION 'invalid_range' USING ERRCODE = '22023',
+            DETAIL = 'The insights window must cover 1 to 366 days.';
+    END IF;
     v_range_start := v_start::timestamp AT TIME ZONE v_tz;
     v_range_end := (v_end + 1)::timestamp AT TIME ZONE v_tz;
 

@@ -7,8 +7,10 @@
 --   groups they currently belong to. This is the same definition as get_expense_insights' personal
 --   scope. Other members' amounts, names and emails are never included.
 --   p_tz    IANA zone (validated against pg_timezone_names); NULL = the caller's profile time zone.
---   p_days  1..366 (default 90).
---   p_as_of reference instant (default now()); used by tests to fix "today".
+--   p_days  1..366 (default 90; NULL or outside the range: 22023 invalid_range).
+--   p_as_of reference instant (default now()); used by tests to fix "today". Must be finite, not before
+--           2000-01-01 (in any zone) and at most one year after now() (22023 invalid_date).
+--   The month window is checked (at most 13 months, 22023 invalid_range) before any series is generated.
 --   Requires profiles.ai_consent = true, else P0001 'consent_required'. The ai-chat Edge Function checks
 --   consent itself before calling; this check is defence in depth, and the key is the function's own
 --   error code, so its generic P0001 mapping answers 403 consent_required.
@@ -46,7 +48,17 @@ BEGIN
         RAISE EXCEPTION 'not_authenticated' USING ERRCODE = '42501';
     END IF;
     IF p_days IS NULL OR p_days NOT BETWEEN 1 AND 366 THEN
-        RAISE EXCEPTION 'invalid_days' USING ERRCODE = '22023';
+        RAISE EXCEPTION 'invalid_range' USING ERRCODE = '22023',
+            DETAIL = 'p_days must be between 1 and 366.';
+    END IF;
+    -- The reference instant: finite, not before 2000-01-01 anywhere, at most a year ahead (the same
+    -- range as expenses.spent_at). NULL = now().
+    IF p_as_of IS NOT NULL
+       AND (NOT pg_catalog.isfinite(p_as_of)
+            OR p_as_of < '2000-01-01T00:00:00+14'::timestamptz
+            OR p_as_of > pg_catalog.now() + interval '1 year') THEN
+        RAISE EXCEPTION 'invalid_date' USING ERRCODE = '22023',
+            DETAIL = 'p_as_of must be between 2000-01-01 and one year from now.';
     END IF;
 
     SELECT p.ai_consent, p.currency::text AS currency, p.timezone INTO v_profile
@@ -68,6 +80,13 @@ BEGIN
     v_start := v_today - (p_days - 1);
     v_range_start := v_start::timestamp AT TIME ZONE v_tz;
     v_range_end := (v_today + 1)::timestamp AT TIME ZONE v_tz;
+    -- Guard before generate_series: at most 366 days, i.e. at most 13 calendar months.
+    IF v_today - v_start + 1 NOT BETWEEN 1 AND 366
+       OR (pg_catalog.date_part('year', v_today) - pg_catalog.date_part('year', v_start)) * 12
+          + pg_catalog.date_part('month', v_today) - pg_catalog.date_part('month', v_start) + 1 > 13 THEN
+        RAISE EXCEPTION 'invalid_range' USING ERRCODE = '22023',
+            DETAIL = 'The context window must cover 1 to 366 days.';
+    END IF;
 
     WITH src AS (
         SELECT e.id, e.title, e.category, e.currency::text AS currency, e.spent_at,

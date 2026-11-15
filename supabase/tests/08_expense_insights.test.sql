@@ -189,7 +189,7 @@ $$;
 
 grant execute on all functions in schema tests to anon, authenticated;
 
-select plan(44);
+select plan(50);
 
 select tests.create_user('alice');
 select tests.create_user('bob');
@@ -330,6 +330,18 @@ select throws_ok($$ select public.get_expense_insights('personal', null, 'decade
                  '22023', 'invalid_timeframe', 'unknown timeframes are rejected');
 select throws_ok($$ select public.get_expense_insights('group', null, 'week', 'UTC') $$,
                  '22023', 'invalid_group', 'group scope needs a group');
+select throws_ok($$ select public.get_expense_insights('personal', null, 'week', 'UTC', 'infinity') $$,
+                 '22023', 'invalid_date', 'p_as_of cannot be infinity');
+select throws_ok($$ select public.get_expense_insights('personal', null, 'year', 'UTC', '-infinity') $$,
+                 '22023', 'invalid_date', 'p_as_of cannot be -infinity');
+select throws_ok($$ select public.get_expense_insights('personal', null, 'month', 'UTC', '1999-12-31T00:00:00Z') $$,
+                 '22023', 'invalid_date', 'p_as_of cannot be before 2000');
+select throws_ok($$ select public.get_expense_insights('personal', null, 'month', 'UTC', now() + interval '2 years') $$,
+                 '22023', 'invalid_date', 'p_as_of cannot be more than a year ahead');
+select throws_ok($$ select public.get_expense_insights('personal', null, 'year', 'UTC', '294000-01-01T00:00:00Z') $$,
+                 '22023', 'invalid_date', 'a far-future p_as_of never reaches the series generator');
+select is((public.get_expense_insights('personal', null, 'year', 'UTC', '2000-06-15T00:00:00Z')->>'start_date'), '1999-07-01',
+          'the earliest accepted reference instant still works');
 reset role;
 
 select is((select prosecdef from pg_proc where oid = 'public.get_expense_insights(text, uuid, text, text, timestamptz)'::regprocedure),
