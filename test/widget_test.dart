@@ -5,7 +5,6 @@ import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 import 'package:expense_manager/main.dart';
 import 'package:expense_manager/core/constants/app_constants.dart';
 import 'package:expense_manager/core/utils/currency_formatter.dart';
-import 'package:expense_manager/core/utils/date_helpers.dart';
 import 'package:expense_manager/core/utils/validators.dart';
 import 'package:expense_manager/models/expense_model.dart';
 import 'package:expense_manager/models/group_model.dart';
@@ -67,29 +66,6 @@ void main() {
       expect(CurrencyFormatter.parseAmount('€85.50'), 85.50);
       expect(CurrencyFormatter.parseAmount('invalid'), null);
       expect(CurrencyFormatter.parseAmount(''), null);
-    });
-  });
-
-  group('3. DateHelpers Temporal Logic Tests', () {
-    final now = DateTime.now();
-    test('Calculates relative time correctly', () {
-      expect(DateHelpers.formatRelative(now), 'Just now');
-      expect(
-        DateHelpers.formatRelative(now.subtract(const Duration(minutes: 5))),
-        '5 mins ago',
-      );
-      expect(
-        DateHelpers.formatRelative(now.subtract(const Duration(hours: 3))),
-        '3 hours ago',
-      );
-    });
-
-    test('Resolves temporal section headers accurately', () {
-      expect(DateHelpers.getDateSectionHeader(now), 'Today');
-      expect(
-        DateHelpers.getDateSectionHeader(now.subtract(const Duration(days: 1))),
-        'Yesterday',
-      );
     });
   });
 

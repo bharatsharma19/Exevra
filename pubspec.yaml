@@ -50,6 +50,7 @@ dependencies:
   app_links: ^7.2.2
   connectivity_plus: ^7.3.2
   flutter_native_splash: ^2.4.8
+  flutter_timezone: 5.1.1
 
 dev_dependencies:
   flutter_test:

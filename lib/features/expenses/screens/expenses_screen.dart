@@ -205,8 +205,8 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
                         final expense = filtered[index];
                         final showHeader =
                             index == 0 ||
-                            DateHelpers.getDateSectionHeader(expense.date) !=
-                                DateHelpers.getDateSectionHeader(
+                            DateHelpers.sectionHeader(expense.date) !=
+                                DateHelpers.sectionHeader(
                                   filtered[index - 1].date,
                                 );
 
@@ -217,9 +217,7 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
                               Padding(
                                 padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
                                 child: Text(
-                                  DateHelpers.getDateSectionHeader(
-                                    expense.date,
-                                  ),
+                                  DateHelpers.sectionHeader(expense.date),
                                   style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w700,
