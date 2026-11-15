@@ -308,18 +308,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           .fadeIn(delay: 300.ms)
                           .slideY(begin: 0.1, end: 0),
 
-                      const SizedBox(height: 20),
-
-                      // Phone Auth Shortcut
-                      OutlinedButton.icon(
-                        onPressed: () {
-                          AppHaptics.selection();
-                          unawaited(context.push('/phone-auth'));
-                        },
-                        icon: const Icon(Icons.phone_iphone_rounded, size: 20),
-                        label: const Text('Continue with Phone OTP'),
-                      ).animate().fadeIn(delay: 350.ms),
-
                       const SizedBox(height: 24),
 
                       // Social Sign-In Divider

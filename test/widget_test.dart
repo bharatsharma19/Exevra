@@ -97,15 +97,6 @@ void main() {
       expect(Validators.validatePassword(''), 'Password is required');
     });
 
-    test('Validates international phone numbers', () {
-      expect(Validators.validatePhone('+14155552671'), null);
-      expect(Validators.validatePhone('+447911123456'), null);
-      expect(
-        Validators.validatePhone('123'),
-        'Please enter a valid international phone (e.g. +1234567890)',
-      );
-    });
-
     test('Validates 6-digit OTP tokens', () {
       expect(Validators.validateOtp('123456'), null);
       expect(Validators.validateOtp('12345'), 'Please enter a 6-digit code');
@@ -272,21 +263,6 @@ void main() {
           user: confirmedUser,
         );
         expect(verifiedState.isEmailVerified, isTrue);
-
-        // Phone user without email is not gated
-        final phoneUser = supabase.User(
-          id: 'u-phone',
-          appMetadata: const {},
-          userMetadata: const {},
-          aud: 'authenticated',
-          createdAt: DateTime.now().toIso8601String(),
-          phone: '+14155552671',
-        );
-        final phoneState = AppAuthState(
-          status: AuthStatus.authenticated,
-          user: phoneUser,
-        );
-        expect(phoneState.isEmailVerified, isTrue);
       },
     );
 

@@ -5,7 +5,6 @@ class UserProfile {
   final String id;
   final String displayName;
   final String? avatarUrl;
-  final String? phone;
   final String? email;
   final String? groupId;
   final String currency;
@@ -19,7 +18,6 @@ class UserProfile {
     required this.id,
     required this.displayName,
     this.avatarUrl,
-    this.phone,
     this.email,
     this.groupId,
     this.currency = AppConstants.defaultCurrency,
@@ -35,7 +33,6 @@ class UserProfile {
       id: json['id'] as String,
       displayName: json['display_name'] as String? ?? 'User',
       avatarUrl: json['avatar_url'] as String?,
-      phone: json['phone'] as String?,
       email: json['email'] as String?,
       groupId: json['group_id'] as String?,
       currency: json['currency'] as String? ?? AppConstants.defaultCurrency,
@@ -56,7 +53,6 @@ class UserProfile {
       'id': id,
       'display_name': displayName,
       'avatar_url': avatarUrl,
-      'phone': phone,
       'email': email,
       'group_id': groupId,
       'currency': currency,
@@ -72,7 +68,6 @@ class UserProfile {
     String? id,
     String? displayName,
     String? avatarUrl,
-    String? phone,
     String? email,
     String? groupId,
     String? currency,
@@ -86,7 +81,6 @@ class UserProfile {
       id: id ?? this.id,
       displayName: displayName ?? this.displayName,
       avatarUrl: avatarUrl ?? this.avatarUrl,
-      phone: phone ?? this.phone,
       email: email ?? this.email,
       groupId: groupId ?? this.groupId,
       currency: currency ?? this.currency,

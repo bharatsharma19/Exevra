@@ -62,7 +62,6 @@ class SupabaseService {
       id: userId,
       displayName: resolvedDisplayName,
       email: currentUser?.email ?? '',
-      phone: currentUser?.phone,
       currency: AppConstants.defaultCurrency,
       themeMode: 'system',
       hapticsEnabled: true,

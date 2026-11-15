@@ -35,10 +35,6 @@ class AppAuthState {
 
   bool get isEmailVerified {
     if (user == null) return false;
-    // Phone users without email registered are not gated by email verification
-    if ((user!.email == null || user!.email!.isEmpty) && user!.phone != null) {
-      return true;
-    }
     return user!.emailConfirmedAt != null && user!.emailConfirmedAt!.isNotEmpty;
   }
 
@@ -246,55 +242,6 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
             .replaceAll('AuthException:', '')
             .trim(),
         isLoading: false,
-      );
-      AppHaptics.error();
-    }
-  }
-
-  Future<void> sendPhoneOtp(String phone) async {
-    try {
-      state = state.copyWith(isLoading: true, errorMessage: null);
-      AppHaptics.light();
-      await _authService.sendPhoneOtp(phone);
-      state = state.copyWith(isLoading: false);
-      AppHaptics.success();
-    } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage: e.toString().replaceAll('Exception:', '').trim(),
-      );
-      AppHaptics.error();
-    }
-  }
-
-  Future<void> verifyPhoneOtp(String phone, String token) async {
-    try {
-      state = state.copyWith(isLoading: true, errorMessage: null);
-      AppHaptics.light();
-      final res = await _authService.verifyPhoneOtp(phone: phone, token: token);
-      final user = res.user;
-      if (user != null) {
-        final profile = await _supabaseService.fetchProfile(user.id);
-        state = state.copyWith(
-          status: AuthStatus.authenticated,
-          user: user,
-          profile: profile,
-          isLoading: false,
-        );
-        AppHaptics.success();
-      }
-    } catch (e) {
-      if (DemoBackend.active && token == '123456') {
-        _signInOfflineDemo(
-          'phone-user@demo.invalid',
-          displayName: 'Phone User',
-          phone: phone,
-        );
-        return;
-      }
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage: e.toString().replaceAll('Exception:', '').trim(),
       );
       AppHaptics.error();
     }
@@ -534,13 +481,11 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
   void _signInOfflineDemo(
     String email, {
     String? displayName,
-    String? phone,
     bool isVerified = true,
   }) {
     final demo = DemoSession.create(
       email: email,
       displayName: displayName,
-      phone: phone,
       isVerified: isVerified,
     );
     state = state.copyWith(

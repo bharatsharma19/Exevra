@@ -29,18 +29,6 @@ class Validators {
     return null;
   }
 
-  static String? validatePhone(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Phone number is required';
-    }
-    final cleaned = value.replaceAll(RegExp(r'[\s\-()]'), '');
-    final phoneRegex = RegExp(r'^\+?[1-9]\d{7,14}$');
-    if (!phoneRegex.hasMatch(cleaned)) {
-      return 'Please enter a valid international phone (e.g. +1234567890)';
-    }
-    return null;
-  }
-
   static String? validateOtp(String? value) {
     if (value == null || value.trim().isEmpty) {
       return 'Verification code is required';

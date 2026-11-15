@@ -72,7 +72,6 @@ class DemoSession {
   factory DemoSession.create({
     required String email,
     String? displayName,
-    String? phone,
     bool isVerified = true,
   }) {
     if (!DemoBackend.active) {
@@ -83,7 +82,6 @@ class DemoSession {
       id: kDemoUserId,
       displayName: displayName ?? email.split('@').first,
       email: email,
-      phone: phone,
       groupId: 'grp-demo',
       currency: AppConstants.defaultCurrency,
       themeMode: 'system',
@@ -99,7 +97,6 @@ class DemoSession {
       aud: 'authenticated',
       createdAt: now.toIso8601String(),
       email: email,
-      phone: phone,
       emailConfirmedAt: isVerified ? now.toIso8601String() : null,
     );
     return DemoSession._(user, profile);
@@ -118,7 +115,6 @@ class DemoSession {
       aud: user.aud,
       createdAt: user.createdAt,
       email: user.email,
-      phone: user.phone,
       emailConfirmedAt: DateTime.now().toIso8601String(),
     );
   }

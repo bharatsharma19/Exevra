@@ -885,18 +885,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                 : AppColors.lightTextTertiary,
                           ),
                         ),
-                        if (profile?.phone != null) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            profile!.phone!,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: isDark
-                                  ? AppColors.darkTextTertiary
-                                  : AppColors.lightTextTertiary,
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                   ),

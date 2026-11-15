@@ -5,7 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/config/app_config.dart';
 import '../core/logging/app_logger.dart';
 
-/// Authentication Service handling Email/Password, Phone OTP, Google, and Apple Sign-Ins
+/// Authentication service for email/password, Google and Apple sign-in.
 class AuthService {
   static AuthService? _instance;
   static AuthService get instance => _instance ??= AuthService._();
@@ -57,36 +57,6 @@ class AuthService {
       return response;
     } catch (e) {
       AppLogger.warn('AuthService: signInWithEmail error', e);
-      rethrow;
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // PHONE SMS OTP AUTHENTICATION
-  // ---------------------------------------------------------------------------
-
-  Future<void> sendPhoneOtp(String phone) async {
-    try {
-      await _client.auth.signInWithOtp(phone: phone.trim());
-    } catch (e) {
-      AppLogger.warn('AuthService: sendPhoneOtp error', e);
-      rethrow;
-    }
-  }
-
-  Future<AuthResponse> verifyPhoneOtp({
-    required String phone,
-    required String token,
-  }) async {
-    try {
-      final response = await _client.auth.verifyOTP(
-        phone: phone.trim(),
-        token: token.trim(),
-        type: OtpType.sms,
-      );
-      return response;
-    } catch (e) {
-      AppLogger.warn('AuthService: verifyPhoneOtp error', e);
       rethrow;
     }
   }
