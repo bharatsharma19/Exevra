@@ -1,12 +1,13 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
-import '../constants/app_colors.dart';
 import 'app_palette.dart';
 import 'app_tokens.dart';
 import 'app_typography.dart';
 import 'system_ui.dart';
+
+export 'glass_card.dart';
+
+part 'app_control_themes.dart';
 
 /// Material 3 themes for Exevra, built entirely from [AppPalette] tokens.
 ///
@@ -121,65 +122,8 @@ class AppTheme {
   static ThemeData _build(AppPalette p) {
     final scheme = colorSchemeFor(p);
     final text = AppTypography.textTheme(p);
-    const buttonShape = RoundedRectangleBorder(borderRadius: AppRadius.mdAll);
-    const buttonPadding = EdgeInsets.symmetric(
-      horizontal: AppSpacing.xl,
-      vertical: 14,
-    );
-    final buttonText = text.labelLarge!.copyWith(fontSize: 16);
-    const minButton = Size(AppSizes.minTapTarget, AppSizes.minTapTarget);
-
-    // Keyboard and D-pad focus (WCAG 2.4.7): Material's focus overlay is a
-    // faint tint, so the themed components get a solid indicator in
-    // AppPalette.focusRing (at least 3:1 against the page, see
-    // contrast_test). Filled controls get a ring with a gap ([focusRingSide]),
-    // outlined controls a thicker border ([focusBorderSide]), toggles
-    // (switch, checkbox, radio) a solid halo with their marks redrawn in
-    // textOnAccent on top of it, segments an underline, and snackbar actions
-    // an inverted fill. Material only reports the focused state while the
-    // keyboard drives focus, so touch users never see it.
-    //
-    // Not covered by the theme: InkWell-based widgets (ListTile, InkWell,
-    // the rows of Flutter's licence page) only get the [ThemeData.focusColor]
-    // tint, which cannot reach 3:1 against the page without pushing
-    // textSecondary on it under 4.5:1. Kit widgets built on them (AppListTile,
-    // AppCard, AppNavigationDestination) add a FocusOutline; screens should
-    // use those instead of the raw widgets. Screens built by Flutter (the
-    // licence page) are wrapped in a FocusRingOverlay.
-    final focusRing = focusRingSide(p);
-    final focusBorder = focusBorderSide(p);
-    bool focused(Set<WidgetState> states) =>
-        states.contains(WidgetState.focused) &&
-        !states.contains(WidgetState.disabled);
-    final focusSide = WidgetStateProperty.resolveWith<BorderSide?>(
-      (states) => focused(states) ? focusRing : null,
-    );
-    // Radial focus halo of switches, checkboxes and radios. Pressed and
-    // hovered overlays keep the Material defaults (null falls through).
-    final toggleOverlay = WidgetStateProperty.resolveWith<Color?>(
-      (states) => focused(states) ? p.focusRing : null,
-    );
-    // State layer of accent-filled controls. Material's default is the
-    // foreground colour, which pulls the fill toward the label: white text on
-    // the light accent fell to 4.4:1 when focused and 3.7:1 when pressed (the
-    // highlight and splash stack). onAccentContainer moves the fill away from
-    // the label in both themes (darker under white text, lighter under the
-    // dark text of the dark theme).
-    final accentOverlay = p.onAccentContainer;
-    // Accent text of text and outlined buttons. Any state layer behind it
-    // takes the light accent under 4.5:1 (4.5 on the page, 4.9 on
-    // surfaceVariant at rest), so while hovered, focused or pressed the label
-    // deepens to onAccentContainer.
-    final accentText = WidgetStateProperty.resolveWith<Color?>(
-      (states) => states.contains(WidgetState.disabled)
-          ? p.textTertiary
-          : states.contains(WidgetState.hovered) ||
-                states.contains(WidgetState.focused) ||
-                states.contains(WidgetState.pressed)
-          ? p.onAccentContainer
-          : p.accent,
-    );
-
+    final c = _Controls(p, text);
+    final focused = c.focused;
     OutlineInputBorder inputBorder(Color color, [double width = 1]) =>
         OutlineInputBorder(
           borderRadius: AppRadius.mdAll,
@@ -323,7 +267,7 @@ class AppTheme {
         ),
         side: WidgetStateBorderSide.resolveWith(
           (states) => focused(states)
-              ? focusBorder
+              ? c.focusBorder
               : BorderSide(
                   color: states.contains(WidgetState.disabled)
                       ? p.outlineVariant
@@ -368,10 +312,10 @@ class AppTheme {
         shape: WidgetStateOutlinedBorder.resolveWith(
           (states) => RoundedRectangleBorder(
             borderRadius: AppRadius.lgAll,
-            side: focused(states) ? focusRing : BorderSide.none,
+            side: focused(states) ? c.focusRing : BorderSide.none,
           ),
         ),
-        extendedTextStyle: buttonText,
+        extendedTextStyle: c.buttonText,
       ),
       cardTheme: CardThemeData(
         color: p.surface,
@@ -439,211 +383,15 @@ class AppTheme {
         prefixIconColor: p.textSecondary,
         suffixIconColor: p.textSecondary,
       ),
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: p.accent,
-          foregroundColor: p.textOnAccent,
-          overlayColor: accentOverlay,
-          disabledBackgroundColor: p.surfaceVariant,
-          disabledForegroundColor: p.textTertiary,
-          elevation: 0,
-          shadowColor: Colors.transparent,
-          minimumSize: minButton,
-          padding: buttonPadding,
-          shape: buttonShape,
-          textStyle: buttonText,
-          tapTargetSize: MaterialTapTargetSize.padded,
-        ).copyWith(side: focusSide),
-      ),
-      filledButtonTheme: FilledButtonThemeData(
-        style: FilledButton.styleFrom(
-          overlayColor: accentOverlay,
-          disabledBackgroundColor: p.surfaceVariant,
-          disabledForegroundColor: p.textTertiary,
-          minimumSize: minButton,
-          padding: buttonPadding,
-          shape: buttonShape,
-          textStyle: buttonText,
-          tapTargetSize: MaterialTapTargetSize.padded,
-        ).copyWith(side: focusSide),
-      ),
-      outlinedButtonTheme: OutlinedButtonThemeData(
-        style:
-            ButtonStyle(
-              foregroundColor: accentText,
-              side: WidgetStateBorderSide.resolveWith(
-                (states) => focused(states)
-                    ? focusBorder
-                    : BorderSide(
-                        color: states.contains(WidgetState.disabled)
-                            ? p.outlineVariant
-                            : p.accent,
-                        width: 1.2,
-                      ),
-              ),
-            ).merge(
-              // Its foregroundColor only seeds the accent state layer; the
-              // label colour is accentText above.
-              OutlinedButton.styleFrom(
-                foregroundColor: p.accent,
-                disabledForegroundColor: p.textTertiary,
-                minimumSize: minButton,
-                padding: buttonPadding,
-                shape: buttonShape,
-                textStyle: buttonText,
-                tapTargetSize: MaterialTapTargetSize.padded,
-              ),
-            ),
-      ),
-      textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(
-          foregroundColor: p.accent,
-          disabledForegroundColor: p.textTertiary,
-          minimumSize: minButton,
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-          shape: buttonShape,
-          textStyle: text.labelLarge,
-          tapTargetSize: MaterialTapTargetSize.padded,
-        ).copyWith(side: focusSide, foregroundColor: accentText),
-      ),
-      iconButtonTheme: IconButtonThemeData(
-        // A selected (toggled) icon button gets a filled accent container with
-        // an accent outline, so the state shows even without a selectedIcon.
-        // Otherwise the foreground is left to the variant: the theme style
-        // applies to IconButton.filled, .filledTonal and .outlined too, and a
-        // fixed textSecondary would put the send button's icon on the accent
-        // fill at 1.4:1. The scheme's variant defaults (onSurfaceVariant =
-        // textSecondary for the standard button, onPrimary on the fill) all
-        // meet 3:1.
-        style:
-            IconButton.styleFrom(
-              minimumSize: minButton,
-              tapTargetSize: MaterialTapTargetSize.padded,
-            ).copyWith(
-              foregroundColor: WidgetStateProperty.resolveWith(
-                (states) => states.contains(WidgetState.disabled)
-                    ? p.textTertiary
-                    : states.contains(WidgetState.selected)
-                    ? p.onAccentContainer
-                    : null,
-              ),
-              backgroundColor: WidgetStateProperty.resolveWith(
-                (states) => !states.contains(WidgetState.selected)
-                    ? null
-                    : states.contains(WidgetState.disabled)
-                    ? p.surfaceVariant
-                    : p.accentContainer,
-              ),
-              side: WidgetStateProperty.resolveWith(
-                (states) => focused(states)
-                    ? focusRing
-                    : states.contains(WidgetState.selected) &&
-                          !states.contains(WidgetState.disabled)
-                    ? BorderSide(color: p.accent)
-                    : null,
-              ),
-            ),
-      ),
-      segmentedButtonTheme: SegmentedButtonThemeData(
-        style: ButtonStyle(
-          minimumSize: const WidgetStatePropertyAll(minButton),
-          // Segments cannot draw their own ring (SegmentedButton forces a
-          // plain shape on them), and a solid focus fill would look more
-          // selected than the selected segment. So a focused segment keeps
-          // its fill and colours, its label gets a thick focusRing underline,
-          // and the group border turns into the focus colour.
-          backgroundColor: WidgetStateProperty.resolveWith(
-            (states) => states.contains(WidgetState.selected)
-                ? p.accentContainer
-                : p.surface,
-          ),
-          foregroundColor: WidgetStateProperty.resolveWith(
-            (states) => states.contains(WidgetState.disabled)
-                ? p.textTertiary
-                : states.contains(WidgetState.selected)
-                ? p.onAccentContainer
-                : p.textPrimary,
-          ),
-          textStyle: WidgetStateProperty.resolveWith(
-            (states) => focused(states)
-                ? text.labelLarge!.copyWith(
-                    decoration: TextDecoration.underline,
-                    decorationColor: p.focusRing,
-                    decorationThickness: 3,
-                  )
-                : text.labelLarge,
-          ),
-          side: WidgetStateProperty.resolveWith(
-            (states) => focused(states)
-                ? BorderSide(color: p.focusRing, width: focusRingWidth)
-                : BorderSide(color: p.outline),
-          ),
-        ),
-      ),
-      switchTheme: SwitchThemeData(
-        overlayColor: toggleOverlay,
-        thumbColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.disabled)) return p.outlineVariant;
-          if (focused(states)) return p.textOnAccent;
-          return states.contains(WidgetState.selected)
-              ? p.textOnAccent
-              : p.outlineStrong;
-        }),
-        trackColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.disabled)) return p.surfaceVariant;
-          return states.contains(WidgetState.selected)
-              ? p.accent
-              : p.surfaceVariant;
-        }),
-        trackOutlineColor: WidgetStateProperty.resolveWith((states) {
-          if (focused(states)) {
-            // On the accent track the outline must contrast with the track.
-            return states.contains(WidgetState.selected)
-                ? p.textOnAccent
-                : p.focusRing;
-          }
-          if (states.contains(WidgetState.selected)) return Colors.transparent;
-          return states.contains(WidgetState.disabled)
-              ? p.outlineVariant
-              : p.outline;
-        }),
-      ),
-      checkboxTheme: CheckboxThemeData(
-        overlayColor: toggleOverlay,
-        // While focused the box sits on the focusRing halo, so it is redrawn
-        // in textOnAccent (at least 4.5:1 against the halo).
-        fillColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.selected)
-              ? (states.contains(WidgetState.disabled)
-                    ? p.outlineVariant
-                    : focused(states)
-                    ? p.textOnAccent
-                    : p.accent)
-              : Colors.transparent,
-        ),
-        checkColor: WidgetStateProperty.resolveWith(
-          (states) => focused(states) ? p.focusRing : p.textOnAccent,
-        ),
-        // A WidgetStateBorderSide is also resolved for selected boxes; null
-        // keeps the default (no border) there.
-        side: WidgetStateBorderSide.resolveWith(
-          (states) => focused(states) && !states.contains(WidgetState.selected)
-              ? BorderSide(color: p.textOnAccent, width: 2)
-              : states.contains(WidgetState.selected)
-              ? null
-              : BorderSide(color: p.outline, width: 2),
-        ),
-      ),
-      radioTheme: RadioThemeData(
-        overlayColor: toggleOverlay,
-        fillColor: WidgetStateProperty.resolveWith(
-          (states) => focused(states)
-              ? p.textOnAccent
-              : states.contains(WidgetState.selected)
-              ? p.accent
-              : p.outline,
-        ),
-      ),
+      elevatedButtonTheme: c.elevatedButtonTheme,
+      filledButtonTheme: c.filledButtonTheme,
+      outlinedButtonTheme: c.outlinedButtonTheme,
+      textButtonTheme: c.textButtonTheme,
+      iconButtonTheme: c.iconButtonTheme,
+      segmentedButtonTheme: c.segmentedButtonTheme,
+      switchTheme: c.switchTheme,
+      checkboxTheme: c.checkboxTheme,
+      radioTheme: c.radioTheme,
       progressIndicatorTheme: ProgressIndicatorThemeData(
         color: p.accent,
         linearTrackColor: p.surfaceVariant,
@@ -683,120 +431,5 @@ class AppTheme {
         selectionHandleColor: p.accent,
       ),
     );
-  }
-}
-
-/// Frosted-glass card used by the current screens.
-///
-/// Legacy: new code uses `AppCard` (solid) or `AppCard.glass` (hero surfaces
-/// only) from `lib/core/widgets/app_card.dart`. This widget stays until the
-/// screens are migrated.
-///
-/// The backdrop blur is opt-in: it is applied only when [blurSigma] is above
-/// zero, because every `BackdropFilter` adds a compositing pass and list rows
-/// built from this card dropped frames while scrolling. Pass a [blurSigma]
-/// only for a single hero surface. The ink ripple paints above the gradient
-/// fill, so taps are visible.
-class GlassCard extends StatelessWidget {
-  /// Creates a glass card.
-  const GlassCard({
-    super.key,
-    required this.child,
-    this.borderRadius = 20,
-    this.blurSigma = 0,
-    this.padding,
-    this.margin,
-    this.border,
-    this.gradient,
-    this.onTap,
-  });
-
-  /// Card content.
-  final Widget child;
-
-  /// Corner radius.
-  final double borderRadius;
-
-  /// Backdrop blur strength. Zero (the default) skips the blur.
-  final double blurSigma;
-
-  /// Padding around [child]. Defaults to 18 on all sides.
-  final EdgeInsetsGeometry? padding;
-
-  /// Outer margin.
-  final EdgeInsetsGeometry? margin;
-
-  /// Border override.
-  final Border? border;
-
-  /// Background gradient override.
-  final Gradient? gradient;
-
-  /// Tap handler; adds an ink ripple.
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final radius = BorderRadius.circular(borderRadius);
-
-    // Ink paints the fill on the Material, so the InkWell ripple shows above
-    // it instead of under an opaque Container.
-    Widget card = Ink(
-      decoration: BoxDecoration(
-        borderRadius: radius,
-        border:
-            border ??
-            Border.all(
-              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-              width: 1.2,
-            ),
-        gradient:
-            gradient ??
-            LinearGradient(
-              colors: isDark
-                  ? [
-                      Colors.white.withValues(alpha: 0.08),
-                      Colors.white.withValues(alpha: 0.02),
-                    ]
-                  : [
-                      Colors.white.withValues(alpha: 0.85),
-                      Colors.white.withValues(alpha: 0.60),
-                    ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-      ),
-      child: Padding(
-        padding: padding ?? const EdgeInsets.all(18),
-        child: child,
-      ),
-    );
-
-    if (onTap != null) {
-      card = InkWell(borderRadius: radius, onTap: onTap, child: card);
-    }
-
-    card = Material(
-      type: MaterialType.transparency,
-      borderRadius: radius,
-      clipBehavior: Clip.antiAlias,
-      child: card,
-    );
-
-    if (blurSigma > 0) {
-      card = ClipRRect(
-        borderRadius: radius,
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-          child: card,
-        ),
-      );
-    }
-
-    if (margin != null) {
-      card = Padding(padding: margin!, child: card);
-    }
-    return card;
   }
 }
