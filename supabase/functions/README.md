@@ -32,7 +32,7 @@ provider key and the service-role key.
 
 ## Required `supabase/config.toml` entries
 
-`config.toml` is owned by the database workstream; these are the entries the functions need:
+These entries are in `supabase/config.toml`:
 
 ```toml
 [edge_runtime]
@@ -295,14 +295,10 @@ such as `<5 items` or `a < b`, are left alone. The app must still render answers
 | `get_ai_spending_context(p_tz text, p_days int)`                                                                                            | Any JSON value; passed to the model as data                                                                                                                                                                                                                                                                                                                                   |
 | `finish_ai_usage(p_event_id uuid, p_provider text, p_model text, p_status text, p_latency_ms int, p_input_tokens int, p_output_tokens int)` | Called once per reserved event, after the stream has closed, with a 5 s limit. `p_status` is one of `ok`, `truncated`, `declined`, `interrupted`, `failed`, `aborted`, `error`. `p_provider`, `p_model` and the token counts may be null. Token counts are those of `p_provider` (see the log fields above). A failure or timeout here is logged and never affects the reply. |
 
-**Open item for the database workstream.** The decided database contract writes this signature
-as `finish_ai_usage(p_event_id, provider, model, status, latency_ms, input_tokens, output_tokens)`
-and the published contract has no AI section yet. PostgREST matches RPC arguments by name, so
-the SQL must use exactly the `p_`-prefixed names in this table (for `consume_ai_quota`,
-`get_ai_spending_context` and `finish_ai_usage`), and any `CHECK` on `ai_usage_events.status`
-must allow the seven `p_status` values above plus `reserved`. A mismatch fails silently (the
-handler only logs `step: "finish_ai_usage"` with the PostgREST code), so compare this table with
-the migration when it lands.
+The migrations use exactly these `p_`-prefixed argument names (PostgREST matches RPC arguments by
+name), and the `ai_usage_events.status` CHECK allows the seven `p_status` values above plus
+`reserved`. pgTAP tests in `supabase/tests/` pin these signatures, so a drift fails the database
+suite.
 
 ## `send-invite` contract
 
@@ -315,7 +311,7 @@ the migration when it lands.
 - `email` is trimmed and lower-cased; it must match the database's format rule and be at most
   254 characters. `role` is `member` (default) or `viewer`; admin is only reached by transfer.
 - The caller-scoped client runs `create_group_invitation(p_group_id, p_email, p_role)`, which
-  enforces the admin check, the rate limits (20 per inviter per hour, 5 per recipient per day)
+  enforces the admin check, the rate limits (20 per inviter per hour, 5 per recipient per group per day)
   and creates the 256-bit token. The function never uses the service role.
 - The link is always `${APP_BASE_URL}/invite/<token>`. `APP_BASE_URL` comes only from the
   environment; nothing in the request (body, `Host`, `Origin`, forwarded headers) affects it.
