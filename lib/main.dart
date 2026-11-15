@@ -42,6 +42,7 @@ Future<void> main() async {
     runApp(ServiceUnavailableApp(problems: problems));
     return;
   }
+  if (useDemoBackend) DemoBackend.activate();
 
   // 4. Initialize the Supabase client (PKCE auth flow).
   try {

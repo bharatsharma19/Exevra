@@ -15,10 +15,45 @@ const bool kDemoMode = !kReleaseMode && bool.fromEnvironment('DEMO');
 /// User id of the offline demo account.
 const String kDemoUserId = 'demo-user-id';
 
-/// True only for the offline demo account inside a demo build. Permission
-/// shortcuts for the demo account depend on this, so they never apply in
-/// release builds.
-bool isDemoUser(String? userId) => kDemoMode && userId == kDemoUserId;
+/// Whether this run talks to the offline demo backend.
+///
+/// A demo build with a valid configuration talks to the real project, so
+/// every demo fallback (fake sessions, local invitations, seeded data) is
+/// gated on this flag rather than on [kDemoMode] alone. Always false outside
+/// demo builds.
+abstract final class DemoBackend {
+  static bool _active = false;
+
+  static bool get active => kDemoMode && _active;
+
+  /// Called once from `main()` when the offline demo backend is chosen.
+  static void activate() {
+    if (!kDemoMode) {
+      throw StateError('The demo backend is only available in demo mode.');
+    }
+    _active = true;
+  }
+}
+
+/// True only for the offline demo account while the demo backend is in use.
+/// Permission shortcuts for the demo account depend on this, so they never
+/// apply in release builds or against a real backend.
+bool isDemoUser(String? userId) => DemoBackend.active && userId == kDemoUserId;
+
+/// Returns [userId], or the demo account's id when no one is signed in and
+/// the demo backend is in use. Otherwise there is no fallback identity, so
+/// this throws a [StateError].
+String requireUserId(String? userId) {
+  if (userId != null) return userId;
+  if (DemoBackend.active) return kDemoUserId;
+  throw StateError('Not signed in.');
+}
+
+/// Returns [userId] for UI permission checks. When no one is signed in it is
+/// the demo account's id while the demo backend is in use, and otherwise an
+/// empty id that matches no user, so checks fail closed.
+String userIdForChecks(String? userId) =>
+    userId ?? (DemoBackend.active ? kDemoUserId : '');
 
 /// Placeholder backend used when demo mode runs without a configuration.
 /// Requests to it fail fast, which routes the data layer to its in-memory
@@ -33,14 +68,14 @@ class DemoSession {
   final supabase.User user;
   final UserProfile profile;
 
-  /// Builds the offline demo session. Only callable in demo mode.
+  /// Builds the offline demo session. Only callable with the demo backend.
   factory DemoSession.create({
     required String email,
     String? displayName,
     String? phone,
     bool isVerified = true,
   }) {
-    if (!kDemoMode) {
+    if (!DemoBackend.active) {
       throw StateError('Demo sessions are only available in demo mode.');
     }
     final now = DateTime.now();
@@ -70,9 +105,10 @@ class DemoSession {
     return DemoSession._(user, profile);
   }
 
-  /// Returns [user] marked as email-verified. Only callable in demo mode.
+  /// Returns [user] marked as email-verified. Only callable with the demo
+  /// backend.
   static supabase.User markVerified(supabase.User user) {
-    if (!kDemoMode) {
+    if (!DemoBackend.active) {
       throw StateError('Demo sessions are only available in demo mode.');
     }
     return supabase.User(

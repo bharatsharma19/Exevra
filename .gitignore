@@ -47,8 +47,9 @@ app.*.map.json
 # Environment variables and local configuration (never commit secrets)
 .env
 .env.*
-config/*.json
+config/*
 !config/dev.example.json
+!config/README.md
 
 # Android signing material
 android/key.properties

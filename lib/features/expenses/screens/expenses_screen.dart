@@ -34,7 +34,7 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
   void _confirmDelete(Expense expense) {
     AppHaptics.heavy();
     final auth = ref.read(authNotifierProvider);
-    final currentUserId = auth.user?.id ?? kDemoUserId;
+    final currentUserId = userIdForChecks(auth.user?.id);
     final isGroupAdmin =
         ref.read(expenseProvider).currentGroup?.isAdmin(currentUserId) ?? true;
 
@@ -318,7 +318,7 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
     final catColor = AppColors.getCategoryColor(expense.category);
     final catIcon = AppConstants.getCategoryIcon(expense.category);
     final auth = ref.watch(authNotifierProvider);
-    final currentUserId = auth.user?.id ?? kDemoUserId;
+    final currentUserId = userIdForChecks(auth.user?.id);
     final isGroupAdmin =
         ref.watch(expenseProvider).currentGroup?.isAdmin(currentUserId) ?? true;
 

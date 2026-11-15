@@ -28,7 +28,7 @@ environment (for example `config/prod.json`, also gitignored).
 | --- | --- | --- |
 | `SUPABASE_URL` | yes | `https://<project-ref>.supabase.co`. Plain `http` is accepted only for `127.0.0.1`, `localhost` or `10.0.2.2` in debug builds. |
 | `SUPABASE_ANON_KEY` | yes | The **anon** (publishable) key. Never use the `service_role` or `sb_secret_` key here; the app refuses to start with one. |
-| `APP_LINK_HOST` | no | Host used for shared invite links. Defaults to `exevra.app`. |
+| `APP_LINK_HOST` | no | Host used for shared invite links. Defaults to `exevra.app`. The Android build also uses it as the invite link host in the manifest. |
 | `SENTRY_DSN` | no | Crash reporting DSN (not secret). Empty disables reporting. |
 | `GOOGLE_WEB_CLIENT_ID` | no | OAuth web client ID used as the Google sign-in server client ID. Empty hides Google sign-in behind a "not available" message. |
 | `GOOGLE_IOS_CLIENT_ID` | no | OAuth iOS client ID. |
@@ -52,4 +52,6 @@ problems on that screen; release builds show only the friendly message.
 `flutter run --dart-define=DEMO=true` enables an offline demo for UI work:
 without a valid configuration the app runs against an unreachable local
 placeholder backend with sample data, and failed sign-ins open a local demo
-account. Demo mode is compiled out of release builds.
+account. With a valid configuration a demo build talks to the real project
+and none of these fallbacks apply. Demo mode is compiled out of release
+builds.

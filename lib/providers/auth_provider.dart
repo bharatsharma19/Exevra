@@ -180,7 +180,7 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
         AppHaptics.success();
       }
     } catch (e) {
-      if (kDemoMode) {
+      if (DemoBackend.active) {
         _signInOfflineDemo(email);
         return;
       }
@@ -234,7 +234,7 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
         AppHaptics.success();
       }
     } catch (e) {
-      if (kDemoMode) {
+      if (DemoBackend.active) {
         _signInOfflineDemo(email, displayName: displayName, isVerified: false);
         return;
       }
@@ -284,7 +284,7 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
         AppHaptics.success();
       }
     } catch (e) {
-      if (kDemoMode && token == '123456') {
+      if (DemoBackend.active && token == '123456') {
         _signInOfflineDemo(
           'phone-user@demo.invalid',
           displayName: 'Phone User',
@@ -326,7 +326,7 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
       AppHaptics.error();
     } catch (e) {
       AppLogger.warn('AuthNotifier: Google sign-in error', e);
-      if (kDemoMode) {
+      if (DemoBackend.active) {
         _signInOfflineDemo(
           'google.user@demo.invalid',
           displayName: 'Google User',
@@ -360,7 +360,7 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
       }
     } catch (e) {
       AppLogger.warn('AuthNotifier: Apple sign-in error', e);
-      if (kDemoMode) {
+      if (DemoBackend.active) {
         _signInOfflineDemo(
           'apple.user@demo.invalid',
           displayName: 'Apple User',
@@ -519,7 +519,7 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
     } catch (e) {
       AppLogger.warn('AuthNotifier: refreshSession fallback', e);
       // Offline demo only: treat an explicit refresh as verification.
-      if (kDemoMode && state.user != null) {
+      if (DemoBackend.active && state.user != null) {
         final verifiedUser = DemoSession.markVerified(state.user!);
         state = state.copyWith(user: verifiedUser, isLoading: false);
         AppHaptics.success();

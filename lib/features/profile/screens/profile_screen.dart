@@ -283,9 +283,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           builder: (context, setDialogState) => AlertDialog(
             title: const Row(
               children: [
-                Icon(Icons.email_outlined, color: AppColors.primaryCyan),
+                Icon(Icons.link_rounded, color: AppColors.primaryCyan),
                 SizedBox(width: 8),
-                Text('Invite by Email'),
+                Text('Create Invite Link'),
               ],
             ),
             content: SingleChildScrollView(
@@ -405,11 +405,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   /// Reports the outcome of creating an invitation. The app never emails
-  /// the invitee itself, so on success it offers the link to share.
+  /// the invitee itself, so on success it shows the link to share. The link
+  /// stays available from the pending invitations list.
   void _showInvitationResult(GroupInvitation? invitation) {
-    final messenger = ScaffoldMessenger.of(context);
     if (invitation == null) {
-      messenger.showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Could not create the invitation. Please try again.'),
           backgroundColor: AppColors.error,
@@ -418,24 +418,47 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       return;
     }
     final link = AppConfig.environment.inviteLink(invitation.token).toString();
-    messenger.showSnackBar(
-      SnackBar(
-        content: const Text('Invitation created. Share the link with them.'),
-        backgroundColor: AppColors.primaryEmerald,
-        duration: const Duration(seconds: 8),
-        action: SnackBarAction(
-          label: 'Copy link',
-          textColor: Colors.white,
-          onPressed: () {
-            unawaited(Clipboard.setData(ClipboardData(text: link)));
-            messenger.showSnackBar(
-              const SnackBar(
-                content: Text('Invite link copied to clipboard!'),
-                duration: Duration(seconds: 2),
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Invitation created'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Send this link to ${invitation.email}. It only works for '
+                'that email address.',
+                style: const TextStyle(fontSize: 13),
               ),
-            );
-          },
+              const SizedBox(height: 12),
+              SelectableText(link, style: const TextStyle(fontSize: 12)),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Done'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => _copyInviteLink(link),
+              icon: const Icon(Icons.copy_rounded, size: 16),
+              label: const Text('Copy link'),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+
+  void _copyInviteLink(String link) {
+    AppHaptics.selection();
+    unawaited(Clipboard.setData(ClipboardData(text: link)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Invite link copied to clipboard!'),
+        duration: Duration(seconds: 2),
       ),
     );
   }
@@ -446,7 +469,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }) {
     final expenseState = ref.read(expenseProvider);
     final authState = ref.read(authNotifierProvider);
-    final currentUserId = authState.user?.id ?? kDemoUserId;
+    final currentUserId = userIdForChecks(authState.user?.id);
     final currency =
         authState.profile?.currency ?? AppConstants.defaultCurrency;
 
@@ -761,7 +784,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               authState.user?.email?.split('@').first ??
               'User');
     final group = expenseState.currentGroup;
-    final currentUserId = authState.user?.id ?? kDemoUserId;
+    final currentUserId = userIdForChecks(authState.user?.id);
     final isGroupAdmin = group?.isAdmin(currentUserId) ?? false;
 
     return Scaffold(
@@ -1099,14 +1122,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     ),
                     const SizedBox(height: 14),
 
-                    // Invite Actions: Email vs Share Link
+                    // Invite Actions: per-member invitation vs group link
                     Row(
                       children: [
                         Expanded(
                           child: ElevatedButton.icon(
                             onPressed: _showInviteByEmailDialog,
-                            icon: const Icon(Icons.email_outlined, size: 16),
-                            label: const Text('Invite by Email'),
+                            icon: const Icon(
+                              Icons.person_add_alt_1_rounded,
+                              size: 16,
+                            ),
+                            label: const Text('Invite Member'),
                             style: ElevatedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 10),
                               shape: RoundedRectangleBorder(
@@ -1126,8 +1152,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                               final token = base64Url.encode(
                                 utf8.encode('${group.inviteCode}|$exp'),
                               );
+                              final link = AppConfig.environment.inviteLink(
+                                token,
+                              );
                               final shareText =
-                                  'Join my group "${group.name}" on Exevra!\n\nClick this link to join:\nhttps://exevra.com/invite?token=$token';
+                                  'Join my group "${group.name}" on Exevra!\n\nClick this link to join:\n$link';
                               unawaited(
                                 Clipboard.setData(
                                   ClipboardData(text: shareText),
@@ -1229,6 +1258,22 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                     ],
                                   ),
                                 ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.copy_rounded,
+                                    size: 18,
+                                    color: AppColors.primaryCyan,
+                                  ),
+                                  tooltip: 'Copy Invite Link',
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                  onPressed: () => _copyInviteLink(
+                                    AppConfig.environment
+                                        .inviteLink(inv.token)
+                                        .toString(),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
                                 IconButton(
                                   icon: const Icon(
                                     Icons.cancel_outlined,

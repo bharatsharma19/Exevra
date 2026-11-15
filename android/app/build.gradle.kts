@@ -1,8 +1,27 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+// Build defines passed by `flutter build/run --dart-define[-from-file]`,
+// base64-encoded as "KEY=value" entries. Used here only for non-secret values.
+val dartDefines: Map<String, String> =
+    (project.findProperty("dart-defines") as String?)
+        ?.split(",")
+        ?.filter { it.isNotBlank() }
+        ?.map { String(Base64.getDecoder().decode(it), Charsets.UTF_8) }
+        ?.mapNotNull { entry ->
+            entry.split("=", limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] }
+        }
+        ?.toMap()
+        ?: emptyMap()
+
+// Must match AppConfig.defaultAppLinkHost in lib/core/config/app_config.dart.
+val appLinkHost: String =
+    dartDefines["APP_LINK_HOST"]?.trim()?.takeIf { it.isNotEmpty() } ?: "exevra.app"
 
 android {
     namespace = "com.antigravity.expensemanager.expense_manager"
@@ -20,6 +39,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["appLinkHost"] = appLinkHost
     }
 
     buildTypes {

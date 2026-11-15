@@ -95,7 +95,7 @@ class SupabaseService {
   // ---------------------------------------------------------------------------
 
   Future<List<ExpenseGroup>> fetchUserGroups() async {
-    final userId = currentUser?.id ?? kDemoUserId;
+    final userId = requireUserId(currentUser?.id);
     try {
       final res = await client.rpc<dynamic>('get_user_groups');
       if (res is List) {
@@ -144,7 +144,7 @@ class SupabaseService {
   }
 
   Future<void> switchActiveGroup(String? groupId) async {
-    final userId = currentUser?.id ?? kDemoUserId;
+    final userId = requireUserId(currentUser?.id);
     try {
       await client
           .from('profiles')
@@ -194,7 +194,7 @@ class SupabaseService {
   }
 
   Future<ExpenseGroup> createGroup(String name) async {
-    final userId = currentUser?.id ?? kDemoUserId;
+    final userId = requireUserId(currentUser?.id);
     final now = DateTime.now();
     final newGroup = ExpenseGroup(
       id: 'grp-${now.millisecondsSinceEpoch}',
@@ -279,7 +279,7 @@ class SupabaseService {
 
     if (target != null &&
         target.inviteCode.toLowerCase() == inviteCode.trim().toLowerCase()) {
-      final userId = currentUser?.id ?? kDemoUserId;
+      final userId = requireUserId(currentUser?.id);
       if (_localProfile != null) {
         _localProfile = _localProfile!.copyWith(groupId: target.id);
       }
@@ -363,7 +363,7 @@ class SupabaseService {
     }
 
     if (_localMembers.isEmpty) {
-      final userId = currentUser?.id ?? kDemoUserId;
+      final userId = requireUserId(currentUser?.id);
       _localMembers.add(
         GroupMember(
           id: 'mem-1',
@@ -381,7 +381,7 @@ class SupabaseService {
   }
 
   Future<String?> leaveGroup(String groupId) async {
-    final userId = currentUser?.id ?? kDemoUserId;
+    final userId = requireUserId(currentUser?.id);
     String? nextGroupId;
     try {
       await client.from('group_members').delete().match({
@@ -422,7 +422,7 @@ class SupabaseService {
   }
 
   Future<String?> deleteGroup(String groupId) async {
-    final userId = currentUser?.id ?? kDemoUserId;
+    final userId = requireUserId(currentUser?.id);
     String? nextGroupId;
     try {
       await client.from('groups').delete().eq('id', groupId);
@@ -468,7 +468,7 @@ class SupabaseService {
     required String email,
     String role = 'member',
   }) async {
-    final userId = currentUser?.id ?? kDemoUserId;
+    final userId = requireUserId(currentUser?.id);
     try {
       final raw = await client.rpc<dynamic>(
         'create_group_invitation',
@@ -509,8 +509,8 @@ class SupabaseService {
     }
 
     // Offline demo only: a locally generated token is not a real invitation,
-    // so outside demo mode a failed request reports failure.
-    if (!kDemoMode) return null;
+    // so unless the demo backend is in use a failed request reports failure.
+    if (!DemoBackend.active) return null;
     final now = DateTime.now();
     final group =
         _localGroups.where((g) => g.id == groupId).firstOrNull ?? _localGroup;
@@ -663,7 +663,7 @@ class SupabaseService {
         throw Exception('This invitation has been revoked');
       }
 
-      final userId = currentUser?.id ?? kDemoUserId;
+      final userId = requireUserId(currentUser?.id);
       final grp =
           _localGroups.where((g) => g.id == local.groupId).firstOrNull ??
           _localGroup;
@@ -708,7 +708,7 @@ class SupabaseService {
     required double amount,
     String? notes,
   }) async {
-    final userId = currentUser?.id ?? kDemoUserId;
+    final userId = requireUserId(currentUser?.id);
     try {
       final raw = await client.rpc<dynamic>(
         'record_settlement',
@@ -807,7 +807,7 @@ class SupabaseService {
     DateTime? startDate,
     DateTime? endDate,
   }) async {
-    final currentUid = currentUser?.id ?? kDemoUserId;
+    final currentUid = requireUserId(currentUser?.id);
     try {
       var query = client.from('expenses').select('*, profiles(display_name)');
 
@@ -838,8 +838,8 @@ class SupabaseService {
       AppLogger.warn('SupabaseService: fetchExpenses fallback', e);
     }
 
-    // Seed mock local expenses ONLY when running in dummy demo mode (not live Supabase)
-    if (kDemoMode && _localExpenses.isEmpty) {
+    // Seed mock local expenses only with the offline demo backend.
+    if (DemoBackend.active && _localExpenses.isEmpty) {
       _seedMockExpenses();
     }
 
@@ -866,7 +866,7 @@ class SupabaseService {
   }
 
   Future<Expense> createExpense(Expense expense) async {
-    final userId = currentUser?.id ?? kDemoUserId;
+    final userId = requireUserId(currentUser?.id);
     try {
       final res = await client
           .from('expenses')
@@ -1062,7 +1062,7 @@ class SupabaseService {
 
   void _seedMockExpenses() {
     final now = DateTime.now();
-    final userId = currentUser?.id ?? kDemoUserId;
+    final userId = requireUserId(currentUser?.id);
 
     _localExpenses.addAll([
       Expense(

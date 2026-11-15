@@ -103,13 +103,20 @@ class AuthService {
   bool get isGoogleSignInConfigured =>
       AppConfig.environment.isGoogleSignInConfigured;
 
+  /// Initializes Google sign-in once. A failed attempt is not cached, so the
+  /// next sign-in retries it.
   Future<void> _ensureGoogleInitialized() {
-    return _googleInit ??= GoogleSignIn.instance.initialize(
-      serverClientId: AppConfig.environment.googleWebClientId,
-      clientId: AppConfig.environment.googleIosClientId.isEmpty
-          ? null
-          : AppConfig.environment.googleIosClientId,
-    );
+    return _googleInit ??= GoogleSignIn.instance
+        .initialize(
+          serverClientId: AppConfig.environment.googleWebClientId,
+          clientId: AppConfig.environment.googleIosClientId.isEmpty
+              ? null
+              : AppConfig.environment.googleIosClientId,
+        )
+        .catchError((Object error, StackTrace stackTrace) {
+          _googleInit = null;
+          Error.throwWithStackTrace(error, stackTrace);
+        });
   }
 
   /// Signs in with Google and exchanges the ID token with Supabase.
@@ -134,13 +141,11 @@ class AuthService {
         throw Exception('Failed to obtain Google ID Token');
       }
 
-      final authorization = await account.authorizationClient
-          .authorizationForScopes(_googleScopes);
-
+      // Supabase only needs the ID token for Google, so no separate
+      // authorization (access token) request is made here.
       return await _client.auth.signInWithIdToken(
         provider: OAuthProvider.google,
         idToken: idToken,
-        accessToken: authorization?.accessToken,
       );
     } on GoogleSignInException catch (e) {
       if (e.code == GoogleSignInExceptionCode.canceled) {

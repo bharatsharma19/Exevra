@@ -368,7 +368,7 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       state = state.copyWith(errorMessage: null);
       AppHaptics.light();
       final auth = _ref.read(authNotifierProvider);
-      final userId = auth.user?.id ?? kDemoUserId;
+      final userId = requireUserId(auth.user?.id);
       final groupId = isGroup
           ? (state.currentGroup?.id ?? auth.profile?.groupId)
           : null;
@@ -419,7 +419,7 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       state = state.copyWith(errorMessage: null);
       AppHaptics.light();
       final auth = _ref.read(authNotifierProvider);
-      final currentUserId = auth.user?.id ?? kDemoUserId;
+      final currentUserId = requireUserId(auth.user?.id);
 
       if (!updatedExpense.canEdit(currentUserId) &&
           !isDemoUser(currentUserId)) {
@@ -462,7 +462,7 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       state = state.copyWith(errorMessage: null);
       final expense = state.expenses.firstWhere((e) => e.id == expenseId);
       final auth = _ref.read(authNotifierProvider);
-      final currentUserId = auth.user?.id ?? kDemoUserId;
+      final currentUserId = requireUserId(auth.user?.id);
       final isGroupAdmin = state.currentGroup?.isAdmin(currentUserId) ?? true;
 
       if (!expense.canDelete(currentUserId, isGroupAdmin) &&

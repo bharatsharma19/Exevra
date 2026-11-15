@@ -98,10 +98,29 @@ void main() {
       );
     });
 
-    test('demo sessions are only built behind a kDemoMode guard', () {
+    test('demo sessions are only built behind a demo backend guard', () {
       for (final path in filesContaining('DemoSession.')) {
-        expect(sources[path], contains('kDemoMode'), reason: path);
+        expect(sources[path], contains('DemoBackend.active'), reason: path);
       }
+    });
+
+    test('demo fallbacks are gated on the demo backend, not the build', () {
+      // kDemoMode alone is true for a demo build talking to a real project.
+      expect(filesContaining(RegExp(r'\bkDemoMode\b')), [
+        'lib/core/config/demo_mode.dart',
+        'lib/main.dart',
+      ]);
+    });
+
+    test('the demo user id is only used inside demo_mode.dart', () {
+      // Elsewhere, requireUserId/userIdForChecks keep it behind the demo
+      // backend guard so release builds have no fallback identity.
+      expect(filesContaining('kDemoUserId'), [
+        'lib/core/config/demo_mode.dart',
+      ]);
+      expect(filesContaining("'demo-user-id'"), [
+        'lib/core/config/demo_mode.dart',
+      ]);
     });
 
     test('does not write directly to the console', () {

@@ -90,12 +90,10 @@ lib/
 - Android Studio / Xcode
 - Supabase Project
 
-### 2. Environment Configuration
-Create a `.env` file in the project root:
-```env
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-supabase-publishable-key
-GEMINI_API_KEY=your-gemini-api-key
+### 2. Build Configuration
+Configuration is passed at build time with `--dart-define-from-file`; the app does not read a `.env` file. The client only holds the Supabase URL and the anon (publishable) key; never add AI or email keys to it. See [`config/README.md`](config/README.md) for details.
+```bash
+cp config/dev.example.json config/dev.json   # gitignored; fill in your Supabase values
 ```
 
 ### 3. Database Setup (Supabase PostgreSQL)
@@ -117,10 +115,10 @@ flutter analyze
 flutter test
 
 # Run app on connected device
-flutter run
+flutter run --dart-define-from-file=config/dev.json
 
-# Build release APK
-flutter build apk --release
+# Build release APK (use a separate, gitignored config/prod.json)
+flutter build apk --release --dart-define-from-file=config/prod.json
 ```
 
 ---
