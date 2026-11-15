@@ -7,6 +7,7 @@ import 'package:expense_manager/data/ai/ai_chat_models.dart';
 import 'package:expense_manager/data/repositories/invitation_repository.dart';
 import 'package:expense_manager/features/about/about_screen.dart';
 import 'package:expense_manager/features/auth/screens/login_screen.dart';
+import 'package:expense_manager/features/auth/screens/register_screen.dart';
 import 'package:expense_manager/features/onboarding/onboarding.dart';
 import 'package:expense_manager/features/profile/screens/invite_screen.dart';
 import 'package:expense_manager/main.dart';
@@ -105,6 +106,20 @@ void main() {
     expect(location(c), '/login');
     expect(find.byType(LoginScreen), findsOneWidget);
     expect(c.read(onboardingCompletedProvider).value, isTrue);
+  });
+
+  testWidgets('registering on a fresh device returns to registration', (
+    tester,
+  ) async {
+    final c = await pumpApp(tester, onboardingDone: false);
+    c.read(routerProvider).go('/register');
+    await _settle(tester);
+    expect(location(c), '/onboarding?next=%2Fregister');
+
+    await tester.tap(find.text('Skip'));
+    await _settle(tester);
+    expect(location(c), '/register');
+    expect(find.byType(RegisterScreen), findsOneWidget);
   });
 
   testWidgets('an invite link on a fresh device is not sent to the intro', (

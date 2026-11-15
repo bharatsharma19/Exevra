@@ -346,6 +346,112 @@ void main() {
       expect(container.read(failureReporterProvider)?.failure, result.failure);
     });
 
+    test('a group expense moved to personal can change its currency', () async {
+      const key = ExpenseListKey(
+        'u1',
+        ExpenseQuery(scope: ExpenseScope.personalAndGroup('g1')),
+      );
+      final grouped = expenseOf(
+        'ge',
+        userId: 'u1',
+        groupId: 'g1',
+        spentAt: DateTime.utc(2026, 11, 5),
+      );
+      backend.expenses.rows.add(grouped);
+      final notifier = await load(key);
+      final target = ExpenseDraft(
+        title: 'Hotel',
+        amount: Money(4200, 'USD'),
+        category: grouped.category,
+        spentAt: grouped.spentAt,
+      );
+
+      final result = await notifier.move(grouped, target);
+
+      expect(result.failure, isNull);
+      expect(backend.expenses.moves, [('ge', null)]);
+      final saved = backend.expenses.rows.singleWhere(
+        (e) => e.id == result.moved?.id,
+      );
+      expect(saved.isPersonal, isTrue);
+      expect(saved.title, 'Hotel');
+      expect(saved.amount, Money(4200, 'USD'));
+      expect(result.moved?.amount, Money(4200, 'USD'));
+      final shown = container
+          .read(expenseListProvider(key))
+          .value!
+          .items
+          .singleWhere((e) => e.id == saved.id);
+      expect(shown.amount, Money(4200, 'USD'));
+    });
+
+    test(
+      'a refused move from a group leaves the group row as it was',
+      () async {
+        final grouped = expenseOf(
+          'ge',
+          userId: 'u1',
+          groupId: 'g1',
+          spentAt: DateTime.utc(2026, 11, 5),
+        );
+        backend.expenses.rows.add(grouped);
+        const key = ExpenseListKey(
+          'u1',
+          ExpenseQuery(scope: ExpenseScope.personalAndGroup('g1')),
+        );
+        final notifier = await load(key);
+        backend.expenses.failMoves = const AppFailure.permissionDenied(
+          key: 'not_group_member',
+        );
+        final target = ExpenseDraft(
+          title: grouped.title,
+          amount: Money(99900, 'INR'),
+          category: grouped.category,
+          spentAt: grouped.spentAt,
+        );
+
+        final result = await notifier.move(grouped, target);
+
+        expect(result.moved, isNull);
+        expect(result.failure?.key, 'not_group_member');
+        // The new amount never reached the group (no re-split).
+        expect(
+          backend.expenses.rows.singleWhere((e) => e.id == 'ge').amount,
+          grouped.amount,
+        );
+      },
+    );
+
+    test('a moved expense whose edit fails reports both', () async {
+      final grouped = expenseOf(
+        'ge',
+        userId: 'u1',
+        groupId: 'g1',
+        spentAt: DateTime.utc(2026, 11, 5),
+      );
+      backend.expenses.rows.add(grouped);
+      const key = ExpenseListKey(
+        'u1',
+        ExpenseQuery(scope: ExpenseScope.personalAndGroup('g1')),
+      );
+      final notifier = await load(key);
+      backend.expenses.failUpdates = const AppFailure.validation(
+        key: 'invalid_title',
+      );
+      final target = ExpenseDraft(
+        title: 'Renamed',
+        amount: grouped.amount,
+        category: grouped.category,
+        spentAt: grouped.spentAt,
+      );
+
+      final result = await notifier.move(grouped, target, report: false);
+
+      expect(result.moved?.isPersonal, isTrue);
+      expect(result.failure?.key, 'invalid_title');
+      expect(backend.expenses.rows.where((e) => e.id == 'ge'), isEmpty);
+    });
+
     test('already in that scope is explained as such', () async {
       final notifier = await load();
       final original = backend.expenses.rows.firstWhere((e) => e.id == 'e2');

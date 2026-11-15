@@ -262,6 +262,25 @@ class FakeAuthService implements AuthService {
     calls.add('fullName:$fullName');
   }
 
+  @override
+  ReauthMethod? reauthMethod = ReauthMethod.password;
+
+  /// What [reauthenticate] returns (the Apple code), or the failure it
+  /// throws next.
+  String? reauthAppleCode;
+  AppFailure? reauthFailure;
+
+  @override
+  Future<String?> reauthenticate({String? password}) async {
+    calls.add('reauth:${reauthMethod?.name}:${password ?? ''}');
+    final f = reauthFailure;
+    reauthFailure = null;
+    if (f != null) throw f;
+    if (_user == null) throw const AppFailure.sessionExpired();
+    emit(supabase.AuthChangeEvent.signedIn, _user);
+    return reauthAppleCode;
+  }
+
   /// When set, the server part of [signOut] waits for it.
   Completer<void>? holdSignOut;
 
@@ -697,12 +716,22 @@ class FakeExpenseRepository implements ExpenseRepository {
     return saved;
   }
 
+  /// When set, [update] throws it (after [failWrites]).
+  AppFailure? failUpdates;
+
   @override
   Future<Expense> update(Expense expense) async {
     await Future<void>.delayed(Duration.zero);
     await holdWrites?.future;
-    final failure = failWrites;
+    final failure = failWrites ?? failUpdates;
     if (failure != null) throw failure;
+    final current = rows.where((e) => e.id == expense.id).firstOrNull;
+    // Like the server trigger: a group expense keeps the group currency.
+    if (current != null &&
+        current.isGroup &&
+        current.amount.currency != expense.amount.currency) {
+      throw const AppFailure.validation(key: 'currency_mismatch');
+    }
     final saved = expense.copyWith(isSyncing: false);
     rows
       ..removeWhere((e) => e.id == expense.id)

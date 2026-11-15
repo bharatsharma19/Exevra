@@ -53,6 +53,10 @@ class AppleSignInResult {
   final AppleName name;
 }
 
+/// How the signed-in user proves it is them again before account deletion
+/// (the server wants a sign-in from the last few minutes).
+enum ReauthMethod { password, google, apple }
+
 /// Authentication against Supabase plus the native Google and Apple SDKs.
 ///
 /// Every method throws an [AppFailure] on error. A user cancelling a social
@@ -109,6 +113,20 @@ abstract interface class AuthService {
   /// the user has no Apple identity or this device cannot ask Apple.
   /// Throws `apple_reauth_cancelled` when the user cancels.
   Future<String?> appleAuthorizationCode();
+
+  /// How the current user can sign in again: with their password when
+  /// they have one, else with Google, else with Apple. Null when there is
+  /// no user or none of these works on this device.
+  ReauthMethod? get reauthMethod;
+
+  /// Signs the current user in again with [reauthMethod] ([password] for
+  /// [ReauthMethod.password]), so the new session counts as a recent
+  /// sign-in. Never switches to another account: a Google or Apple account
+  /// that is not this user's throws `reauth_wrong_account` before the
+  /// session changes. Returns the fresh Apple authorization code when
+  /// Apple was used (see [appleAuthorizationCode]), else null. Throws
+  /// `reauth_cancelled` when the user cancels.
+  Future<String?> reauthenticate({String? password});
 
   /// Ends the local session (and the Google account selection). Never
   /// throws: the local session is always removed.
@@ -253,7 +271,11 @@ class SupabaseAuthService implements AuthService {
   }
 
   @override
-  Future<bool> signInWithGoogle() async {
+  Future<bool> signInWithGoogle() => _signInWithGoogle();
+
+  /// Signs in with Google. With [onlyIds], a Google account whose id is not
+  /// in it is refused before the session changes.
+  Future<bool> _signInWithGoogle({Set<String>? onlyIds}) async {
     if (!_config.isGoogleSignInConfigured) {
       throw const AppFailure.business('google_unavailable');
     }
@@ -262,6 +284,9 @@ class SupabaseAuthService implements AuthService {
       final account = await GoogleSignIn.instance.authenticate(
         scopeHint: _googleScopes,
       );
+      if (onlyIds != null && !onlyIds.contains(account.id)) {
+        throw const AppFailure.business('reauth_wrong_account');
+      }
       final idToken = account.authentication.idToken;
       if (idToken == null) throw const AppFailure.business('google_failed');
       // Supabase verifies both tokens when both are present.
@@ -325,15 +350,16 @@ class SupabaseAuthService implements AuthService {
     }
   }
 
+  static bool get _appleNative =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.macOS);
+
   @override
   Future<String?> appleAuthorizationCode() async {
     final user = _auth.currentUser;
-    if (user == null || !_hasAppleIdentity(user)) return null;
-    final native =
-        !kIsWeb &&
-        (defaultTargetPlatform == TargetPlatform.iOS ||
-            defaultTargetPlatform == TargetPlatform.macOS);
-    if (!native) return null;
+    if (user == null || !_hasProvider(user, 'apple')) return null;
+    if (!_appleNative) return null;
     try {
       if (!await SignInWithApple.isAvailable()) return null;
       final credential = await SignInWithApple.getAppleIDCredential(
@@ -351,12 +377,96 @@ class SupabaseAuthService implements AuthService {
     }
   }
 
-  static bool _hasAppleIdentity(User user) {
-    if (user.identities?.any((i) => i.provider == 'apple') ?? false) {
+  // ---------------------------------------------------------------------------
+  // Signing in again
+  // ---------------------------------------------------------------------------
+
+  /// The provider's own ids for [user]'s identities with [provider].
+  static Set<String> _providerIds(User user, String provider) => {
+    for (final identity in user.identities ?? const <UserIdentity>[])
+      if (identity.provider == provider) ...[
+        identity.id,
+        if (identity.identityData?['sub'] case final String sub) sub,
+      ],
+  };
+
+  static bool _hasProvider(User user, String provider) {
+    if (user.identities?.any((i) => i.provider == provider) ?? false) {
       return true;
     }
     final providers = user.appMetadata['providers'];
-    return providers is List && providers.contains('apple');
+    return providers is List && providers.contains(provider);
+  }
+
+  @override
+  ReauthMethod? get reauthMethod {
+    final user = _auth.currentUser;
+    if (user == null) return null;
+    if (_hasProvider(user, 'email') && (user.email ?? '').isNotEmpty) {
+      return ReauthMethod.password;
+    }
+    if (_hasProvider(user, 'google') && _config.isGoogleSignInConfigured) {
+      return ReauthMethod.google;
+    }
+    if (_hasProvider(user, 'apple') && _appleNative) return ReauthMethod.apple;
+    return null;
+  }
+
+  @override
+  Future<String?> reauthenticate({String? password}) async {
+    final user = _auth.currentUser;
+    switch (reauthMethod) {
+      case ReauthMethod.password:
+        if (password == null || password.isEmpty) {
+          throw const AppFailure.business('reauth_cancelled');
+        }
+        await signIn(email: user!.email!, password: password);
+        return null;
+      case ReauthMethod.google:
+        final ids = _providerIds(user!, 'google');
+        if (!await _signInWithGoogle(onlyIds: ids)) {
+          throw const AppFailure.business('reauth_cancelled');
+        }
+        return null;
+      case ReauthMethod.apple:
+        return _reauthenticateWithApple(_providerIds(user!, 'apple'));
+      case null:
+        throw const AppFailure.business('reauth_required');
+    }
+  }
+
+  /// Signs in with Apple again as the account in [ids] and returns the
+  /// authorization code Apple issued with it.
+  Future<String?> _reauthenticateWithApple(Set<String> ids) async {
+    final rawNonce = Nonce.generate();
+    try {
+      final credential = await SignInWithApple.getAppleIDCredential(
+        scopes: const [],
+        nonce: Nonce.sha256Hex(rawNonce),
+      );
+      final appleId = credential.userIdentifier;
+      if (appleId == null || !ids.contains(appleId)) {
+        throw const AppFailure.business('reauth_wrong_account');
+      }
+      final idToken = credential.identityToken;
+      if (idToken == null) throw const AppFailure.business('apple_failed');
+      await ErrorMapper.guard(
+        () => _auth.signInWithIdToken(
+          provider: OAuthProvider.apple,
+          idToken: idToken,
+          nonce: rawNonce,
+        ),
+      );
+      return credential.authorizationCode;
+    } on SignInWithAppleAuthorizationException catch (e) {
+      if (e.code == AuthorizationErrorCode.canceled) {
+        throw const AppFailure.business('reauth_cancelled');
+      }
+      AppLogger.warn('Apple re-authentication failed', e.code);
+      throw const AppFailure.business('apple_failed');
+    } on SignInWithAppleNotSupportedException {
+      throw const AppFailure.business('apple_failed');
+    }
   }
 
   @override

@@ -411,6 +411,36 @@ void main() {
       expect(accounts.appleCodes, ['apple-code']);
     });
 
+    test('signing in again keeps the session and its Apple code is used '
+        'by the deletion', () async {
+      final c = await start(signedInAs: 'A');
+      backend.auth
+        ..reauthMethod = ReauthMethod.apple
+        ..reauthAppleCode = 'fresh-code'
+        ..appleCode = 'other-code';
+      expect(controllerOf(c).reauthMethod, ReauthMethod.apple);
+      expect(await controllerOf(c).reauthenticate(), isNull);
+      await settle();
+      expect(stateOf(c).phase, AuthPhase.signedIn);
+      expect(stateOf(c).user?.id, 'A');
+      expect(await controllerOf(c).deleteAccount(), isNull);
+      expect(accounts.appleCodes, ['fresh-code']);
+      expect(backend.auth.calls, isNot(contains('appleCode')));
+    });
+
+    test('a failed sign-in again is returned as is', () async {
+      final c = await start(signedInAs: 'A');
+      backend.auth.reauthFailure = const AppFailure.business(
+        'reauth_wrong_account',
+      );
+      expect(
+        await controllerOf(c).reauthenticate(password: 'x'),
+        const AppFailure.business('reauth_wrong_account'),
+      );
+      expect(stateOf(c).isLoading, isFalse);
+      expect(stateOf(c).user?.id, 'A');
+    });
+
     test('cancelling the Apple confirmation deletes nothing', () async {
       final c = await start(signedInAs: 'A');
       backend.auth.appleCodeFailure = const AppFailure.business(

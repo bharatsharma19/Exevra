@@ -66,6 +66,24 @@ abstract final class AppRoutes {
 /// [raw] if it is a safe in-app location to return to after signing in:
 /// an absolute path (no scheme, host or `//`), not an auth screen.
 String? safeReturnTo(String? raw) {
+  final uri = _inAppLocation(raw);
+  if (uri == null || AppRoutes.authRoutes.contains(uri.path)) return null;
+  return raw!.trim();
+}
+
+/// [raw] if it is a safe place to go once the introduction is done: what
+/// [safeReturnTo] accepts, or a screen for signed-out visitors (such as
+/// registration).
+String? safeAfterIntro(String? raw) {
+  final uri = _inAppLocation(raw);
+  if (uri == null) return null;
+  if (AppRoutes.entryRoutes.contains(uri.path)) return raw!.trim();
+  return safeReturnTo(raw);
+}
+
+/// [raw] parsed when it is an absolute in-app path (no scheme, host or
+/// `//`), else null.
+Uri? _inAppLocation(String? raw) {
   if (raw == null) return null;
   final value = raw.trim();
   if (!value.startsWith('/') ||
@@ -75,8 +93,7 @@ String? safeReturnTo(String? raw) {
   }
   final uri = Uri.tryParse(value);
   if (uri == null || uri.hasScheme || uri.hasAuthority) return null;
-  if (AppRoutes.authRoutes.contains(uri.path)) return null;
-  return value;
+  return uri;
 }
 
 /// The redirect for [location] in [phase], or null to stay.
@@ -130,7 +147,8 @@ String? platformLinkRedirect(Uri location) {
 /// it was [completed] on this device (null while the flag loads).
 ///
 /// * Not completed: everything except the introduction itself and
-///   invitation links goes to `/onboarding`.
+///   invitation links goes to `/onboarding`, with the location the user
+///   wanted in `next` (see [safeAfterIntro]) unless that is sign-in.
 /// * Loading (null) or completed: no decision here ([authRedirect] runs).
 ///
 /// In the result, `stay` keeps the location and `to` moves there; a null
@@ -143,7 +161,17 @@ String? platformLinkRedirect(Uri location) {
   final path = location.path.isEmpty ? AppRoutes.root : location.path;
   if (path == AppRoutes.onboarding) return (stay: true, to: null);
   if (AppRoutes.isInvite(path)) return null;
-  return (stay: false, to: AppRoutes.onboarding);
+  final next = safeAfterIntro(
+    path == AppRoutes.splash
+        ? location.queryParameters['from']
+        : location.toString(),
+  );
+  return (
+    stay: false,
+    to: next == null || next == AppRoutes.login
+        ? AppRoutes.onboarding
+        : '${AppRoutes.onboarding}?next=${Uri.encodeComponent(next)}',
+  );
 }
 
 /// The router's redirect: platform links first, then the introduction

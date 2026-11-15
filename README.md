@@ -34,7 +34,8 @@ Designed & developed by Bharat Sharma.
   expense, and an About page with the version, privacy policy, terms, support contact, open-source
   licences and account deletion.
 - **Account deletion.** Delete your account and data from the app (Profile or About), or follow
-  the account deletion page on the website.
+  the account deletion page on the website. If you last signed in more than a few minutes ago,
+  the app asks you to confirm it's you (password, Google or Apple) first.
 
 ## Screenshots
 
@@ -316,9 +317,6 @@ supabase test db                     # pgTAP tests against the local stack
 
 # Backend smoke test (local stack + functions serve; see supabase/e2e/smoke.mjs)
 node supabase/e2e/smoke.mjs "$API_URL" "$ANON_KEY" "$SERVICE_ROLE_KEY"
-
-# End-to-end on an emulator against the local stack
-flutter test integration_test --dart-define-from-file=config/local.json
 ```
 
 ## Continuous integration
@@ -345,7 +343,6 @@ lib/
   providers/   Riverpod providers and notifiers
   services/    access to Supabase and Edge Functions
 test/          unit, widget and golden tests
-integration_test/
 supabase/
   migrations/  database schema (single source of truth)
   tests/       pgTAP tests

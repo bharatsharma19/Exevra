@@ -99,7 +99,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           state,
           // Runs after the flag is already true, so the redirect does not
           // bring the user back here.
-          OnboardingFlow(onFinished: () => context.go(AppRoutes.login)),
+          OnboardingFlow(
+            onFinished: () => context.go(
+              safeAfterIntro(state.uri.queryParameters['next']) ??
+                  AppRoutes.login,
+            ),
+          ),
         ),
       ),
       GoRoute(

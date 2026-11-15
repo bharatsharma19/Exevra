@@ -380,6 +380,17 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
     }
 
     if (!mounted) return;
+    if (failure != null && moved != null) {
+      // The move went through but the changes after it did not: the old
+      // expense is gone, so this sheet cannot retry them.
+      AppSnackbar.showError(
+        'Moved "${moved.title}", but your other changes were not saved. '
+        '${friendlyMessage(failure)}',
+      );
+      _allowPop = true;
+      Navigator.of(context).pop(true);
+      return;
+    }
     if (failure != null) {
       final locked = failure.key == 'expense_locked_member_left';
       setState(() {

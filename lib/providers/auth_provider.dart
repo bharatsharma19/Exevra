@@ -514,21 +514,48 @@ class AuthController extends Notifier<AppAuthState> {
   /// slow or failed server call never keeps the user signed in.
   Future<void> signOut() async {
     _rememberedPassword = null;
+    _appleCodeForDeletion = null;
     _setPendingEmail(null);
     _setRecoveryUser(null);
     _settle(null);
     await _service.signOut();
   }
 
+  /// How the user signs in again when the server asks for a recent sign-in
+  /// (`reauth_required`), or null when the app cannot offer it.
+  ReauthMethod? get reauthMethod => _service.reauthMethod;
+
+  /// Signs the user in again as the same account (see
+  /// [AuthService.reauthenticate]). Returns the failure, or null.
+  Future<AppFailure?> reauthenticate({String? password}) async {
+    state = state._copy(isLoading: true);
+    try {
+      _appleCodeForDeletion = await _service.reauthenticate(password: password);
+      return null;
+    } catch (error, stackTrace) {
+      return ErrorMapper.map(error, stackTrace);
+    } finally {
+      if (ref.mounted) state = state._copy(isLoading: false);
+    }
+  }
+
+  /// The Apple code from [reauthenticate], used by the next deletion so
+  /// the user is not asked by Apple twice.
+  String? _appleCodeForDeletion;
+
   /// Deletes the account on the server, then signs out. On failure the
   /// session and all local data are kept and the failure is returned.
   ///
+  /// The server wants a recent sign-in: when the session is older it
+  /// answers `reauth_required`; call [reauthenticate] and then this again.
   /// Users who signed in with Apple confirm with Apple first, so the
   /// server can revoke the app's Apple token along with the account.
   Future<AppFailure?> deleteAccount() async {
     state = state._copy(isLoading: true);
     try {
-      final appleCode = await _service.appleAuthorizationCode();
+      final reused = _appleCodeForDeletion;
+      _appleCodeForDeletion = null;
+      final appleCode = reused ?? await _service.appleAuthorizationCode();
       await ref
           .read(accountRepositoryProvider)
           .deleteAccount(appleAuthorizationCode: appleCode);

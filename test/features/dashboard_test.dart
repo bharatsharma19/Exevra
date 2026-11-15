@@ -135,6 +135,17 @@ void main() {
       expect(find.byType(FirstExpenseNudge), findsNothing);
     });
 
+    testWidgets('an empty group does not show it to a user with expenses', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        setUp: (b) => b.expenses.rows.removeWhere((e) => e.groupId == 'g1'),
+      );
+      expect(find.text('Recent group expenses'), findsOneWidget);
+      expect(find.byType(FirstExpenseNudge), findsNothing);
+    });
+
     testWidgets('stays hidden after it was dismissed', (tester) async {
       await _pump(
         tester,

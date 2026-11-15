@@ -158,6 +158,12 @@ const Map<String, String> _byKey = {
   'consent_required': 'Turn on the AI assistant in Settings to use it.',
   'reauth_required':
       'For your security, please sign in again and then try once more.',
+  'reauth_cancelled':
+      "Confirm it's you to delete your account. Nothing was "
+      'deleted.',
+  'reauth_wrong_account':
+      "That's a different account. Use the account you're signed in with. "
+      'Nothing was deleted.',
   'deletion_failed':
       "We couldn't delete your account and nothing was removed. Please try "
       'again.',

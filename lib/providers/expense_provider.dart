@@ -531,13 +531,21 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
   }
 
   /// Saves [target] for [original] when it belongs to another scope
-  /// (personal <-> group, or another group). Changed fields are saved
-  /// first, then the expense is moved with one server call
-  /// (`move_expense_scope`), so it is never counted twice or lost.
+  /// (personal <-> group, or another group). The expense is moved with one
+  /// server call (`move_expense_scope`), so it is never counted twice or
+  /// lost, and changed fields are saved with a separate update:
+  ///
+  /// * from personal, before the move, because a group only accepts an
+  ///   expense in its own currency;
+  /// * from a group, after the move, because a group row refuses a new
+  ///   currency and an edit saved there first would change the group's
+  ///   balances even if the move then failed.
   ///
   /// Shows the result at once and rolls back on failure. Returns the moved
   /// expense (the server gives it a new id) or the failure. When the edit
-  /// was saved but the move failed, the edit stays.
+  /// was saved but the move failed, the edit stays; when the move worked
+  /// but the edit after it failed, both [MoveResult.moved] and
+  /// [MoveResult.failure] are set.
   Future<MoveResult> move(
     Expense original,
     ExpenseDraft target, {
@@ -618,30 +626,23 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
         optimistic,
       ),
     );
+    final editFirst = edited != null && original.isPersonal;
     Expense? savedEdit;
+    final Expense moved;
     try {
-      if (edited != null) {
+      if (editFirst) {
         savedEdit = await _repo.update(edited);
         if (!_holds(session, action)) {
           return (moved: null, failure: SessionGuard.dropped);
         }
         _confirmed++;
       }
-      final moved = await _repo.moveScope(original.id, groupId: groupId);
+      moved = await _repo.moveScope(original.id, groupId: groupId);
       if (!_holds(session, action)) {
         return (moved: null, failure: SessionGuard.dropped);
       }
       _confirmed++;
       _deleted.add(original.id);
-      _update(
-        (items) => _insertSorted(
-          items.where((e) => e.id != original.id && e.id != moved.id).toList(),
-          moved,
-        ),
-      );
-      _changed();
-      AppHaptics.success();
-      return (moved: moved, failure: null);
     } on AppFailure catch (failure) {
       if (!_holds(session, action)) {
         return (moved: null, failure: SessionGuard.dropped);
@@ -664,6 +665,52 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
         ),
       );
     }
+
+    var shown = moved;
+    AppFailure? editFailure;
+    if (edited != null && !editFirst) {
+      // The moved row is now in its new scope, which accepts the edit.
+      try {
+        shown = await _repo.update(
+          moved.copyWith(
+            title: edited.title,
+            amount: edited.amount,
+            category: edited.category,
+            spentAt: edited.spentAt,
+            note: edited.note,
+          ),
+        );
+        if (!_holds(session, action)) {
+          return (moved: null, failure: SessionGuard.dropped);
+        }
+        _confirmed++;
+      } on AppFailure catch (failure) {
+        if (!_holds(session, action)) {
+          return (moved: null, failure: SessionGuard.dropped);
+        }
+        editFailure = failure;
+      }
+    }
+    _update(
+      (items) => _insertSorted(
+        items.where((e) => e.id != original.id && e.id != moved.id).toList(),
+        shown,
+      ),
+    );
+    _changed();
+    if (editFailure != null) {
+      // Moved, but the changed fields were not saved.
+      return (
+        moved: moved,
+        failure: session.fail(
+          _inTransit(editFailure) ? _unconfirmed() : editFailure,
+          'an expense edit',
+          report: report,
+        ),
+      );
+    }
+    AppHaptics.success();
+    return (moved: shown, failure: null);
   }
 
   /// `invalid_target` from a move means the expense is already there.

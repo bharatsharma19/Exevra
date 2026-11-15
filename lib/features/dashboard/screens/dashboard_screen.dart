@@ -381,8 +381,9 @@ class DashboardScreen extends ConsumerWidget {
                     ).animate().fadeIn(duration: 300.ms),
 
                     // First-run tip while the user has no expenses yet
-                    // (hidden for good once dismissed).
-                    if (hasNoExpenses) ...[
+                    // (hidden for good once dismissed). Only the personal
+                    // list says that: an empty group does not.
+                    if (hasNoExpenses && !inGroup) ...[
                       const SizedBox(height: 16),
                       FirstExpenseNudge(
                         key: const Key('dashboard-first-expense'),

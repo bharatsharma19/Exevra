@@ -951,7 +951,7 @@ Deno.test("secondsUntilUtcMidnight", () => {
   assertEquals(secondsUntilUtcMidnight(Date.UTC(2026, 10, 15)), 86_400);
 });
 
-// ---- Review findings -------------------------------------------------------------------------
+// ---- Stream protocol edge cases --------------------------------------------------------------
 
 Deno.test("Markdown and HTML images from the model never reach a delta event", async () => {
   const claude = fakeProvider(
@@ -1173,7 +1173,7 @@ Deno.test("when every provider fails, the last attempt's tokens are booked", asy
   assertEquals(entry?.failover_output_tokens, 40);
 });
 
-// ---- Phase 2 review --------------------------------------------------------------------------
+// ---- History, quotas and provider limits -----------------------------------------------------
 
 Deno.test("a long question split into consecutive user turns is rejected, not merged", async () => {
   const claude = fakeProvider("claude", answer(["hi"]));

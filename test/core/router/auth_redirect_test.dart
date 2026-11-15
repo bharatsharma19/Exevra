@@ -26,11 +26,38 @@ void main() {
     test('a fresh device goes to the introduction first', () {
       expect(app('/splash', completed: false), '/onboarding');
       expect(app('/login', completed: false), '/onboarding');
-      expect(app('/dashboard', completed: false), '/onboarding');
+      expect(app('/', completed: false), '/onboarding');
+      expect(
+        app('/dashboard', completed: false),
+        '/onboarding?next=%2Fdashboard',
+      );
       expect(
         app('/dashboard', completed: false, phase: AuthPhase.signedIn),
-        '/onboarding',
+        '/onboarding?next=%2Fdashboard',
       );
+    });
+
+    test('the introduction keeps where the user was going', () {
+      expect(
+        app('/register', completed: false),
+        '/onboarding?next=%2Fregister',
+      );
+      expect(
+        app('/splash?from=%2Fexpenses', completed: false),
+        '/onboarding?next=%2Fexpenses',
+      );
+      expect(app('//evil.example/x', completed: false), '/onboarding');
+    });
+
+    test('only in-app places are accepted after the introduction', () {
+      expect(safeAfterIntro('/register'), '/register');
+      expect(safeAfterIntro('/expenses?q=1'), '/expenses?q=1');
+      expect(safeAfterIntro('/login'), '/login');
+      expect(safeAfterIntro('/onboarding'), isNull);
+      expect(safeAfterIntro('/splash'), isNull);
+      expect(safeAfterIntro('https://evil.example/register'), isNull);
+      expect(safeAfterIntro('//evil.example/register'), isNull);
+      expect(safeAfterIntro(null), isNull);
     });
 
     test('the introduction itself stays, whatever the auth phase', () {
