@@ -20,6 +20,12 @@ class AppConfig {
 
   static const String defaultAppLinkHost = 'exevra.app';
 
+  /// Deployment environment reported with crash reports (`APP_ENV`).
+  static const String appEnvironment = String.fromEnvironment(
+    'APP_ENV',
+    defaultValue: 'production',
+  );
+
   /// The configuration compiled into this build.
   static const AppConfig environment = AppConfig(
     supabaseUrl: String.fromEnvironment('SUPABASE_URL'),
