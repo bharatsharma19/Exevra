@@ -6,7 +6,9 @@
 import Anthropic from "npm:@anthropic-ai/sdk@1.8.0";
 import {
   type ChatProvider,
+  kindFromStatus,
   ProviderError,
+  type ProviderErrorKind,
   type ProviderEvent,
   type StopReason,
   type StreamParams,
@@ -129,11 +131,34 @@ export function buildClaudeRequest(
 }
 
 /**
- * Maps an SDK error to a {@link ProviderError}, most specific class first.
- * `APIConnectionError` is checked before `APIError` because it is a subclass in the TS SDK.
+ * Error `type`s that decide the kind regardless of the HTTP status. An SSE `error` event inside a
+ * 200 stream (for example `overloaded_error` or `rate_limit_error` after `message_start`) reaches
+ * us as a plain `APIError` with no status, so its `type` is the only signal. `billing_error`
+ * (HTTP 402, for example prepaid credits used up) is `unavailable`: retrying in a minute does not
+ * help, so it must not become `rate_limited`.
+ */
+const CLAUDE_ERROR_TYPE_KINDS: Readonly<Record<string, ProviderErrorKind>> = {
+  rate_limit_error: "rate_limited",
+  overloaded_error: "unavailable",
+  api_error: "unavailable",
+  timeout_error: "unavailable",
+  billing_error: "unavailable",
+};
+
+/**
+ * Maps an SDK error to a {@link ProviderError}: the API error `type` first (see
+ * {@link CLAUDE_ERROR_TYPE_KINDS}), then the most specific class. `APIConnectionError` is checked
+ * before `APIError` because it is a subclass in the TS SDK.
  */
 export function mapClaudeError(err: unknown): ProviderError {
   if (err instanceof ProviderError) return err;
+  if (err instanceof Anthropic.APIError && typeof err.type === "string") {
+    const kind = CLAUDE_ERROR_TYPE_KINDS[err.type];
+    if (kind !== undefined) {
+      const status = typeof err.status === "number" ? err.status : undefined;
+      return new ProviderError(kind, { status, cause: err });
+    }
+  }
   if (err instanceof Anthropic.RateLimitError) {
     return new ProviderError("rate_limited", { status: 429, cause: err });
   }
@@ -157,10 +182,13 @@ export function mapClaudeError(err: unknown): ProviderError {
   }
   if (err instanceof Anthropic.APIError) {
     const status = typeof err.status === "number" ? err.status : undefined;
-    return new ProviderError(status === 429 ? "rate_limited" : "unavailable", {
-      status,
-      cause: err,
-    });
+    return new ProviderError(
+      status === undefined ? "unavailable" : kindFromStatus(status),
+      {
+        status,
+        cause: err,
+      },
+    );
   }
   return new ProviderError("unavailable", { cause: err });
 }

@@ -86,9 +86,14 @@ export interface ChatProvider {
   ): AsyncIterable<ProviderEvent>;
 }
 
-/** Maps an HTTP status from a provider to a {@link ProviderErrorKind}. */
+/**
+ * Maps an HTTP status from a provider to a {@link ProviderErrorKind}. 402 (prepaid credits
+ * depleted or another billing problem) is `unavailable`, not `rate_limited`: waiting a minute does
+ * not fix it, so the app must not say "busy".
+ */
 export function kindFromStatus(status: number): ProviderErrorKind {
   if (status === 429) return "rate_limited";
+  if (status === 402) return "unavailable";
   if (status === 401 || status === 403) return "auth";
   if (status === 400 || status === 404 || status === 413 || status === 422) {
     return "bad_request";

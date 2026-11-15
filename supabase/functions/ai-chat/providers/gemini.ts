@@ -38,8 +38,12 @@ export interface GeminiRequestBody {
   contents: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>;
   generationConfig: {
     maxOutputTokens: number;
-    // gemini-3.8-flash rejects "minimal"; thinkingBudget must not be sent alongside thinkingLevel.
-    thinkingConfig: { thinkingLevel: "low" };
+    // The `ThinkingLevel` enum of the generateContent API reference is upper case
+    // (MINIMAL, LOW, MEDIUM, HIGH, XHIGH); proto JSON parsers always accept the enum name. The
+    // lower-case "low" in the thinking guide belongs to the separate Interactions API
+    // (`generation_config.thinking_level`). gemini-3.8-flash rejects MINIMAL; thinkingBudget
+    // must not be sent alongside thinkingLevel.
+    thinkingConfig: { thinkingLevel: "LOW" };
   };
 }
 
@@ -65,7 +69,7 @@ export function buildGeminiRequest(params: StreamParams): GeminiRequestBody {
     })),
     generationConfig: {
       maxOutputTokens: params.maxOutputTokens,
-      thinkingConfig: { thinkingLevel: "low" },
+      thinkingConfig: { thinkingLevel: "LOW" },
     },
   };
 }
@@ -111,7 +115,12 @@ export function geminiUsage(metadata: unknown): ProviderUsage | undefined {
   return { inputTokens: input, outputTokens: output };
 }
 
-/** Maps an in-stream `error` object (`{ code, status }`) to a {@link ProviderError}. */
+/**
+ * Maps an in-stream `error` object (`{ code, status }`) to a {@link ProviderError}. The numeric
+ * code wins: 429 is `rate_limited`, but 402 (prepaid credits depleted, which Google may report
+ * with status `RESOURCE_EXHAUSTED`) is `unavailable`. Only a bare `RESOURCE_EXHAUSTED` without a
+ * code counts as a rate limit.
+ */
 function streamError(error: Record<string, unknown>): ProviderError {
   const code = typeof error.code === "number" ? error.code : undefined;
   if (code !== undefined) {

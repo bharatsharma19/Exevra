@@ -99,7 +99,7 @@ Deno.test("request: header key, alt=sse URL, camelCase body with thinkingConfig"
     ],
     generationConfig: {
       maxOutputTokens: 4096,
-      thinkingConfig: { thinkingLevel: "low" },
+      thinkingConfig: { thinkingLevel: "LOW" },
     },
   });
   assert(call.signal !== null);
@@ -249,6 +249,7 @@ Deno.test("SAFETY after text yields the text then stop blocked", async () => {
 Deno.test("HTTP errors map to ProviderError kinds without reading the body", async () => {
   const cases: Array<[number, string]> = [
     [429, "rate_limited"],
+    [402, "unavailable"],
     [500, "unavailable"],
     [503, "unavailable"],
     [400, "bad_request"],
@@ -304,6 +305,11 @@ Deno.test("in-stream error objects, bad JSON and missing finish reason throw", a
       "rate_limited",
     ],
     [[chunk({ error: { status: "RESOURCE_EXHAUSTED" } })], "rate_limited"],
+    // Prepaid credits depleted: not a rate limit, even with RESOURCE_EXHAUSTED.
+    [
+      [chunk({ error: { code: 402, status: "RESOURCE_EXHAUSTED" } })],
+      "unavailable",
+    ],
     [[chunk({ error: { code: 500, status: "INTERNAL" } })], "unavailable"],
     [["data: {not json\n\n"], "unavailable"],
     [[textChunk(["no finish"])], "unavailable"],

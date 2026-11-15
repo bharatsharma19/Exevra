@@ -472,3 +472,101 @@ Deno.test("real SDK: the stream itself is never retried by the SDK (failover is 
   }
   assertEquals(fetchMock.calls.length, 2, "one request per model, no retries");
 });
+
+// ---- In-stream and billing errors -------------------------------------------------------------
+
+Deno.test("API error types decide the kind, including in-stream errors without a status", () => {
+  const headers = new Headers();
+  const body = (type: string) => ({
+    type: "error",
+    error: { type, message: "x" },
+  });
+  // How the SDK builds an in-stream `event: error` (status undefined, type from the body).
+  const inStream = (type: string) =>
+    new Anthropic.APIError(undefined, body(type), undefined, headers);
+  const cases: Array<[unknown, string, number | undefined]> = [
+    [inStream("rate_limit_error"), "rate_limited", undefined],
+    [inStream("overloaded_error"), "unavailable", undefined],
+    [inStream("api_error"), "unavailable", undefined],
+    [inStream("billing_error"), "unavailable", undefined],
+    [
+      new Anthropic.APIError(402, body("billing_error"), "x", headers),
+      "unavailable",
+      402,
+    ],
+    [new Anthropic.APIError(402, undefined, "x", headers), "unavailable", 402],
+    [
+      new Anthropic.BadRequestError(400, body("billing_error"), "x", headers),
+      "unavailable",
+      400,
+    ],
+    [
+      new Anthropic.RateLimitError(429, body("rate_limit_error"), "x", headers),
+      "rate_limited",
+      429,
+    ],
+  ];
+  for (const [error, kind, status] of cases) {
+    const mapped = mapClaudeError(error);
+    assertEquals(mapped.kind, kind, String(error));
+    assertEquals(mapped.status, status, String(error));
+  }
+});
+
+function inStreamErrorBody(
+  type: string,
+  before: Array<Record<string, unknown>> = [],
+): string[] {
+  return [
+    ...anthropicSse([{ type: "message_start", message: MESSAGE }, ...before]),
+    `event: error\ndata: ${JSON.stringify({ type: "error", error: { type, message: "x" } })}\n\n`,
+  ];
+}
+
+Deno.test("real SDK: an in-stream error event is classified by its type", async () => {
+  for (
+    const [type, kind] of [
+      ["rate_limit_error", "rate_limited"],
+      ["overloaded_error", "unavailable"],
+      ["api_error", "unavailable"],
+    ] as const
+  ) {
+    using _fetch = mockFetch(() =>
+      new Response(streamFromChunks(inStreamErrorBody(type)), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      })
+    );
+    const provider = createClaudeProvider({
+      model: "claude-haiku-5-5",
+      open: sdkStreamOpener(testClient()),
+    });
+    const error = await assertRejects(() =>
+      collect(provider.streamText(params, new AbortController().signal))
+    );
+    assertInstanceOf(error, ProviderError);
+    assertEquals(error.kind, kind, type);
+  }
+});
+
+Deno.test("real SDK: HTTP 402 billing_error (credits used up) is unavailable", async () => {
+  using _fetch = mockFetch(() =>
+    new Response(
+      JSON.stringify({
+        type: "error",
+        error: { type: "billing_error", message: "x" },
+      }),
+      { status: 402, headers: { "content-type": "application/json" } },
+    )
+  );
+  const provider = createClaudeProvider({
+    model: "claude-haiku-5-5",
+    open: sdkStreamOpener(testClient()),
+  });
+  const error = await assertRejects(() =>
+    collect(provider.streamText(params, new AbortController().signal))
+  );
+  assertInstanceOf(error, ProviderError);
+  assertEquals(error.kind, "unavailable");
+  assertEquals(error.status, 402);
+});
