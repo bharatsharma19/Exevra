@@ -3,10 +3,12 @@
 --
 -- prepare_account_deletion(p_user_id) -> jsonb   (SECURITY DEFINER, EXECUTE for service_role only)
 --   Run by the delete-account Edge Function before auth.admin.deleteUser(p_user_id):
---   1. every group the user administers passes to the longest-standing other approved member
+--   1. the user's pending settlements (as payer or payee) in every group that is kept are voided
+--      with reason 'account_deleted', before any membership changes (the departure trigger on
+--      group_members, 20261115001000, uses the same reason for anything left);
+--   2. every group the user administers passes to the longest-standing other approved member
 --      (pick_successor_admin, the same rule as leave_group); a group with no other approved member
 --      is deleted with all its data;
---   2. the user's pending settlements (as payer or payee) are voided with reason 'account_deleted';
 --   3. the user's memberships, bans, personal expenses (group_id IS NULL), AI usage events, AI
 --      reports, invitations they sent or that were addressed to their email, invite-code attempts and
 --      profile are deleted.
@@ -21,6 +23,8 @@
 --
 -- A BEFORE DELETE trigger on auth.users runs the same function, so deleting a user by any path
 -- (dashboard, admin API without the Edge Function) never takes other members' data with it.
+-- The function also marks the transaction (exevra.account_deletion = 'on'): only then may the foreign
+-- key clear the payer of a group expense (expenses_payer_guard, 20261115000800).
 --
 -- delete_user_account() (client-callable, deleted auth.users directly) is dropped.
 -- =============================================================================
@@ -107,6 +111,10 @@ BEGIN
     -- One deletion at a time per user (Edge Function retry racing the auth trigger).
     PERFORM pg_catalog.pg_advisory_xact_lock(
         pg_catalog.hashtextextended('exevra.account_deletion:' || p_user_id::text, 0));
+    -- Kept until the end of the transaction: the auth user's foreign-key actions run after this
+    -- function returns (BEFORE DELETE trigger on auth.users).
+    PERFORM pg_catalog.set_config('exevra.account_deletion', 'on', true);
+    PERFORM pg_catalog.set_config('exevra.departure_reason', 'account_deleted', true);
 
     SELECT pg_catalog.array_agg(DISTINCT pg_catalog.lower(pg_catalog.btrim(x.email)))
     INTO v_emails
@@ -126,7 +134,29 @@ BEGIN
     ORDER BY g.id
     FOR UPDATE;
 
-    -- 1. Groups the user administers.
+    -- 1. Pending settlements can no longer be confirmed by (or for) this user. Done before any
+    --    membership is removed, so the count covers every group that is kept (a group deleted in
+    --    step 2 takes its settlements with it).
+    FOR v_settlement IN
+        SELECT * FROM public.settlements AS s
+        WHERE s.status = 'pending'
+          AND s.group_id NOT IN (SELECT g.id FROM public.groups AS g
+                                 WHERE g.admin_id = p_user_id
+                                   AND public.pick_successor_admin(g.id, p_user_id) IS NULL)
+          AND (s.from_user = p_user_id OR s.to_user = p_user_id)
+        ORDER BY s.created_at, s.id
+        FOR UPDATE
+    LOOP
+        UPDATE public.settlements AS s
+        SET status = 'voided', voided_at = pg_catalog.now(), voided_by = p_user_id, void_reason = 'account_deleted'
+        WHERE s.id = v_settlement.id;
+        INSERT INTO public.settlement_events (settlement_id, group_id, actor, action, details)
+        VALUES (v_settlement.id, v_settlement.group_id, p_user_id, 'voided',
+                pg_catalog.jsonb_build_object('previous_status', 'pending', 'reason', 'account_deleted'));
+        v_voided := v_voided + 1;
+    END LOOP;
+
+    -- 2. Groups the user administers.
     FOR v_group_id IN
         SELECT g.id FROM public.groups AS g
         WHERE g.admin_id = p_user_id
@@ -146,22 +176,6 @@ BEGIN
             v_transferred := v_transferred
                 || pg_catalog.jsonb_build_object('group_id', v_group_id, 'new_admin_id', v_successor);
         END IF;
-    END LOOP;
-
-    -- 2. Pending settlements can no longer be confirmed by (or for) this user.
-    FOR v_settlement IN
-        SELECT * FROM public.settlements AS s
-        WHERE s.status = 'pending' AND (s.from_user = p_user_id OR s.to_user = p_user_id)
-        ORDER BY s.created_at, s.id
-        FOR UPDATE
-    LOOP
-        UPDATE public.settlements AS s
-        SET status = 'voided', voided_at = pg_catalog.now(), voided_by = p_user_id, void_reason = 'account_deleted'
-        WHERE s.id = v_settlement.id;
-        INSERT INTO public.settlement_events (settlement_id, group_id, actor, action, details)
-        VALUES (v_settlement.id, v_settlement.group_id, p_user_id, 'voided',
-                pg_catalog.jsonb_build_object('previous_status', 'pending', 'reason', 'account_deleted'));
-        v_voided := v_voided + 1;
     END LOOP;
 
     -- 3. Personal data.

@@ -26,6 +26,16 @@
 -- every writer (clients, service_role, the table owner); the only exception is the deletion of the
 -- whole group, whose cascade removes its expenses.
 --
+-- Payer integrity. The payer of a group expense is an approved admin or member of the group (not a
+-- viewer, not a pending member, not someone who left or was removed) whenever it is written: on
+-- INSERT and on every payer change, for every writer (42501 payer_not_member). The payer can become
+-- NULL only through the foreign key (ON DELETE SET NULL) while the payer's account is being deleted:
+-- prepare_account_deletion() marks the transaction (exevra.account_deletion = 'on'), the change
+-- arrives one trigger level down, and the auth user no longer exists. A direct UPDATE to NULL is
+-- refused. Both checks take the same key-share lock on the group as the lock below.
+-- Operator actions outside these rules (service_role TRUNCATE, raw edits of expense_splits) are
+-- trusted maintenance and are not checked.
+--
 -- public.split_equal_shares(total, member_ids, payer) is the single, pure implementation of the
 -- equal split. Shares always sum exactly to the total; leftover minor units are assigned by the
 -- clearly delimited deterministic rule below.
@@ -249,6 +259,62 @@ CREATE TRIGGER trigger_expenses_departed_guard_delete
     FOR EACH ROW
     WHEN (OLD.group_id IS NOT NULL)
     EXECUTE FUNCTION public.expenses_departed_member_guard();
+
+-- -----------------------------------------------------------------------------
+-- Payer integrity: the payer of a group expense is an approved admin or member
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.expenses_payer_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+    IF NEW.user_id IS NULL THEN
+        -- Only the foreign-key action of an account deletion clears the payer (UPDATE only).
+        IF TG_OP = 'UPDATE'
+           AND pg_catalog.pg_trigger_depth() > 1
+           AND COALESCE(pg_catalog.current_setting('exevra.account_deletion', true), '') = 'on'
+           AND NOT EXISTS (SELECT 1 FROM auth.users AS u WHERE u.id = OLD.user_id) THEN
+            RETURN NEW;
+        END IF;
+        RAISE EXCEPTION 'payer_not_member' USING ERRCODE = '42501',
+            DETAIL = 'A group expense needs a payer; it is cleared only when the payer''s account is deleted.';
+    END IF;
+
+    -- Same key-share lock as expenses_departed_member_guard: runs before or after a concurrent
+    -- leave_group / remove_member, never during it. A missing group is left to the foreign key.
+    PERFORM 1 FROM public.groups AS g WHERE g.id = NEW.group_id FOR KEY SHARE;
+    IF NOT FOUND THEN
+        RETURN NEW;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM public.group_members AS gm
+        WHERE gm.group_id = NEW.group_id AND gm.user_id = NEW.user_id
+          AND gm.status = 'approved' AND gm.role IN ('admin', 'member')
+    ) THEN
+        RAISE EXCEPTION 'payer_not_member' USING ERRCODE = '42501',
+            DETAIL = 'The payer must be an approved admin or member of the group.';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.expenses_payer_guard() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS trigger_expenses_payer_guard_insert ON public.expenses;
+CREATE TRIGGER trigger_expenses_payer_guard_insert
+    BEFORE INSERT ON public.expenses
+    FOR EACH ROW
+    WHEN (NEW.group_id IS NOT NULL)
+    EXECUTE FUNCTION public.expenses_payer_guard();
+
+-- Named to fire after trigger_expenses_departed_guard_update (triggers fire in name order).
+DROP TRIGGER IF EXISTS trigger_expenses_payer_guard_update ON public.expenses;
+CREATE TRIGGER trigger_expenses_payer_guard_update
+    BEFORE UPDATE OF user_id ON public.expenses
+    FOR EACH ROW
+    WHEN (NEW.group_id IS NOT NULL AND NEW.user_id IS DISTINCT FROM OLD.user_id)
+    EXECUTE FUNCTION public.expenses_payer_guard();
 
 -- -----------------------------------------------------------------------------
 -- Back-fill legacy group expenses (current approved admins and members)

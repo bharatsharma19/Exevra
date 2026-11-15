@@ -20,6 +20,10 @@
 --   people who are no longer approved members (deleted accounts, members who left or were removed
 --   with p_force, legacy ex-members) cannot be settled in the app and does not block anyone; it stays
 --   in the group's balances. See group_settleable_minor() in 20261115001000.
+-- * Departure is final for balances: once a member's row is deleted (left, removed, account deleted),
+--   their pending settlements in the group are voided (trigger in 20261115001000) and nothing else can
+--   change their balance there (expense and settlement locks in 20261115000800 / 20261115001000),
+--   except deleting the whole group.
 -- * Concurrency: every RPC that changes membership or acts with the admin's authority first locks the
 --   group row (SELECT ... FOR UPDATE) and reads admin_id from the locked row, so admin transfers,
 --   removals, approvals, role changes, leaving and account deletion of the same group run one at a
@@ -534,7 +538,8 @@ $$;
 -- the group code. A later invitation from the admin lifts the ban.
 -- An approved member with a pending settlement or a balance that can still be settled with the other
 -- approved members is only removed with p_force => true (their balance then stays in the group's
--- balances, see get_group_balances). The admin row itself is never removed (cannot_remove_admin).
+-- balances, see get_group_balances, and their pending settlements in the group are voided with reason
+-- member_removed). The admin row itself is never removed (cannot_remove_admin).
 -- group_balance_rows() and group_settleable_minor() are created in the balances migration
 -- (20261115001000).
 DROP FUNCTION IF EXISTS public.remove_member(uuid, uuid);
@@ -587,8 +592,12 @@ BEGIN
             HINT = 'Settle up first, or pass p_force => true to remove the member anyway.';
     END IF;
 
+    -- The member's pending settlements in this group are voided with reason member_removed by the
+    -- departure trigger on group_members (20261115001000).
     PERFORM pg_catalog.set_config('exevra.membership_rpc', 'on', true);
+    PERFORM pg_catalog.set_config('exevra.departure_reason', 'member_removed', true);
     DELETE FROM public.group_members WHERE id = v_member.id;
+    PERFORM pg_catalog.set_config('exevra.departure_reason', '', true);
     PERFORM pg_catalog.set_config('exevra.membership_rpc', 'off', true);
 
     INSERT INTO public.group_bans (group_id, user_id, banned_by)

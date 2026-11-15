@@ -35,12 +35,31 @@
 --   record_settlement(group, to_user, amount_minor, note)  caller pays; both approved members;
 --        amount <= min(caller's projected debt, payee's projected credit), else P0001
 --        settlement_exceeds_debt; creates a pending settlement
---   confirm_settlement(id)               only the payee (to_user), only while pending. The debt limit
---        is NOT re-checked: confirming records money that actually changed hands, even if expenses
---        changed after the settlement was recorded and the payment now exceeds the debt (balances
---        then show the payee owing the difference back). A payment that did not happen is voided.
---   void_settlement(id, reason)          payer, payee or group admin; not already voided
+--   confirm_settlement(id)               only the payee (to_user), only while pending, and only while
+--        both parties are approved members (P0001 settlement_locked_member_left otherwise). The debt
+--        limit is NOT re-checked: confirming records money that actually changed hands, even if
+--        expenses changed after the settlement was recorded and the payment now exceeds the debt
+--        (balances then show the payee owing the difference back). A payment that did not happen is
+--        voided.
+--   void_settlement(id, reason)          payer, payee or group admin; not already voided. A CONFIRMED
+--        settlement whose payer or payee is no longer an approved member (left, removed, or a former
+--        member with a NULL user) cannot be voided (P0001 settlement_locked_member_left): voiding it
+--        would change the balance of someone who can no longer settle in the group. A pending one can.
 -- Every write appends a row to settlement_events.
+--
+-- Departure voids pending settlements. When a membership row is deleted (leave_group, remove_member
+-- also with p_force, account deletion, a foreign-key cascade from a deleted profile), an AFTER DELETE
+-- trigger voids every pending settlement of that user in that group, in both directions, with an audit
+-- event 'voided' {previous_status: 'pending', reason}. The reason comes from the transaction-local
+-- setting exevra.departure_reason ('member_removed' from remove_member, 'account_deleted' from
+-- prepare_account_deletion), else 'member_left'. A group that is being deleted as a whole is skipped
+-- (its settlements go with it).
+--
+-- Locks: record_settlement, confirm_settlement and void_settlement take a key-share lock on the group
+-- row (the same lock as the expense guards) before they check membership, so they run strictly before
+-- or after a concurrent leave_group / remove_member / account deletion, which lock the group FOR
+-- UPDATE. The settlement row is locked after the group (same order as a departure), so the two never
+-- deadlock.
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -284,6 +303,9 @@ BEGIN
     IF v_note IS NOT NULL AND pg_catalog.char_length(v_note) > 200 THEN
         RAISE EXCEPTION 'invalid_note' USING ERRCODE = '22023';
     END IF;
+    -- Key-share lock on the group: a concurrent departure finishes first (or waits), so both parties
+    -- are still approved members when the settlement is written.
+    PERFORM 1 FROM public.groups AS g WHERE g.id = p_group_id FOR KEY SHARE;
     IF public.group_role(p_group_id) IS NULL THEN
         RAISE EXCEPTION 'not_group_member' USING ERRCODE = '42501';
     END IF;
@@ -323,6 +345,24 @@ REVOKE ALL ON FUNCTION public.record_settlement(uuid, uuid, bigint, text) FROM P
 GRANT EXECUTE ON FUNCTION public.record_settlement(uuid, uuid, bigint, text) TO authenticated, service_role;
 
 -- -----------------------------------------------------------------------------
+-- Internal: true when both parties of a settlement are approved members of its group.
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.settlement_parties_are_members(p_group_id uuid, p_from_user uuid, p_to_user uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+    SELECT p_from_user IS NOT NULL AND p_to_user IS NOT NULL
+       AND (SELECT pg_catalog.count(*) FROM public.group_members AS gm
+            WHERE gm.group_id = p_group_id AND gm.status = 'approved'
+              AND gm.user_id IN (p_from_user, p_to_user)) = 2;
+$$;
+REVOKE ALL ON FUNCTION public.settlement_parties_are_members(uuid, uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.settlement_parties_are_members(uuid, uuid, uuid) TO service_role;
+
+-- -----------------------------------------------------------------------------
 -- confirm_settlement
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.confirm_settlement(p_settlement_id uuid)
@@ -338,6 +378,11 @@ BEGIN
     IF v_uid IS NULL THEN
         RAISE EXCEPTION 'not_authenticated' USING ERRCODE = '42501';
     END IF;
+    -- Group first (key share, like the expense guards), then the settlement row: the order a
+    -- departure uses, so the two never deadlock. group_id never changes.
+    PERFORM 1 FROM public.groups AS g
+    WHERE g.id = (SELECT s.group_id FROM public.settlements AS s WHERE s.id = p_settlement_id)
+    FOR KEY SHARE;
     SELECT * INTO v_row FROM public.settlements AS s WHERE s.id = p_settlement_id FOR UPDATE;
     IF NOT FOUND OR public.group_role(v_row.group_id) IS NULL THEN
         RAISE EXCEPTION 'settlement_not_found' USING ERRCODE = 'P0002';
@@ -347,6 +392,11 @@ BEGIN
     END IF;
     IF v_row.status <> 'pending' THEN
         RAISE EXCEPTION 'settlement_not_pending' USING ERRCODE = 'P0001';
+    END IF;
+    IF NOT public.settlement_parties_are_members(v_row.group_id, v_row.from_user, v_row.to_user) THEN
+        RAISE EXCEPTION 'settlement_locked_member_left' USING ERRCODE = 'P0001',
+            DETAIL = 'A party of this settlement is no longer a member of the group.',
+            HINT = 'The settlement can only be voided.';
     END IF;
 
     UPDATE public.settlements AS s
@@ -384,6 +434,9 @@ BEGIN
     IF v_reason IS NOT NULL AND pg_catalog.char_length(v_reason) > 200 THEN
         RAISE EXCEPTION 'invalid_reason' USING ERRCODE = '22023';
     END IF;
+    PERFORM 1 FROM public.groups AS g
+    WHERE g.id = (SELECT s.group_id FROM public.settlements AS s WHERE s.id = p_settlement_id)
+    FOR KEY SHARE;
     SELECT * INTO v_row FROM public.settlements AS s WHERE s.id = p_settlement_id FOR UPDATE;
     IF NOT FOUND OR public.group_role(v_row.group_id) IS NULL THEN
         RAISE EXCEPTION 'settlement_not_found' USING ERRCODE = 'P0002';
@@ -394,6 +447,13 @@ BEGIN
     END IF;
     IF v_row.status = 'voided' THEN
         RAISE EXCEPTION 'settlement_already_voided' USING ERRCODE = 'P0001';
+    END IF;
+    -- A confirmed settlement counts in the balances: with a departed party it can no longer change.
+    IF v_row.status = 'confirmed'
+       AND NOT public.settlement_parties_are_members(v_row.group_id, v_row.from_user, v_row.to_user) THEN
+        RAISE EXCEPTION 'settlement_locked_member_left' USING ERRCODE = 'P0001',
+            DETAIL = 'A party of this settlement is no longer a member of the group.',
+            HINT = 'A confirmed settlement with someone who left cannot be voided.';
     END IF;
     v_previous := v_row.status;
 
@@ -410,3 +470,48 @@ END;
 $$;
 REVOKE ALL ON FUNCTION public.void_settlement(uuid, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.void_settlement(uuid, text) TO authenticated, service_role;
+
+-- -----------------------------------------------------------------------------
+-- A departing member's pending settlements are voided
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.group_members_void_pending_settlements()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    v_reason text := COALESCE(NULLIF(pg_catalog.current_setting('exevra.departure_reason', true), ''), 'member_left');
+    v_actor uuid;
+    v_settlement public.settlements;
+BEGIN
+    -- The whole group is being deleted (cascade): its settlements go with it.
+    PERFORM 1 FROM public.groups AS g WHERE g.id = OLD.group_id FOR KEY SHARE;
+    IF NOT FOUND THEN
+        RETURN NULL;
+    END IF;
+    v_actor := CASE WHEN v_reason = 'account_deleted' THEN OLD.user_id ELSE auth.uid() END;
+
+    FOR v_settlement IN
+        SELECT * FROM public.settlements AS s
+        WHERE s.group_id = OLD.group_id AND s.status = 'pending'
+          AND (s.from_user = OLD.user_id OR s.to_user = OLD.user_id)
+        ORDER BY s.created_at, s.id
+        FOR UPDATE
+    LOOP
+        UPDATE public.settlements AS s
+        SET status = 'voided', voided_at = pg_catalog.now(), voided_by = v_actor, void_reason = v_reason
+        WHERE s.id = v_settlement.id;
+        INSERT INTO public.settlement_events (settlement_id, group_id, actor, action, details)
+        VALUES (v_settlement.id, v_settlement.group_id, v_actor, 'voided',
+                pg_catalog.jsonb_build_object('previous_status', 'pending', 'reason', v_reason));
+    END LOOP;
+    RETURN NULL;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.group_members_void_pending_settlements() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS trigger_group_members_void_pending_settlements ON public.group_members;
+CREATE TRIGGER trigger_group_members_void_pending_settlements
+    AFTER DELETE ON public.group_members
+    FOR EACH ROW EXECUTE FUNCTION public.group_members_void_pending_settlements();
