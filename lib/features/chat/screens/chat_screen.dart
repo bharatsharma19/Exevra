@@ -49,6 +49,10 @@ class _ChatViewState extends ConsumerState<_ChatView> {
   ScrollDirection _lastUserDirection = ScrollDirection.idle;
   bool _followQueued = false;
 
+  /// Whether the list has been moved to the newest message since it last
+  /// appeared; a restored conversation would otherwise open at the oldest.
+  bool _openedAtLatest = false;
+
   static const double _bottomSlack = 48;
 
   @override
@@ -99,6 +103,22 @@ class _ChatViewState extends ConsumerState<_ChatView> {
         return;
       }
       if (p.pixels < p.maxScrollExtent) _scroll.jumpTo(p.maxScrollExtent);
+    });
+  }
+
+  /// Puts a list that just appeared at its newest message. A lazy list only
+  /// estimates its extent, so this repeats until the end stops moving.
+  void _openAtLatest([int attempts = 5]) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_atBottom || !_scroll.hasClients) return;
+      final p = _scroll.position;
+      if (p.isScrollingNotifier.value ||
+          p.userScrollDirection != ScrollDirection.idle ||
+          p.pixels >= p.maxScrollExtent) {
+        return;
+      }
+      _scroll.jumpTo(p.maxScrollExtent);
+      if (attempts > 1) _openAtLatest(attempts - 1);
     });
   }
 
@@ -221,6 +241,12 @@ class _ChatViewState extends ConsumerState<_ChatView> {
     final scheme = theme.colorScheme;
     final messages = chat.messages;
     final last = messages.isEmpty ? null : messages.last;
+    if (messages.isEmpty) {
+      _openedAtLatest = false;
+    } else if (!_openedAtLatest) {
+      _openedAtLatest = true;
+      _openAtLatest();
+    }
     final announcement = chat.isStreaming
         ? ChatCopy.responding
         : last != null && !last.isUser
@@ -274,10 +300,12 @@ class _ChatViewState extends ConsumerState<_ChatView> {
                 ],
               ),
             ),
+            // A node with no area is dropped from the semantics tree, so
+            // the live region needs a size to reach TalkBack.
             Semantics(
               liveRegion: true,
               label: announcement,
-              child: const SizedBox(width: double.infinity, height: 0),
+              child: const SizedBox(width: double.infinity, height: 1),
             ),
             // The controls never take more than half the height; past that
             // they scroll, so the conversation keeps its share.

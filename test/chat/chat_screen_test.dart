@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:expense_manager/core/constants/app_constants.dart';
+import 'package:expense_manager/core/storage/preferences.dart';
 import 'package:expense_manager/core/theme/app_theme.dart';
 import 'package:expense_manager/data/ai/ai_chat_models.dart';
 import 'package:expense_manager/data/repositories/ai_report_repository.dart';
@@ -13,6 +15,7 @@ import 'package:expense_manager/providers/chat_provider.dart';
 import 'package:expense_manager/providers/profile_provider.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -34,6 +37,7 @@ Future<_Env> _pump(
   required ThemeData theme,
   bool consent = true,
   Widget? child,
+  Map<String, Object> prefs = const {},
 }) async {
   tester.view
     ..physicalSize = const Size(1200, 2700)
@@ -47,7 +51,13 @@ Future<_Env> _pump(
   final reports = FakeAiReportRepository();
   final launched = <Uri>[];
   final container = await tester.runAsync(
-    () => chatContainer(backend, api, reports: reports, launched: launched),
+    () => chatContainer(
+      backend,
+      api,
+      prefs: prefs,
+      reports: reports,
+      launched: launched,
+    ),
   );
   addTearDown(container!.dispose);
   container.listen(profileProvider, (_, _) {});
@@ -61,6 +71,27 @@ Future<_Env> _pump(
   await tester.pump(const Duration(milliseconds: 10));
   await tester.pump(const Duration(milliseconds: 10));
   return _Env(container, api, backend, reports, launched);
+}
+
+/// The live-region node labelled [label] in the semantics tree the platform
+/// receives, or null when it is not attached there.
+SemanticsNode? _attachedLiveRegion(WidgetTester tester, String label) {
+  SemanticsNode? found;
+  bool visit(SemanticsNode node) {
+    final data = node.getSemanticsData();
+    if (data.label == label && data.flagsCollection.isLiveRegion) {
+      found = node;
+      return false;
+    }
+    node.visitChildren(visit);
+    return found == null;
+  }
+
+  for (final view in tester.binding.renderViews) {
+    final root = view.owner?.semanticsOwner?.rootSemanticsNode;
+    if (root != null) visit(root);
+  }
+  return found;
 }
 
 void main() {
@@ -335,6 +366,56 @@ void main() {
     expect(position.pixels, position.maxScrollExtent);
     await env.api.last.finish([const AiDone()]);
     await tester.pump();
+  });
+
+  testWidgets('a restored conversation opens at the newest message', (
+    tester,
+  ) async {
+    final saved = jsonEncode([
+      for (var i = 0; i < 30; i++)
+        ChatMessage(
+          id: 'm-$i',
+          isUser: i.isEven,
+          text: 'Message $i\n\nwith a second paragraph of text.',
+          createdAt: DateTime.utc(2026, 1, 1, 0, i),
+        ).toJson(),
+    ]);
+    await _pump(
+      tester,
+      theme: AppTheme.lightTheme,
+      prefs: {UserPrefs.key('u1', ChatNotifier.historyPref): saved},
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final list = find.byWidgetPredicate(
+      (w) => w is ListView && w.scrollDirection == Axis.vertical,
+    );
+    final position = tester
+        .state<ScrollableState>(
+          find.descendant(of: list, matching: find.byType(Scrollable)).first,
+        )
+        .position;
+    expect(position.maxScrollExtent, greaterThan(0));
+    expect(position.pixels, position.maxScrollExtent);
+    expect(find.textContaining('Message 29', findRichText: true), findsWidgets);
+    expect(find.byTooltip('Jump to latest'), findsNothing);
+  });
+
+  testWidgets('streaming status reaches the platform as a live region', (
+    tester,
+  ) async {
+    final handle = tester.ensureSemantics();
+    final env = await _pump(tester, theme: AppTheme.lightTheme);
+    await tester.tap(find.text(AppConstants.aiQuickPrompts.first));
+    await tester.pump();
+    expect(_attachedLiveRegion(tester, ChatCopy.responding), isNotNull);
+
+    await env.api.last.finish([const AiDelta('An answer'), const AiDone()]);
+    await tester.pump();
+    await tester.pump();
+    expect(_attachedLiveRegion(tester, ChatCopy.complete), isNotNull);
+    handle.dispose();
   });
 
   testWidgets('server consent_required shows the consent screen', (
