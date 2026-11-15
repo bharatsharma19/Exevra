@@ -89,6 +89,8 @@ const Map<String, String> _byKey = {
   'invalid_currency': "That currency isn't supported.",
   'invalid_role': 'Choose member or viewer.',
   'invalid_email': 'Enter a valid email address.',
+  // Also from transfer_admin and record_settlement; a move maps its own
+  // invalid_target to expense_scope_unchanged.
   'invalid_target': 'Choose another member.',
   'invalid_timezone': "Your device's time zone isn't recognised.",
   'invalid_amount': 'Enter an amount greater than zero.',
@@ -110,9 +112,23 @@ const Map<String, String> _byKey = {
   'invalid_category': 'Choose a category from the list.',
   'invalid_display_name': 'Names must be 1 to 60 characters.',
   'invalid_avatar_url': 'Use an https:// image link.',
-  'currency_mismatch': "Group expenses must use the group's currency.",
+  'currency_mismatch':
+      "Group expenses must use the group's currency. Change the currency, "
+      'then try again.',
   'expense_group_immutable':
-      "An expense can't be moved between personal and a group.",
+      "An expense can't change its group this way. Move it instead.",
+  'expense_locked_member_left':
+      "This expense can't be changed because someone in it has left the "
+      'group.',
+  'expense_not_found':
+      "We couldn't find that expense. It may have been "
+      'deleted.',
+  'not_expense_payer': 'Only the person who paid can move this expense.',
+  'expense_scope_unchanged': 'This expense is already there.',
+  'payer_not_member':
+      'Only group admins and members can pay for group expenses.',
+  'invalid_date': 'Choose a date from 2000 up to one year from today.',
+  'invalid_range': "That date range isn't available. Choose a shorter one.",
   'no_split_members': 'This group has no members who can share expenses.',
   'expense_not_saved_yet': 'This expense is still saving. Try again shortly.',
   'expense_unconfirmed':
@@ -131,6 +147,9 @@ const Map<String, String> _byKey = {
   'settlement_unconfirmed':
       "We couldn't confirm this payment change was saved. Check the payments "
       'before trying again.',
+  'settlement_locked_member_left':
+      'This payment is with someone who has left the group, so it can no '
+      'longer be changed.',
   'settlement_in_progress':
       'This payment is still being saved. Wait a moment, then try again.',
   // Limits and services

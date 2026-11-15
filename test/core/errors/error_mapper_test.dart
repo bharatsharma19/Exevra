@@ -289,6 +289,90 @@ void main() {
       );
     });
 
+    test('expense moves, locks and dates have their own copy', () {
+      String forKey(String key) => friendlyMessageForKey(key);
+      expect(
+        forKey('expense_locked_member_left'),
+        "This expense can't be changed because someone in it has left the "
+        'group.',
+      );
+      expect(
+        friendlyMessage(
+          const AppFailure.business('settlement_locked_member_left'),
+        ),
+        contains('left the group'),
+      );
+      expect(
+        friendlyMessage(
+          const AppFailure.permissionDenied(key: 'payer_not_member'),
+        ),
+        contains('members can pay'),
+      );
+      expect(
+        friendlyMessage(const AppFailure.validation(key: 'invalid_date')),
+        contains('2000'),
+      );
+      expect(
+        friendlyMessage(const AppFailure.validation(key: 'invalid_range')),
+        contains('date range'),
+      );
+      expect(
+        friendlyMessage(const AppFailure.validation(key: 'currency_mismatch')),
+        contains("group's currency"),
+      );
+      expect(
+        friendlyMessage(const AppFailure.notFound(key: 'expense_not_found')),
+        contains("couldn't find that expense"),
+      );
+      expect(
+        friendlyMessage(
+          const AppFailure.permissionDenied(key: 'not_expense_payer'),
+        ),
+        'Only the person who paid can move this expense.',
+      );
+      expect(
+        friendlyMessage(const AppFailure.validation(key: 'invalid_target')),
+        'Choose another member.',
+      );
+      expect(
+        forKey('expense_scope_unchanged'),
+        'This expense is already there.',
+      );
+    });
+
+    test('the expense and settlement keys map from Postgres errors', () {
+      AppFailure map(String code, String message) =>
+          ErrorMapper.map(PostgrestException(message: message, code: code));
+      expect(
+        map('P0001', 'expense_locked_member_left'),
+        const AppFailure.business('expense_locked_member_left'),
+      );
+      expect(
+        map('P0001', 'settlement_locked_member_left'),
+        const AppFailure.business('settlement_locked_member_left'),
+      );
+      expect(
+        map('42501', 'payer_not_member'),
+        const AppFailure.permissionDenied(key: 'payer_not_member'),
+      );
+      expect(
+        map('42501', 'not_expense_payer'),
+        const AppFailure.permissionDenied(key: 'not_expense_payer'),
+      );
+      expect(
+        map('P0002', 'expense_not_found'),
+        const AppFailure.notFound(key: 'expense_not_found'),
+      );
+      for (final key in [
+        'invalid_date',
+        'invalid_range',
+        'currency_mismatch',
+        'invalid_target',
+      ]) {
+        expect(map('22023', key), AppFailure.validation(key: key));
+      }
+    });
+
     test('falls back to the failure type', () {
       expect(
         friendlyMessage(const AppFailure.business('brand_new_key')),
