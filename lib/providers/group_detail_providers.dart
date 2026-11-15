@@ -302,7 +302,10 @@ class SettlementsNotifier extends UserScopedNotifier<SettlementHistory> {
     const action = 'a payment write';
     final session = guard();
     if (!session.holds(action)) return SessionGuard.dropped;
-    if (!_inFlight.add(target)) {
+    // Keyed by user so a request held from an earlier session never blocks
+    // the next signed-in user on the same provider instance.
+    final inFlightKey = '${session.userId}|$target';
+    if (!_inFlight.add(inFlightKey)) {
       return session.fail(
         const AppFailure.business('settlement_in_progress'),
         action,
@@ -337,7 +340,7 @@ class SettlementsNotifier extends UserScopedNotifier<SettlementHistory> {
         report: report,
       );
     } finally {
-      _inFlight.remove(target);
+      _inFlight.remove(inFlightKey);
     }
   }
 

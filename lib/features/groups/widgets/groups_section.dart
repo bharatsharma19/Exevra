@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../../../providers/session_guard.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_colors.dart';
@@ -814,11 +815,11 @@ class _MemberTile extends ConsumerWidget {
       }
       return;
     }
+    if (!context.mounted || identical(failure, SessionGuard.dropped)) return;
     if (failure.key != 'outstanding_balance') {
       ref.read(failureReporterProvider.notifier).report(failure);
       return;
     }
-    if (!context.mounted) return;
     final force = await confirmAction(
       context,
       title: '${member.label} is not settled up',

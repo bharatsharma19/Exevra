@@ -510,8 +510,10 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
       AppHaptics.medium();
       return null;
     } on AppFailure catch (failure) {
-      if (!_holds(session, action)) return SessionGuard.dropped;
+      // Undo the local bookkeeping even when the result is dropped, so a
+      // later session on this instance does not keep the row hidden.
       _deleted.remove(expense.id);
+      if (!_holds(session, action)) return SessionGuard.dropped;
       _reloadIfInTransit(failure);
       _update(
         (items) => _insertSorted(
