@@ -119,6 +119,27 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                       ),
                     ),
 
+                    const SizedBox(height: 10),
+                    Text(
+                      key?.scope == InsightScope.group
+                          ? 'Everything spent in '
+                                '${ref.watch(activeGroupProvider)?.name ?? 'this group'}'
+                          : 'Your personal expenses plus your share of group '
+                                'expenses',
+                      key: const Key('insights-scope'),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    if (async.hasError && !async.isLoading) ...[
+                      const SizedBox(height: 8),
+                      FailureRetry(
+                        error: async.error!,
+                        compact: true,
+                        onRetry: () => unawaited(reload()),
+                      ),
+                    ],
                     const SizedBox(height: 18),
 
                     // Primary Metric Banner Card
@@ -132,13 +153,17 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text(
-                                'TOTAL SPEND (${_timeframeLabel(timeframe)})',
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 1.5,
-                                  color: AppColors.primaryCyan,
+                              Expanded(
+                                child: Text(
+                                  'TOTAL SPEND (${_timeframeLabel(timeframe)})',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 1.5,
+                                    color: AppColors.primaryCyan,
+                                  ),
                                 ),
                               ),
                               Container(
@@ -173,6 +198,18 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                               color: Colors.white,
                             ),
                           ).animate().fadeIn().slideX(begin: -0.1, end: 0),
+                          if (insight.otherCurrencyTotals.isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              'Also spent: '
+                              '${insight.otherCurrencyTotals.map(MoneyFormat.format).join(', ')}',
+                              key: const Key('insights-other-currencies'),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.darkTextSecondary,
+                              ),
+                            ),
+                          ],
                           const SizedBox(height: 14),
                           Divider(color: Colors.white.withValues(alpha: 0.1)),
                           const SizedBox(height: 10),
@@ -184,6 +221,7 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                 MoneyFormat.format(insight.averageDaily),
                                 Icons.calendar_today_rounded,
                               ),
+                              const SizedBox(width: 8),
                               _buildSubMetric(
                                 'Top Expense',
                                 highest != null
@@ -197,283 +235,17 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                       ),
                     ),
 
-                    const SizedBox(height: 24),
-
-                    // Trend Line/Bar Chart
-                    Text(
-                      'Spending Velocity & Trends',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.3,
-                        color: isDark
-                            ? AppColors.darkTextPrimary
-                            : AppColors.lightTextPrimary,
+                    if (insight.isEmpty) ...[
+                      const SizedBox(height: 18),
+                      _buildEmptyState(
+                        isGroup: key?.scope == InsightScope.group,
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    GlassCard(
-                      borderRadius: 20,
-                      padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
-                      child: SizedBox(
-                        height: 220,
-                        child: trend.every((b) => b.total.isZero)
-                            ? const Center(
-                                child: Text(
-                                  'No trend data available for this range',
-                                ),
-                              )
-                            : LineChart(
-                                LineChartData(
-                                  gridData: FlGridData(
-                                    show: true,
-                                    drawVerticalLine: false,
-                                    getDrawingHorizontalLine: (val) => FlLine(
-                                      color: isDark
-                                          ? Colors.white10
-                                          : Colors.black12,
-                                      strokeWidth: 1,
-                                    ),
-                                  ),
-                                  titlesData: FlTitlesData(
-                                    rightTitles: const AxisTitles(
-                                      sideTitles: SideTitles(showTitles: false),
-                                    ),
-                                    topTitles: const AxisTitles(
-                                      sideTitles: SideTitles(showTitles: false),
-                                    ),
-                                    leftTitles: AxisTitles(
-                                      sideTitles: SideTitles(
-                                        showTitles: true,
-                                        reservedSize: 44,
-                                        getTitlesWidget: (val, meta) => Text(
-                                          MoneyFormat.compact(
-                                            Money(
-                                              (val *
-                                                      CurrencyInfo.of(
-                                                        currency,
-                                                      ).minorPerMajor)
-                                                  .round(),
-                                              currency,
-                                            ),
-                                          ),
-                                          style: TextStyle(
-                                            color: isDark
-                                                ? AppColors.darkTextTertiary
-                                                : AppColors.lightTextTertiary,
-                                            fontSize: 10,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    bottomTitles: AxisTitles(
-                                      sideTitles: SideTitles(
-                                        showTitles: true,
-                                        reservedSize: 28,
-                                        interval: (trend.length / 5).clamp(
-                                          1.0,
-                                          10.0,
-                                        ),
-                                        getTitlesWidget: (val, meta) {
-                                          final int idx = val.toInt();
-                                          if (idx >= 0 && idx < trend.length) {
-                                            final rawDate = trend[idx].date;
-                                            return Text(
-                                              timeframe == InsightTimeframe.year
-                                                  ? '${rawDate.month}/${rawDate.year % 100}'
-                                                  : '${rawDate.day}/${rawDate.month}',
-                                              style: TextStyle(
-                                                color: isDark
-                                                    ? AppColors.darkTextTertiary
-                                                    : AppColors
-                                                          .lightTextTertiary,
-                                                fontSize: 10,
-                                              ),
-                                            );
-                                          }
-                                          return const Text('');
-                                        },
-                                      ),
-                                    ),
-                                  ),
-                                  borderData: FlBorderData(show: false),
-                                  lineBarsData: [
-                                    LineChartBarData(
-                                      spots: List.generate(trend.length, (i) {
-                                        return FlSpot(
-                                          i.toDouble(),
-                                          trend[i].total.amountMinor /
-                                              trend[i].total.info.minorPerMajor,
-                                        );
-                                      }),
-                                      isCurved: true,
-                                      curveSmoothness: 0.35,
-                                      color: AppColors.primaryCyan,
-                                      barWidth: 3,
-                                      isStrokeCapRound: true,
-                                      dotData: const FlDotData(show: false),
-                                      belowBarData: BarAreaData(
-                                        show: true,
-                                        gradient: LinearGradient(
-                                          colors: [
-                                            AppColors.primaryCyan.withValues(
-                                              alpha: 0.3,
-                                            ),
-                                            AppColors.primaryCyan.withValues(
-                                              alpha: 0.0,
-                                            ),
-                                          ],
-                                          begin: Alignment.topCenter,
-                                          end: Alignment.bottomCenter,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                      ),
-                    ),
+                    ] else ...[
+                      const SizedBox(height: 24),
 
-                    const SizedBox(height: 24),
-
-                    // Category Breakdown Donut Chart
-                    Text(
-                      'Category Breakdown',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.3,
-                        color: isDark
-                            ? AppColors.darkTextPrimary
-                            : AppColors.lightTextPrimary,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    GlassCard(
-                      borderRadius: 20,
-                      padding: const EdgeInsets.all(20),
-                      child: insight.categories.isEmpty
-                          ? const Center(
-                              child: Text('No categorical expenses to chart'),
-                            )
-                          : Column(
-                              children: [
-                                SizedBox(
-                                  height: 200,
-                                  child: PieChart(
-                                    PieChartData(
-                                      pieTouchData: PieTouchData(
-                                        touchCallback: (event, pieTouchResponse) {
-                                          setState(() {
-                                            if (!event
-                                                    .isInterestedForInteractions ||
-                                                pieTouchResponse == null ||
-                                                pieTouchResponse
-                                                        .touchedSection ==
-                                                    null) {
-                                              _touchedPieIndex = -1;
-                                              return;
-                                            }
-                                            _touchedPieIndex = pieTouchResponse
-                                                .touchedSection!
-                                                .touchedSectionIndex;
-                                          });
-                                        },
-                                      ),
-                                      borderData: FlBorderData(show: false),
-                                      sectionsSpace: 3,
-                                      centerSpaceRadius: 50,
-                                      sections: List.generate(
-                                        insight.categories.length,
-                                        (i) {
-                                          final item = insight.categories[i];
-                                          final isTouched =
-                                              i == _touchedPieIndex;
-                                          final radius = isTouched
-                                              ? 45.0
-                                              : 36.0;
-                                          final catColor =
-                                              AppColors.getCategoryColor(
-                                                item.category,
-                                              );
-
-                                          return PieChartSectionData(
-                                            color: catColor,
-                                            value: item.total.amountMinor
-                                                .toDouble(),
-                                            title:
-                                                '${(item.share * 100).toStringAsFixed(0)}%',
-                                            radius: radius,
-                                            titleStyle: TextStyle(
-                                              fontSize: isTouched ? 14 : 11,
-                                              fontWeight: FontWeight.w800,
-                                              color: Colors.white,
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 20),
-                                // Category Legends
-                                ...insight.categories.map((cat) {
-                                  final color = AppColors.getCategoryColor(
-                                    cat.category,
-                                  );
-                                  return Padding(
-                                    padding: const EdgeInsets.only(bottom: 8),
-                                    child: Row(
-                                      children: [
-                                        Container(
-                                          width: 12,
-                                          height: 12,
-                                          decoration: BoxDecoration(
-                                            color: color,
-                                            shape: BoxShape.circle,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 10),
-                                        Expanded(
-                                          child: Text(
-                                            cat.category,
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w600,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                        ),
-                                        Text(
-                                          MoneyFormat.format(cat.total),
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          '(${(cat.share * 100).toStringAsFixed(0)}%)',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: isDark
-                                                ? AppColors.darkTextTertiary
-                                                : AppColors.lightTextTertiary,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                }),
-                              ],
-                            ),
-                    ),
-
-                    const SizedBox(height: 24),
-
-                    // Highest Expense Spotlight
-                    if (highest != null) ...[
+                      // Trend Line/Bar Chart
                       Text(
-                        'Peak Transaction Spotlight',
+                        'Spending Velocity & Trends',
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w800,
@@ -486,62 +258,348 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                       const SizedBox(height: 12),
                       GlassCard(
                         borderRadius: 20,
-                        padding: const EdgeInsets.all(18),
-                        border: Border.all(
-                          color: AppColors.primaryViolet.withValues(alpha: 0.4),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: AppColors.primaryViolet.withValues(
-                                  alpha: 0.18,
+                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
+                        child: SizedBox(
+                          height: 220,
+                          child: trend.every((b) => b.total.isZero)
+                              ? const Center(
+                                  child: Text(
+                                    'No trend data available for this range',
+                                  ),
+                                )
+                              : LineChart(
+                                  LineChartData(
+                                    gridData: FlGridData(
+                                      show: true,
+                                      drawVerticalLine: false,
+                                      getDrawingHorizontalLine: (val) => FlLine(
+                                        color: isDark
+                                            ? Colors.white10
+                                            : Colors.black12,
+                                        strokeWidth: 1,
+                                      ),
+                                    ),
+                                    titlesData: FlTitlesData(
+                                      rightTitles: const AxisTitles(
+                                        sideTitles: SideTitles(
+                                          showTitles: false,
+                                        ),
+                                      ),
+                                      topTitles: const AxisTitles(
+                                        sideTitles: SideTitles(
+                                          showTitles: false,
+                                        ),
+                                      ),
+                                      leftTitles: AxisTitles(
+                                        sideTitles: SideTitles(
+                                          showTitles: true,
+                                          reservedSize: 44,
+                                          getTitlesWidget: (val, meta) => Text(
+                                            MoneyFormat.compact(
+                                              Money(
+                                                (val *
+                                                        CurrencyInfo.of(
+                                                          currency,
+                                                        ).minorPerMajor)
+                                                    .round(),
+                                                currency,
+                                              ),
+                                            ),
+                                            style: TextStyle(
+                                              color: isDark
+                                                  ? AppColors.darkTextTertiary
+                                                  : AppColors.lightTextTertiary,
+                                              fontSize: 10,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      bottomTitles: AxisTitles(
+                                        sideTitles: SideTitles(
+                                          showTitles: true,
+                                          reservedSize: 28,
+                                          interval: (trend.length / 5).clamp(
+                                            1.0,
+                                            10.0,
+                                          ),
+                                          getTitlesWidget: (val, meta) {
+                                            final int idx = val.toInt();
+                                            if (idx >= 0 &&
+                                                idx < trend.length) {
+                                              final rawDate = trend[idx].date;
+                                              return Text(
+                                                timeframe ==
+                                                        InsightTimeframe.year
+                                                    ? '${rawDate.month}/${rawDate.year % 100}'
+                                                    : '${rawDate.day}/${rawDate.month}',
+                                                style: TextStyle(
+                                                  color: isDark
+                                                      ? AppColors
+                                                            .darkTextTertiary
+                                                      : AppColors
+                                                            .lightTextTertiary,
+                                                  fontSize: 10,
+                                                ),
+                                              );
+                                            }
+                                            return const Text('');
+                                          },
+                                        ),
+                                      ),
+                                    ),
+                                    borderData: FlBorderData(show: false),
+                                    lineBarsData: [
+                                      LineChartBarData(
+                                        spots: List.generate(trend.length, (i) {
+                                          return FlSpot(
+                                            i.toDouble(),
+                                            trend[i].total.amountMinor /
+                                                trend[i]
+                                                    .total
+                                                    .info
+                                                    .minorPerMajor,
+                                          );
+                                        }),
+                                        isCurved: true,
+                                        curveSmoothness: 0.35,
+                                        color: AppColors.primaryCyan,
+                                        barWidth: 3,
+                                        isStrokeCapRound: true,
+                                        dotData: const FlDotData(show: false),
+                                        belowBarData: BarAreaData(
+                                          show: true,
+                                          gradient: LinearGradient(
+                                            colors: [
+                                              AppColors.primaryCyan.withValues(
+                                                alpha: 0.3,
+                                              ),
+                                              AppColors.primaryCyan.withValues(
+                                                alpha: 0.0,
+                                              ),
+                                            ],
+                                            begin: Alignment.topCenter,
+                                            end: Alignment.bottomCenter,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              child: const Icon(
-                                Icons.star_rounded,
-                                color: AppColors.primaryViolet,
-                                size: 28,
-                              ),
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    highest.title,
-                                    style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    '${highest.category} • ${DateHelpers.formatDate(highest.spentAt)}',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: isDark
-                                          ? AppColors.darkTextTertiary
-                                          : AppColors.lightTextTertiary,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Text(
-                              MoneyFormat.format(highest.amount),
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.primaryViolet,
-                              ),
-                            ),
-                          ],
                         ),
                       ),
+
+                      const SizedBox(height: 24),
+
+                      // Category Breakdown Donut Chart
+                      Text(
+                        'Category Breakdown',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.3,
+                          color: isDark
+                              ? AppColors.darkTextPrimary
+                              : AppColors.lightTextPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      GlassCard(
+                        borderRadius: 20,
+                        padding: const EdgeInsets.all(20),
+                        child: insight.categories.isEmpty
+                            ? const Center(
+                                child: Text('No categorical expenses to chart'),
+                              )
+                            : Column(
+                                children: [
+                                  SizedBox(
+                                    height: 200,
+                                    child: PieChart(
+                                      PieChartData(
+                                        pieTouchData: PieTouchData(
+                                          touchCallback: (event, pieTouchResponse) {
+                                            setState(() {
+                                              if (!event
+                                                      .isInterestedForInteractions ||
+                                                  pieTouchResponse == null ||
+                                                  pieTouchResponse
+                                                          .touchedSection ==
+                                                      null) {
+                                                _touchedPieIndex = -1;
+                                                return;
+                                              }
+                                              _touchedPieIndex =
+                                                  pieTouchResponse
+                                                      .touchedSection!
+                                                      .touchedSectionIndex;
+                                            });
+                                          },
+                                        ),
+                                        borderData: FlBorderData(show: false),
+                                        sectionsSpace: 3,
+                                        centerSpaceRadius: 50,
+                                        sections: List.generate(
+                                          insight.categories.length,
+                                          (i) {
+                                            final item = insight.categories[i];
+                                            final isTouched =
+                                                i == _touchedPieIndex;
+                                            final radius = isTouched
+                                                ? 45.0
+                                                : 36.0;
+                                            final catColor =
+                                                AppColors.getCategoryColor(
+                                                  item.category,
+                                                );
+
+                                            return PieChartSectionData(
+                                              color: catColor,
+                                              value: item.total.amountMinor
+                                                  .toDouble(),
+                                              title:
+                                                  '${(item.share * 100).toStringAsFixed(0)}%',
+                                              radius: radius,
+                                              titleStyle: TextStyle(
+                                                fontSize: isTouched ? 14 : 11,
+                                                fontWeight: FontWeight.w800,
+                                                color: Colors.white,
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 20),
+                                  // Category Legends
+                                  ...insight.categories.map((cat) {
+                                    final color = AppColors.getCategoryColor(
+                                      cat.category,
+                                    );
+                                    return Padding(
+                                      padding: const EdgeInsets.only(bottom: 8),
+                                      child: Row(
+                                        children: [
+                                          Container(
+                                            width: 12,
+                                            height: 12,
+                                            decoration: BoxDecoration(
+                                              color: color,
+                                              shape: BoxShape.circle,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Text(
+                                              cat.category,
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                          ),
+                                          Text(
+                                            MoneyFormat.format(cat.total),
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            '(${(cat.share * 100).toStringAsFixed(0)}%)',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: isDark
+                                                  ? AppColors.darkTextTertiary
+                                                  : AppColors.lightTextTertiary,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }),
+                                ],
+                              ),
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      // Highest Expense Spotlight
+                      if (highest != null) ...[
+                        Text(
+                          'Peak Transaction Spotlight',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                            color: isDark
+                                ? AppColors.darkTextPrimary
+                                : AppColors.lightTextPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        GlassCard(
+                          borderRadius: 20,
+                          padding: const EdgeInsets.all(18),
+                          border: Border.all(
+                            color: AppColors.primaryViolet.withValues(
+                              alpha: 0.4,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: AppColors.primaryViolet.withValues(
+                                    alpha: 0.18,
+                                  ),
+                                ),
+                                child: const Icon(
+                                  Icons.star_rounded,
+                                  color: AppColors.primaryViolet,
+                                  size: 28,
+                                ),
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      highest.title,
+                                      style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      '${highest.category} • ${DateHelpers.formatDate(highest.spentAt)}',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: isDark
+                                            ? AppColors.darkTextTertiary
+                                            : AppColors.lightTextTertiary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Text(
+                                MoneyFormat.format(highest.amount),
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.primaryViolet,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                   ],
                 ),
@@ -555,6 +613,37 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
     InsightTimeframe.month => 'LAST 30 DAYS',
     InsightTimeframe.year => 'LAST 12 MONTHS',
   };
+
+  Widget _buildEmptyState({required bool isGroup}) {
+    final scheme = Theme.of(context).colorScheme;
+    return GlassCard(
+      key: const Key('insights-empty'),
+      borderRadius: 20,
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        children: [
+          Icon(
+            Icons.insights_rounded,
+            size: 40,
+            color: scheme.onSurfaceVariant,
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'No spending in this period',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            isGroup
+                ? 'Expenses added to this group will show up here.'
+                : 'Record an expense, or pick a longer period above.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildTimeframePill(
     String label,
@@ -593,28 +682,36 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
   }
 
   Widget _buildSubMetric(String label, String value, IconData icon) {
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: Colors.white70),
-        const SizedBox(width: 6),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: const TextStyle(fontSize: 11, color: Colors.white60),
+    return Flexible(
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: Colors.white70),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, color: Colors.white60),
+                ),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
             ),
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-              ),
-            ),
-          ],
-        ),
-      ],
+          ),
+        ],
+      ),
     );
   }
 }
