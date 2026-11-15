@@ -55,7 +55,8 @@ class Expense {
 
     String? creator;
     if (json['profiles'] != null && json['profiles'] is Map) {
-      creator = (json['profiles'] as Map<String, dynamic>)['display_name'] as String?;
+      creator =
+          (json['profiles'] as Map<String, dynamic>)['display_name'] as String?;
     } else if (json['creator_name'] != null) {
       creator = json['creator_name'] as String?;
     }

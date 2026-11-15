@@ -45,7 +45,8 @@ class Validators {
     if (value == null || value.trim().isEmpty) {
       return 'Verification code is required';
     }
-    if (value.trim().length != 6 || !RegExp(r'^\d{6}$').hasMatch(value.trim())) {
+    if (value.trim().length != 6 ||
+        !RegExp(r'^\d{6}$').hasMatch(value.trim())) {
       return 'Please enter a 6-digit code';
     }
     return null;

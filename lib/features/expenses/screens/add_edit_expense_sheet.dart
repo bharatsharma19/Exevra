@@ -25,7 +25,8 @@ class AddEditExpenseSheet extends ConsumerStatefulWidget {
   }
 
   @override
-  ConsumerState<AddEditExpenseSheet> createState() => _AddEditExpenseSheetState();
+  ConsumerState<AddEditExpenseSheet> createState() =>
+      _AddEditExpenseSheetState();
 }
 
 class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
@@ -97,12 +98,15 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
     final expenseState = ref.read(expenseProvider);
     final currentUserId = authState.user?.id;
 
-    if (_isGroupExpense && !expenseState.canUserAddGroupExpenses(currentUserId)) {
+    if (_isGroupExpense &&
+        !expenseState.canUserAddGroupExpenses(currentUserId)) {
       setState(() => _isSubmitting = false);
       AppHaptics.error();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Pending Admin Review: You have view-only access until the Group Admin approves your membership to record expenses.'),
+          content: Text(
+            'Pending Admin Review: You have view-only access until the Group Admin approves your membership to record expenses.',
+          ),
           backgroundColor: AppColors.primaryRose,
         ),
       );
@@ -121,7 +125,9 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
         amount: amount,
         category: _selectedCategory,
         date: _selectedDate,
-        notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+        notes: _notesController.text.trim().isEmpty
+            ? null
+            : _notesController.text.trim(),
         isGroup: _isGroupExpense,
       );
     } else {
@@ -130,8 +136,13 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
         amount: amount,
         category: _selectedCategory,
         date: _selectedDate,
-        notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
-        groupId: _isGroupExpense ? (widget.existingExpense!.groupId ?? ref.read(authNotifierProvider).profile?.groupId) : null,
+        notes: _notesController.text.trim().isEmpty
+            ? null
+            : _notesController.text.trim(),
+        groupId: _isGroupExpense
+            ? (widget.existingExpense!.groupId ??
+                  ref.read(authNotifierProvider).profile?.groupId)
+            : null,
         isPersonal: !_isGroupExpense,
       );
       success = await expenseNotifier.updateExpense(updated);
@@ -204,7 +215,9 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                         fontSize: 22,
                         fontWeight: FontWeight.w800,
                         letterSpacing: -0.5,
-                        color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                        color: isDark
+                            ? AppColors.darkTextPrimary
+                            : AppColors.lightTextPrimary,
                       ),
                     ),
                     IconButton(
@@ -218,7 +231,10 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
 
                 // Amount Large Numeric Input Card
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 16,
+                  ),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(20),
                     color: isDark
@@ -244,7 +260,9 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                       Expanded(
                         child: TextFormField(
                           controller: _amountController,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
                           validator: Validators.validateAmount,
                           style: TextStyle(
                             fontSize: 34,
@@ -272,7 +290,8 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                 TextFormField(
                   controller: _titleController,
                   textCapitalization: TextCapitalization.sentences,
-                  validator: (v) => Validators.validateRequired(v, 'Expense title'),
+                  validator: (v) =>
+                      Validators.validateRequired(v, 'Expense title'),
                   decoration: const InputDecoration(
                     labelText: 'Expense Title',
                     hintText: 'e.g. Whole Foods Organic Groceries',
@@ -301,7 +320,9 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                             border: Border.all(
                               color: !_isGroupExpense
                                   ? AppColors.primaryCyan
-                                  : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                                  : (isDark
+                                        ? AppColors.darkBorder
+                                        : AppColors.lightBorder),
                               width: !_isGroupExpense ? 1.5 : 1,
                             ),
                           ),
@@ -311,7 +332,9 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                               Icon(
                                 Icons.person_rounded,
                                 size: 18,
-                                color: !_isGroupExpense ? AppColors.primaryCyan : Colors.grey,
+                                color: !_isGroupExpense
+                                    ? AppColors.primaryCyan
+                                    : Colors.grey,
                               ),
                               const SizedBox(width: 8),
                               Text(
@@ -320,7 +343,9 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                                   fontWeight: FontWeight.w700,
                                   color: !_isGroupExpense
                                       ? AppColors.primaryCyan
-                                      : (isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary),
+                                      : (isDark
+                                            ? AppColors.darkTextSecondary
+                                            : AppColors.lightTextSecondary),
                                 ),
                               ),
                             ],
@@ -335,7 +360,9 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                           if (!hasGroup) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('Please join or create a Group in Profile first!'),
+                                content: Text(
+                                  'Please join or create a Group in Profile first!',
+                                ),
                                 backgroundColor: AppColors.warning,
                               ),
                             );
@@ -345,7 +372,9 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                             AppHaptics.error();
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('View-Only Access: As an invited member, the Group Admin must review & approve your membership before you can add group expenses.'),
+                                content: Text(
+                                  'View-Only Access: As an invited member, the Group Admin must review & approve your membership before you can add group expenses.',
+                                ),
                                 backgroundColor: AppColors.primaryRose,
                               ),
                             );
@@ -358,13 +387,17 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           decoration: BoxDecoration(
                             color: _isGroupExpense
-                                ? AppColors.primaryViolet.withValues(alpha: 0.15)
+                                ? AppColors.primaryViolet.withValues(
+                                    alpha: 0.15,
+                                  )
                                 : Colors.transparent,
                             borderRadius: BorderRadius.circular(14),
                             border: Border.all(
                               color: _isGroupExpense
                                   ? AppColors.primaryViolet
-                                  : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                                  : (isDark
+                                        ? AppColors.darkBorder
+                                        : AppColors.lightBorder),
                               width: _isGroupExpense ? 1.5 : 1,
                             ),
                           ),
@@ -374,7 +407,9 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                               Icon(
                                 Icons.groups_rounded,
                                 size: 18,
-                                color: _isGroupExpense ? AppColors.primaryViolet : Colors.grey,
+                                color: _isGroupExpense
+                                    ? AppColors.primaryViolet
+                                    : Colors.grey,
                               ),
                               const SizedBox(width: 8),
                               Text(
@@ -383,7 +418,9 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                                   fontWeight: FontWeight.w700,
                                   color: _isGroupExpense
                                       ? AppColors.primaryViolet
-                                      : (isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary),
+                                      : (isDark
+                                            ? AppColors.darkTextSecondary
+                                            : AppColors.lightTextSecondary),
                                 ),
                               ),
                             ],
@@ -397,20 +434,33 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                 if (isViewer) ...[
                   const SizedBox(height: 10),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.warning.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.warning.withValues(alpha: 0.3)),
+                      border: Border.all(
+                        color: AppColors.warning.withValues(alpha: 0.3),
+                      ),
                     ),
                     child: const Row(
                       children: [
-                        Icon(Icons.shield_outlined, size: 16, color: AppColors.warning),
+                        Icon(
+                          Icons.shield_outlined,
+                          size: 16,
+                          color: AppColors.warning,
+                        ),
                         SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'View-Only Member: You can view group expenses. The Group Admin must review & approve your membership before you can record group expenses.',
-                            style: TextStyle(fontSize: 11, color: AppColors.warning, height: 1.3),
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: AppColors.warning,
+                              height: 1.3,
+                            ),
                           ),
                         ),
                       ],
@@ -431,7 +481,8 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     itemCount: AppConstants.categories.length,
-                    separatorBuilder: (context, index) => const SizedBox(width: 10),
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(width: 10),
                     itemBuilder: (context, idx) {
                       final cat = AppConstants.categories[idx];
                       final isSelected = _selectedCategory == cat.name;
@@ -449,7 +500,9 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                             borderRadius: BorderRadius.circular(16),
                             color: isSelected
                                 ? catColor.withValues(alpha: 0.18)
-                                : (isDark ? AppColors.darkCardElevated : AppColors.lightCardElevated),
+                                : (isDark
+                                      ? AppColors.darkCardElevated
+                                      : AppColors.lightCardElevated),
                             border: Border.all(
                               color: isSelected ? catColor : Colors.transparent,
                               width: 1.5,
@@ -460,7 +513,11 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                             children: [
                               Icon(
                                 cat.icon,
-                                color: isSelected ? catColor : (isDark ? Colors.white60 : Colors.black54),
+                                color: isSelected
+                                    ? catColor
+                                    : (isDark
+                                          ? Colors.white60
+                                          : Colors.black54),
                                 size: 24,
                               ),
                               const SizedBox(height: 4),
@@ -470,8 +527,14 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   fontSize: 11,
-                                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                                  color: isSelected ? catColor : (isDark ? Colors.white70 : Colors.black87),
+                                  fontWeight: isSelected
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                  color: isSelected
+                                      ? catColor
+                                      : (isDark
+                                            ? Colors.white70
+                                            : Colors.black87),
                                 ),
                               ),
                             ],
@@ -488,26 +551,46 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                 GestureDetector(
                   onTap: _pickDate,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(16),
-                      color: isDark ? AppColors.darkCardElevated.withValues(alpha: 0.6) : AppColors.lightCardElevated,
-                      border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                      color: isDark
+                          ? AppColors.darkCardElevated.withValues(alpha: 0.6)
+                          : AppColors.lightCardElevated,
+                      border: Border.all(
+                        color: isDark
+                            ? AppColors.darkBorder
+                            : AppColors.lightBorder,
+                      ),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Row(
                           children: [
-                            const Icon(Icons.calendar_month_rounded, color: AppColors.primaryCyan, size: 20),
+                            const Icon(
+                              Icons.calendar_month_rounded,
+                              color: AppColors.primaryCyan,
+                              size: 20,
+                            ),
                             const SizedBox(width: 12),
                             Text(
                               '${DateHelpers.formatDate(_selectedDate)} • ${DateHelpers.formatTime(_selectedDate)}',
-                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                              ),
                             ),
                           ],
                         ),
-                        const Icon(Icons.edit_calendar_rounded, size: 18, color: Colors.grey),
+                        const Icon(
+                          Icons.edit_calendar_rounded,
+                          size: 18,
+                          color: Colors.grey,
+                        ),
                       ],
                     ),
                   ),
@@ -533,17 +616,25 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
                   onPressed: _isSubmitting ? null : _submit,
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                   ),
                   child: _isSubmitting
                       ? const SizedBox(
                           height: 20,
                           width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(Colors.black)),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation(Colors.black),
+                          ),
                         )
                       : Text(
                           isEditing ? 'Save Changes' : 'Record Expense',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                 ),
               ],

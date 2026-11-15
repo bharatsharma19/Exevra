@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,7 +21,9 @@ class AppLockScreen extends ConsumerWidget {
     return PopScope(
       canPop: false,
       child: Scaffold(
-        backgroundColor: isDark ? AppColors.darkBackground : AppColors.lightBackground,
+        backgroundColor: isDark
+            ? AppColors.darkBackground
+            : AppColors.lightBackground,
         body: SafeArea(
           child: Center(
             child: SingleChildScrollView(
@@ -29,37 +33,42 @@ class AppLockScreen extends ConsumerWidget {
                 children: [
                   // Glowing Security Badge
                   Container(
-                    width: 100,
-                    height: 100,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        colors: [
-                          AppColors.primaryCyan.withValues(alpha: 0.25),
-                          AppColors.primaryViolet.withValues(alpha: 0.25),
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      border: Border.all(
-                        color: AppColors.primaryCyan.withValues(alpha: 0.4),
-                        width: 2,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppColors.primaryCyan.withValues(alpha: 0.2),
-                          blurRadius: 30,
-                          spreadRadius: 4,
+                        width: 100,
+                        height: 100,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            colors: [
+                              AppColors.primaryCyan.withValues(alpha: 0.25),
+                              AppColors.primaryViolet.withValues(alpha: 0.25),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          border: Border.all(
+                            color: AppColors.primaryCyan.withValues(alpha: 0.4),
+                            width: 2,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.primaryCyan.withValues(
+                                alpha: 0.2,
+                              ),
+                              blurRadius: 30,
+                              spreadRadius: 4,
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                    child: const Icon(
-                      Icons.fingerprint_rounded,
-                      size: 54,
-                      color: AppColors.primaryCyan,
-                    ),
-                  )
-                      .animate(onPlay: (controller) => controller.repeat(reverse: true))
+                        child: const Icon(
+                          Icons.fingerprint_rounded,
+                          size: 54,
+                          color: AppColors.primaryCyan,
+                        ),
+                      )
+                      .animate(
+                        onPlay: (controller) =>
+                            controller.repeat(reverse: true),
+                      )
                       .scale(
                         begin: const Offset(0.96, 0.96),
                         end: const Offset(1.04, 1.04),
@@ -71,15 +80,20 @@ class AppLockScreen extends ConsumerWidget {
 
                   // App Title & Status
                   Text(
-                    AppConstants.appName,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.5,
-                      color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
-                    ),
-                  ).animate().fadeIn(duration: 400.ms).slideY(begin: 0.1, end: 0),
+                        AppConstants.appName,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.5,
+                          color: isDark
+                              ? AppColors.darkTextPrimary
+                              : AppColors.lightTextPrimary,
+                        ),
+                      )
+                      .animate()
+                      .fadeIn(duration: 400.ms)
+                      .slideY(begin: 0.1, end: 0),
 
                   const SizedBox(height: 8),
 
@@ -89,7 +103,9 @@ class AppLockScreen extends ConsumerWidget {
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w500,
-                      color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                      color: isDark
+                          ? AppColors.darkTextSecondary
+                          : AppColors.lightTextSecondary,
                     ),
                   ).animate().fadeIn(delay: 100.ms, duration: 400.ms),
 
@@ -101,10 +117,17 @@ class AppLockScreen extends ConsumerWidget {
                       padding: const EdgeInsets.only(bottom: 24),
                       child: GlassCard(
                         borderRadius: 16,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
                         child: Row(
                           children: [
-                            const Icon(Icons.info_outline_rounded, color: AppColors.warning, size: 20),
+                            const Icon(
+                              Icons.info_outline_rounded,
+                              color: AppColors.warning,
+                              size: 20,
+                            ),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Text(
@@ -130,7 +153,7 @@ class AppLockScreen extends ConsumerWidget {
                           ? null
                           : () {
                               AppHaptics.medium();
-                              lockNotifier.authenticate();
+                              unawaited(lockNotifier.authenticate());
                             },
                       icon: lockState.isAuthenticating
                           ? const SizedBox(

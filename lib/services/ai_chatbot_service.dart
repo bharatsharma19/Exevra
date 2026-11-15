@@ -1,3 +1,7 @@
+// This file is replaced by a server-backed assistant client in the next change;
+// the lints below cover legacy JSON handling that is deleted with it.
+// ignore_for_file: avoid_dynamic_calls, inference_failure_on_instance_creation, prefer_const_declarations
+
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -32,13 +36,27 @@ class AiChatbotService {
   static const _secureStorage = FlutterSecureStorage();
 
   // API Keys retrieved from --dart-define or system environment
-  final String _envGeminiApiKey = const String.fromEnvironment('GEMINI_API_KEY', defaultValue: '');
-  final String _envOpenAiApiKey = const String.fromEnvironment('OPENAI_API_KEY', defaultValue: '');
-  final String _envClaudeApiKey = const String.fromEnvironment('ANTHROPIC_API_KEY', defaultValue: '');
-  final String _envDeepseekApiKey = const String.fromEnvironment('DEEPSEEK_API_KEY', defaultValue: '');
+  final String _envGeminiApiKey = const String.fromEnvironment(
+    'GEMINI_API_KEY',
+    defaultValue: '',
+  );
+  final String _envOpenAiApiKey = const String.fromEnvironment(
+    'OPENAI_API_KEY',
+    defaultValue: '',
+  );
+  final String _envClaudeApiKey = const String.fromEnvironment(
+    'ANTHROPIC_API_KEY',
+    defaultValue: '',
+  );
+  final String _envDeepseekApiKey = const String.fromEnvironment(
+    'DEEPSEEK_API_KEY',
+    defaultValue: '',
+  );
 
   Future<String> getGeminiApiKey() async {
-    final dotEnvKey = dotenv.isInitialized ? dotenv.env['GEMINI_API_KEY'] : null;
+    final dotEnvKey = dotenv.isInitialized
+        ? dotenv.env['GEMINI_API_KEY']
+        : null;
     if (dotEnvKey != null && dotEnvKey.isNotEmpty) return dotEnvKey;
     if (_envGeminiApiKey.isNotEmpty) return _envGeminiApiKey;
     try {
@@ -50,7 +68,9 @@ class AiChatbotService {
   }
 
   Future<String> getOpenAiApiKey() async {
-    final dotEnvKey = dotenv.isInitialized ? dotenv.env['OPENAI_API_KEY'] : null;
+    final dotEnvKey = dotenv.isInitialized
+        ? dotenv.env['OPENAI_API_KEY']
+        : null;
     if (dotEnvKey != null && dotEnvKey.isNotEmpty) return dotEnvKey;
     if (_envOpenAiApiKey.isNotEmpty) return _envOpenAiApiKey;
     try {
@@ -62,7 +82,9 @@ class AiChatbotService {
   }
 
   Future<String> getClaudeApiKey() async {
-    final dotEnvKey = dotenv.isInitialized ? dotenv.env['ANTHROPIC_API_KEY'] : null;
+    final dotEnvKey = dotenv.isInitialized
+        ? dotenv.env['ANTHROPIC_API_KEY']
+        : null;
     if (dotEnvKey != null && dotEnvKey.isNotEmpty) return dotEnvKey;
     if (_envClaudeApiKey.isNotEmpty) return _envClaudeApiKey;
     try {
@@ -74,11 +96,15 @@ class AiChatbotService {
   }
 
   Future<String> getDeepseekApiKey() async {
-    final dotEnvKey = dotenv.isInitialized ? dotenv.env['DEEPSEEK_API_KEY'] : null;
+    final dotEnvKey = dotenv.isInitialized
+        ? dotenv.env['DEEPSEEK_API_KEY']
+        : null;
     if (dotEnvKey != null && dotEnvKey.isNotEmpty) return dotEnvKey;
     if (_envDeepseekApiKey.isNotEmpty) return _envDeepseekApiKey;
     try {
-      final key = await _secureStorage.read(key: AppConstants.keyDeepseekApiKey);
+      final key = await _secureStorage.read(
+        key: AppConstants.keyDeepseekApiKey,
+      );
       return key ?? '';
     } catch (_) {
       return '';
@@ -106,16 +132,25 @@ class AiChatbotService {
   }) async* {
     // 1. Strict Guardrail Verification
     if (!isFinancialQuery(userPrompt)) {
-      final refusal = '🛡️ **Financial Scope Protection**\n\n'
+      final refusal =
+          '🛡️ **Financial Scope Protection**\n\n'
           'I am your dedicated **Exevra Financial Assistant**. '
           'I specialize exclusively in personal and group finance, expense optimization, '
           'budget planning, and financial wellness.\n\n'
           'Please ask a question related to your spending, budgeting strategies, or expenses.';
       for (final chunk in _simulateWordStream(refusal)) {
         await Future.delayed(const Duration(milliseconds: 20));
-        yield AiStreamChunk(text: chunk, modelUsed: 'Guardrail Engine', isComplete: false);
+        yield AiStreamChunk(
+          text: chunk,
+          modelUsed: 'Guardrail Engine',
+          isComplete: false,
+        );
       }
-      yield const AiStreamChunk(text: '', modelUsed: 'Guardrail Engine', isComplete: true);
+      yield const AiStreamChunk(
+        text: '',
+        modelUsed: 'Guardrail Engine',
+        isComplete: true,
+      );
       return;
     }
 
@@ -137,10 +172,18 @@ class AiChatbotService {
         await for (final chunk in stream) {
           geminiSuccess = true;
           fullGeminiText += chunk;
-          yield AiStreamChunk(text: chunk, modelUsed: 'Google Gemini 2.5 Flash', isComplete: false);
+          yield AiStreamChunk(
+            text: chunk,
+            modelUsed: 'Google Gemini 2.5 Flash',
+            isComplete: false,
+          );
         }
         if (geminiSuccess && fullGeminiText.isNotEmpty) {
-          yield const AiStreamChunk(text: '', modelUsed: 'Google Gemini 2.5 Flash', isComplete: true);
+          yield const AiStreamChunk(
+            text: '',
+            modelUsed: 'Google Gemini 2.5 Flash',
+            isComplete: true,
+          );
           return;
         }
       } catch (e) {
@@ -157,10 +200,18 @@ class AiChatbotService {
         await for (final chunk in stream) {
           openAiSuccess = true;
           fullOpenAiText += chunk;
-          yield AiStreamChunk(text: chunk, modelUsed: 'OpenAI GPT-4o-mini', isComplete: false);
+          yield AiStreamChunk(
+            text: chunk,
+            modelUsed: 'OpenAI GPT-4o-mini',
+            isComplete: false,
+          );
         }
         if (openAiSuccess && fullOpenAiText.isNotEmpty) {
-          yield const AiStreamChunk(text: '', modelUsed: 'OpenAI GPT-4o-mini', isComplete: true);
+          yield const AiStreamChunk(
+            text: '',
+            modelUsed: 'OpenAI GPT-4o-mini',
+            isComplete: true,
+          );
           return;
         }
       } catch (e) {
@@ -177,10 +228,18 @@ class AiChatbotService {
         await for (final chunk in stream) {
           claudeSuccess = true;
           fullClaudeText += chunk;
-          yield AiStreamChunk(text: chunk, modelUsed: 'Anthropic Claude 3.5 Haiku', isComplete: false);
+          yield AiStreamChunk(
+            text: chunk,
+            modelUsed: 'Anthropic Claude 3.5 Haiku',
+            isComplete: false,
+          );
         }
         if (claudeSuccess && fullClaudeText.isNotEmpty) {
-          yield const AiStreamChunk(text: '', modelUsed: 'Anthropic Claude 3.5 Haiku', isComplete: true);
+          yield const AiStreamChunk(
+            text: '',
+            modelUsed: 'Anthropic Claude 3.5 Haiku',
+            isComplete: true,
+          );
           return;
         }
       } catch (e) {
@@ -193,14 +252,26 @@ class AiChatbotService {
       bool deepseekSuccess = false;
       String fullDeepseekText = '';
       try {
-        final stream = _callDeepseekStream(userPrompt, systemPrompt, deepseekKey);
+        final stream = _callDeepseekStream(
+          userPrompt,
+          systemPrompt,
+          deepseekKey,
+        );
         await for (final chunk in stream) {
           deepseekSuccess = true;
           fullDeepseekText += chunk;
-          yield AiStreamChunk(text: chunk, modelUsed: 'DeepSeek Financial V3', isComplete: false);
+          yield AiStreamChunk(
+            text: chunk,
+            modelUsed: 'DeepSeek Financial V3',
+            isComplete: false,
+          );
         }
         if (deepseekSuccess && fullDeepseekText.isNotEmpty) {
-          yield const AiStreamChunk(text: '', modelUsed: 'DeepSeek Financial V3', isComplete: true);
+          yield const AiStreamChunk(
+            text: '',
+            modelUsed: 'DeepSeek Financial V3',
+            isComplete: true,
+          );
           return;
         }
       } catch (e) {
@@ -210,22 +281,43 @@ class AiChatbotService {
 
     // 7. Resilient On-Device Financial Intelligence Engine (Zero external dependencies)
     // Ensures immediately responsive, high-value guidance even without external API keys
-    final intelligentResponse = _generateHeuristicFinancialAdvice(userPrompt, aiConsent, expenses, currencyCode);
+    final intelligentResponse = _generateHeuristicFinancialAdvice(
+      userPrompt,
+      aiConsent,
+      expenses,
+      currencyCode,
+    );
     for (final chunk in _simulateWordStream(intelligentResponse)) {
       await Future.delayed(const Duration(milliseconds: 18));
-      yield AiStreamChunk(text: chunk, modelUsed: 'Antigravity Intelligence Core', isComplete: false);
+      yield AiStreamChunk(
+        text: chunk,
+        modelUsed: 'Antigravity Intelligence Core',
+        isComplete: false,
+      );
     }
-    yield const AiStreamChunk(text: '', modelUsed: 'Antigravity Intelligence Core', isComplete: true);
+    yield const AiStreamChunk(
+      text: '',
+      modelUsed: 'Antigravity Intelligence Core',
+      isComplete: true,
+    );
   }
 
   // ---------------------------------------------------------------------------
   // SYSTEM PROMPT BUILDER & DATA SANITIZATION
   // ---------------------------------------------------------------------------
 
-  String _buildSystemPrompt(bool aiConsent, List<Expense> expenses, String currencyCode) {
+  String _buildSystemPrompt(
+    bool aiConsent,
+    List<Expense> expenses,
+    String currencyCode,
+  ) {
     final buffer = StringBuffer();
-    buffer.writeln('You are Antigravity Financial Assistant, an elite personal and group financial advisor.');
-    buffer.writeln('Respond with crisp formatting, markdown bullets, bold headers, and actionable metrics.');
+    buffer.writeln(
+      'You are Antigravity Financial Assistant, an elite personal and group financial advisor.',
+    );
+    buffer.writeln(
+      'Respond with crisp formatting, markdown bullets, bold headers, and actionable metrics.',
+    );
 
     if (aiConsent) {
       // Data Isolation & Sanitization: aggregate metrics ONLY, zero PII
@@ -236,19 +328,31 @@ class AiChatbotService {
         catTotals[e.category] = (catTotals[e.category] ?? 0) + e.amount;
       }
 
-      buffer.writeln('\n[PRIVACY CONSENT GRANTED - SANITIZED USER SPENDING DATA]');
+      buffer.writeln(
+        '\n[PRIVACY CONSENT GRANTED - SANITIZED USER SPENDING DATA]',
+      );
       buffer.writeln('Active Currency: $currencyCode');
-      buffer.writeln('Total Tracked Expenses: ${CurrencyFormatter.format(total, currencyCode: currencyCode)} across ${expenses.length} records.');
+      buffer.writeln(
+        'Total Tracked Expenses: ${CurrencyFormatter.format(total, currencyCode: currencyCode)} across ${expenses.length} records.',
+      );
       buffer.writeln('Category Totals:');
       catTotals.forEach((cat, amt) {
         final pct = total > 0 ? (amt / total * 100).toStringAsFixed(1) : '0';
-        buffer.writeln('- $cat: ${CurrencyFormatter.format(amt, currencyCode: currencyCode)} ($pct%)');
+        buffer.writeln(
+          '- $cat: ${CurrencyFormatter.format(amt, currencyCode: currencyCode)} ($pct%)',
+        );
       });
-      buffer.writeln('Use these actual numbers to provide hyper-personalized insights.');
+      buffer.writeln(
+        'Use these actual numbers to provide hyper-personalized insights.',
+      );
     } else {
       buffer.writeln('\n[PRIVACY CONSENT NOT GRANTED]');
-      buffer.writeln('The user has NOT consented to database analysis. You have ZERO access to their transaction records.');
-      buffer.writeln('Act exclusively as a theoretical financial advisor providing best-practice budgeting techniques.');
+      buffer.writeln(
+        'The user has NOT consented to database analysis. You have ZERO access to their transaction records.',
+      );
+      buffer.writeln(
+        'Act exclusively as a theoretical financial advisor providing best-practice budgeting techniques.',
+      );
     }
 
     return buffer.toString();
@@ -258,28 +362,39 @@ class AiChatbotService {
   // API CLIENT STREAMS
   // ---------------------------------------------------------------------------
 
-  Stream<String> _callGeminiStream(String prompt, String systemPrompt, String apiKey) async* {
+  Stream<String> _callGeminiStream(
+    String prompt,
+    String systemPrompt,
+    String apiKey,
+  ) async* {
     // Attempt primary gemini-2.5-flash, fallback to gemini-1.5-flash
     final models = [AppConstants.geminiModel, 'gemini-1.5-flash'];
     http.Response? response;
 
     for (final model in models) {
-      final uri = Uri.parse('${AppConstants.geminiEndpoint}/$model:generateContent?key=$apiKey');
+      final uri = Uri.parse(
+        '${AppConstants.geminiEndpoint}/$model:generateContent?key=$apiKey',
+      );
       try {
-        final res = await http.post(
-          uri,
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'contents': [
-              {
-                'parts': [
-                  {'text': '$systemPrompt\n\nUser Question: $prompt'}
-                ]
-              }
-            ],
-            'generationConfig': {'temperature': 0.7, 'maxOutputTokens': 800}
-          }),
-        ).timeout(const Duration(seconds: 12));
+        final res = await http
+            .post(
+              uri,
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'contents': [
+                  {
+                    'parts': [
+                      {'text': '$systemPrompt\n\nUser Question: $prompt'},
+                    ],
+                  },
+                ],
+                'generationConfig': {
+                  'temperature': 0.7,
+                  'maxOutputTokens': 800,
+                },
+              }),
+            )
+            .timeout(const Duration(seconds: 12));
 
         if (res.statusCode == 200) {
           response = res;
@@ -292,7 +407,8 @@ class AiChatbotService {
 
     if (response != null && response.statusCode == 200) {
       final data = jsonDecode(response.body);
-      final text = data['candidates']?[0]?['content']?['parts']?[0]?['text'] as String?;
+      final text =
+          data['candidates']?[0]?['content']?['parts']?[0]?['text'] as String?;
       if (text != null && text.isNotEmpty) {
         for (final word in text.split(' ')) {
           yield '$word ';
@@ -304,23 +420,29 @@ class AiChatbotService {
     }
   }
 
-  Stream<String> _callOpenAiStream(String prompt, String systemPrompt, String apiKey) async* {
+  Stream<String> _callOpenAiStream(
+    String prompt,
+    String systemPrompt,
+    String apiKey,
+  ) async* {
     final uri = Uri.parse(AppConstants.openAiEndpoint);
-    final response = await http.post(
-      uri,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $apiKey',
-      },
-      body: jsonEncode({
-        'model': AppConstants.openAiModel,
-        'messages': [
-          {'role': 'system', 'content': systemPrompt},
-          {'role': 'user', 'content': prompt}
-        ],
-        'temperature': 0.7,
-      }),
-    ).timeout(const Duration(seconds: 12));
+    final response = await http
+        .post(
+          uri,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $apiKey',
+          },
+          body: jsonEncode({
+            'model': AppConstants.openAiModel,
+            'messages': [
+              {'role': 'system', 'content': systemPrompt},
+              {'role': 'user', 'content': prompt},
+            ],
+            'temperature': 0.7,
+          }),
+        )
+        .timeout(const Duration(seconds: 12));
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
@@ -336,24 +458,30 @@ class AiChatbotService {
     }
   }
 
-  Stream<String> _callClaudeStream(String prompt, String systemPrompt, String apiKey) async* {
+  Stream<String> _callClaudeStream(
+    String prompt,
+    String systemPrompt,
+    String apiKey,
+  ) async* {
     final uri = Uri.parse(AppConstants.claudeEndpoint);
-    final response = await http.post(
-      uri,
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: jsonEncode({
-        'model': AppConstants.claudeModel,
-        'max_tokens': 800,
-        'system': systemPrompt,
-        'messages': [
-          {'role': 'user', 'content': prompt}
-        ],
-      }),
-    ).timeout(const Duration(seconds: 12));
+    final response = await http
+        .post(
+          uri,
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: jsonEncode({
+            'model': AppConstants.claudeModel,
+            'max_tokens': 800,
+            'system': systemPrompt,
+            'messages': [
+              {'role': 'user', 'content': prompt},
+            ],
+          }),
+        )
+        .timeout(const Duration(seconds: 12));
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
@@ -372,23 +500,29 @@ class AiChatbotService {
     }
   }
 
-  Stream<String> _callDeepseekStream(String prompt, String systemPrompt, String apiKey) async* {
+  Stream<String> _callDeepseekStream(
+    String prompt,
+    String systemPrompt,
+    String apiKey,
+  ) async* {
     final uri = Uri.parse(AppConstants.deepseekEndpoint);
-    final response = await http.post(
-      uri,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $apiKey',
-      },
-      body: jsonEncode({
-        'model': AppConstants.deepseekModel,
-        'messages': [
-          {'role': 'system', 'content': systemPrompt},
-          {'role': 'user', 'content': prompt}
-        ],
-        'temperature': 0.7,
-      }),
-    ).timeout(const Duration(seconds: 12));
+    final response = await http
+        .post(
+          uri,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $apiKey',
+          },
+          body: jsonEncode({
+            'model': AppConstants.deepseekModel,
+            'messages': [
+              {'role': 'system', 'content': systemPrompt},
+              {'role': 'user', 'content': prompt},
+            ],
+            'temperature': 0.7,
+          }),
+        )
+        .timeout(const Duration(seconds: 12));
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
@@ -426,7 +560,9 @@ class AiChatbotService {
             '💡 *Pro-Tip*: Enable **Spending Analysis Consent** in settings to have me map your tracked expenses directly against these three categories!';
       }
 
-      if (lower.contains('cut') || lower.contains('reduce') || lower.contains('save')) {
+      if (lower.contains('cut') ||
+          lower.contains('reduce') ||
+          lower.contains('save')) {
         return '### ⚡ 3 High-Impact Strategies to Reduce Expenses by 15%\n\n'
             '1. **Audit Recurring Subscriptions**:\n'
             '   Recurring digital subscriptions represent silent cash leaks. Cancel services unused in the last 30 days.\n\n'
@@ -451,7 +587,8 @@ class AiChatbotService {
     final Map<String, double> categorySums = {};
     for (final exp in expenses) {
       total += exp.amount;
-      categorySums[exp.category] = (categorySums[exp.category] ?? 0) + exp.amount;
+      categorySums[exp.category] =
+          (categorySums[exp.category] ?? 0) + exp.amount;
     }
 
     String topCategory = 'None';
@@ -463,13 +600,21 @@ class AiChatbotService {
       }
     });
 
-    final topPct = total > 0 ? (topAmount / total * 100).toStringAsFixed(1) : '0';
+    final topPct = total > 0
+        ? (topAmount / total * 100).toStringAsFixed(1)
+        : '0';
 
-    if (lower.contains('top') || lower.contains('category') || lower.contains('highest')) {
-      final breakdownList = categorySums.entries.map((e) {
-        final pct = total > 0 ? (e.value / total * 100).toStringAsFixed(1) : '0';
-        return '- **${e.key}**: ${CurrencyFormatter.format(e.value, currencyCode: currencyCode)} (`$pct%`)';
-      }).join('\n');
+    if (lower.contains('top') ||
+        lower.contains('category') ||
+        lower.contains('highest')) {
+      final breakdownList = categorySums.entries
+          .map((e) {
+            final pct = total > 0
+                ? (e.value / total * 100).toStringAsFixed(1)
+                : '0';
+            return '- **${e.key}**: ${CurrencyFormatter.format(e.value, currencyCode: currencyCode)} (`$pct%`)';
+          })
+          .join('\n');
 
       return '### 🔍 Spending Analysis: Category Breakdown\n\n'
           'Based on your tracked records across **${expenses.length} expenses**:\n\n'

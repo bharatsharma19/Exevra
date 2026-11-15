@@ -1,5 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 import '../core/constants/app_constants.dart';
@@ -36,7 +38,9 @@ class AppLockState {
       isLocked: isLocked ?? this.isLocked,
       canCheckBiometrics: canCheckBiometrics ?? this.canCheckBiometrics,
       isAuthenticating: isAuthenticating ?? this.isAuthenticating,
-      errorMessage: errorMessage == const Object() ? this.errorMessage : errorMessage as String?,
+      errorMessage: errorMessage == const Object()
+          ? this.errorMessage
+          : errorMessage as String?,
       lastBackgroundTime: clearLastBackgroundTime
           ? null
           : (lastBackgroundTime ?? this.lastBackgroundTime),
@@ -51,10 +55,10 @@ class AppLockNotifier extends StateNotifier<AppLockState> {
   AppLockNotifier({
     LocalAuthentication? localAuth,
     FlutterSecureStorage? secureStorage,
-  })  : _localAuth = localAuth ?? LocalAuthentication(),
-        _secureStorage = secureStorage ?? const FlutterSecureStorage(),
-        super(const AppLockState()) {
-    init();
+  }) : _localAuth = localAuth ?? LocalAuthentication(),
+       _secureStorage = secureStorage ?? const FlutterSecureStorage(),
+       super(const AppLockState()) {
+    unawaited(init());
   }
 
   Future<void> init() async {
@@ -71,7 +75,9 @@ class AppLockNotifier extends StateNotifier<AppLockState> {
     }
 
     try {
-      final storedVal = await _secureStorage.read(key: AppConstants.keyBiometricsEnabled);
+      final storedVal = await _secureStorage.read(
+        key: AppConstants.keyBiometricsEnabled,
+      );
       enabled = storedVal == 'true';
     } catch (e) {
       debugPrint('[AppLockNotifier] Secure storage read notice: $e');
@@ -86,7 +92,7 @@ class AppLockNotifier extends StateNotifier<AppLockState> {
 
     if (enabled) {
       // Prompt on cold launch
-      authenticate();
+      await authenticate();
     }
   }
 
@@ -96,13 +102,12 @@ class AppLockNotifier extends StateNotifier<AppLockState> {
         key: AppConstants.keyBiometricsEnabled,
         value: enabled ? 'true' : 'false',
       );
-      state = state.copyWith(
-        isBiometricsEnabled: enabled,
-        isLocked: false,
-      );
+      state = state.copyWith(isBiometricsEnabled: enabled, isLocked: false);
       AppHaptics.selection();
     } catch (e) {
-      debugPrint('[AppLockNotifier] Error persisting biometrics preference: $e');
+      debugPrint(
+        '[AppLockNotifier] Error persisting biometrics preference: $e',
+      );
     }
   }
 
@@ -113,12 +118,8 @@ class AppLockNotifier extends StateNotifier<AppLockState> {
 
     try {
       final authenticated = await _localAuth.authenticate(
-        localizedReason: customReason ?? 'Authenticate to access your Antigravity Expenses',
-        options: const AuthenticationOptions(
-          stickyAuth: true,
-          biometricOnly: false,
-          useErrorDialogs: true,
-        ),
+        localizedReason: customReason ?? 'Authenticate to access Exevra',
+        persistAcrossBackgrounding: true,
       );
 
       if (authenticated) {
@@ -131,21 +132,39 @@ class AppLockNotifier extends StateNotifier<AppLockState> {
         AppHaptics.success();
         return true;
       } else {
-        state = state.copyWith(
-          isAuthenticating: false,
-          errorMessage: 'Authentication was cancelled or failed.',
-        );
-        AppHaptics.error();
+        _onAuthenticationCancelled();
         return false;
       }
+    } on LocalAuthException catch (e) {
+      if (e.code == LocalAuthExceptionCode.userCanceled ||
+          e.code == LocalAuthExceptionCode.systemCanceled ||
+          e.code == LocalAuthExceptionCode.timeout) {
+        _onAuthenticationCancelled();
+        return false;
+      }
+      _onAuthenticationUnavailable(e);
+      return false;
     } catch (e) {
-      debugPrint('[AppLockNotifier] LocalAuth exception: $e');
-      state = state.copyWith(
-        isAuthenticating: false,
-        errorMessage: 'Biometric authentication unavailable. Use device PIN/Passcode.',
-      );
+      _onAuthenticationUnavailable(e);
       return false;
     }
+  }
+
+  void _onAuthenticationCancelled() {
+    state = state.copyWith(
+      isAuthenticating: false,
+      errorMessage: 'Authentication was cancelled or failed.',
+    );
+    AppHaptics.error();
+  }
+
+  void _onAuthenticationUnavailable(Object error) {
+    debugPrint('[AppLockNotifier] LocalAuth exception: $error');
+    state = state.copyWith(
+      isAuthenticating: false,
+      errorMessage:
+          'Biometric authentication unavailable. Use device PIN/Passcode.',
+    );
   }
 
   void onAppPaused() {
@@ -164,7 +183,7 @@ class AppLockNotifier extends StateNotifier<AppLockState> {
     final elapsedSeconds = DateTime.now().difference(lastPaused).inSeconds;
     if (elapsedSeconds >= AppConstants.lockTimeoutSeconds) {
       state = state.copyWith(isLocked: true);
-      authenticate();
+      unawaited(authenticate());
     }
   }
 
@@ -179,6 +198,8 @@ class AppLockNotifier extends StateNotifier<AppLockState> {
   }
 }
 
-final appLockProvider = StateNotifierProvider<AppLockNotifier, AppLockState>((ref) {
+final appLockProvider = StateNotifierProvider<AppLockNotifier, AppLockState>((
+  ref,
+) {
   return AppLockNotifier();
 });

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -37,15 +39,19 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
             icon: const Icon(Icons.refresh_rounded),
             onPressed: () {
               AppHaptics.light();
-              ref.read(insightProvider.notifier).loadInsights();
+              unawaited(ref.read(insightProvider.notifier).loadInsights());
             },
           ),
         ],
       ),
-      body: (insightState.isLoading && insightState.insight.expenseCount == 0 && insightState.insight.totalAmount == 0.0)
+      body:
+          (insightState.isLoading &&
+              insightState.insight.expenseCount == 0 &&
+              insightState.insight.totalAmount == 0.0)
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-              onRefresh: () => ref.read(insightProvider.notifier).loadInsights(),
+              onRefresh: () =>
+                  ref.read(insightProvider.notifier).loadInsights(),
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
@@ -56,14 +62,28 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                     Container(
                       padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
-                        color: isDark ? AppColors.darkCardElevated : AppColors.lightCardElevated,
+                        color: isDark
+                            ? AppColors.darkCardElevated
+                            : AppColors.lightCardElevated,
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: Row(
                         children: [
-                          _buildTimeframePill('Weekly', 'weekly', insightState.timeframe),
-                          _buildTimeframePill('Monthly', 'monthly', insightState.timeframe),
-                          _buildTimeframePill('Yearly', 'yearly', insightState.timeframe),
+                          _buildTimeframePill(
+                            'Weekly',
+                            'weekly',
+                            insightState.timeframe,
+                          ),
+                          _buildTimeframePill(
+                            'Monthly',
+                            'monthly',
+                            insightState.timeframe,
+                          ),
+                          _buildTimeframePill(
+                            'Yearly',
+                            'yearly',
+                            insightState.timeframe,
+                          ),
                         ],
                       ),
                     ),
@@ -91,9 +111,14 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                 ),
                               ),
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
                                 decoration: BoxDecoration(
-                                  color: AppColors.primaryCyan.withValues(alpha: 0.15),
+                                  color: AppColors.primaryCyan.withValues(
+                                    alpha: 0.15,
+                                  ),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Text(
@@ -109,7 +134,10 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            CurrencyFormatter.format(insight.totalAmount, currencyCode: currency),
+                            CurrencyFormatter.format(
+                              insight.totalAmount,
+                              currencyCode: currency,
+                            ),
                             style: const TextStyle(
                               fontSize: 36,
                               fontWeight: FontWeight.w800,
@@ -125,13 +153,19 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                             children: [
                               _buildSubMetric(
                                 'Daily Average',
-                                CurrencyFormatter.format(insight.averageDaily, currencyCode: currency),
+                                CurrencyFormatter.format(
+                                  insight.averageDaily,
+                                  currencyCode: currency,
+                                ),
                                 Icons.calendar_today_rounded,
                               ),
                               _buildSubMetric(
                                 'Top Expense',
                                 insight.highestExpense != null
-                                    ? CurrencyFormatter.format(insight.highestExpense!.amount, currencyCode: currency)
+                                    ? CurrencyFormatter.format(
+                                        insight.highestExpense!.amount,
+                                        currencyCode: currency,
+                                      )
                                     : 'None',
                                 Icons.arrow_upward_rounded,
                               ),
@@ -150,7 +184,9 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
                         letterSpacing: -0.3,
-                        color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                        color: isDark
+                            ? AppColors.darkTextPrimary
+                            : AppColors.lightTextPrimary,
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -160,7 +196,11 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                       child: SizedBox(
                         height: 220,
                         child: insight.trendData.isEmpty
-                            ? const Center(child: Text('No trend data available for this range'))
+                            ? const Center(
+                                child: Text(
+                                  'No trend data available for this range',
+                                ),
+                              )
                             : LineChart(
                                 LineChartData(
                                   gridData: FlGridData(
@@ -168,21 +208,32 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                     drawVerticalLine: false,
                                     horizontalInterval: 50,
                                     getDrawingHorizontalLine: (val) => FlLine(
-                                      color: isDark ? Colors.white10 : Colors.black12,
+                                      color: isDark
+                                          ? Colors.white10
+                                          : Colors.black12,
                                       strokeWidth: 1,
                                     ),
                                   ),
                                   titlesData: FlTitlesData(
-                                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                                    rightTitles: const AxisTitles(
+                                      sideTitles: SideTitles(showTitles: false),
+                                    ),
+                                    topTitles: const AxisTitles(
+                                      sideTitles: SideTitles(showTitles: false),
+                                    ),
                                     leftTitles: AxisTitles(
                                       sideTitles: SideTitles(
                                         showTitles: true,
                                         reservedSize: 44,
                                         getTitlesWidget: (val, meta) => Text(
-                                          CurrencyFormatter.formatCompact(val, currencyCode: currency),
+                                          CurrencyFormatter.formatCompact(
+                                            val,
+                                            currencyCode: currency,
+                                          ),
                                           style: TextStyle(
-                                            color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                                            color: isDark
+                                                ? AppColors.darkTextTertiary
+                                                : AppColors.lightTextTertiary,
                                             fontSize: 10,
                                           ),
                                         ),
@@ -192,15 +243,22 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                       sideTitles: SideTitles(
                                         showTitles: true,
                                         reservedSize: 28,
-                                        interval: (insight.trendData.length / 5).clamp(1.0, 10.0),
+                                        interval: (insight.trendData.length / 5)
+                                            .clamp(1.0, 10.0),
                                         getTitlesWidget: (val, meta) {
                                           final int idx = val.toInt();
-                                          if (idx >= 0 && idx < insight.trendData.length) {
-                                            final rawDate = insight.trendData[idx].pointDate;
+                                          if (idx >= 0 &&
+                                              idx < insight.trendData.length) {
+                                            final rawDate = insight
+                                                .trendData[idx]
+                                                .pointDate;
                                             return Text(
                                               '${rawDate.month}/${rawDate.day}',
                                               style: TextStyle(
-                                                color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                                                color: isDark
+                                                    ? AppColors.darkTextTertiary
+                                                    : AppColors
+                                                          .lightTextTertiary,
                                                 fontSize: 10,
                                               ),
                                             );
@@ -213,9 +271,15 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                   borderData: FlBorderData(show: false),
                                   lineBarsData: [
                                     LineChartBarData(
-                                      spots: List.generate(insight.trendData.length, (i) {
-                                        return FlSpot(i.toDouble(), insight.trendData[i].total);
-                                      }),
+                                      spots: List.generate(
+                                        insight.trendData.length,
+                                        (i) {
+                                          return FlSpot(
+                                            i.toDouble(),
+                                            insight.trendData[i].total,
+                                          );
+                                        },
+                                      ),
                                       isCurved: true,
                                       curveSmoothness: 0.35,
                                       color: AppColors.primaryCyan,
@@ -226,8 +290,12 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                         show: true,
                                         gradient: LinearGradient(
                                           colors: [
-                                            AppColors.primaryCyan.withValues(alpha: 0.3),
-                                            AppColors.primaryCyan.withValues(alpha: 0.0),
+                                            AppColors.primaryCyan.withValues(
+                                              alpha: 0.3,
+                                            ),
+                                            AppColors.primaryCyan.withValues(
+                                              alpha: 0.0,
+                                            ),
                                           ],
                                           begin: Alignment.topCenter,
                                           end: Alignment.bottomCenter,
@@ -249,7 +317,9 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
                         letterSpacing: -0.3,
-                        color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                        color: isDark
+                            ? AppColors.darkTextPrimary
+                            : AppColors.lightTextPrimary,
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -257,7 +327,9 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                       borderRadius: 20,
                       padding: const EdgeInsets.all(20),
                       child: insight.categoryBreakdown.isEmpty
-                          ? const Center(child: Text('No categorical expenses to chart'))
+                          ? const Center(
+                              child: Text('No categorical expenses to chart'),
+                            )
                           : Column(
                               children: [
                                 SizedBox(
@@ -267,44 +339,62 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                       pieTouchData: PieTouchData(
                                         touchCallback: (event, pieTouchResponse) {
                                           setState(() {
-                                            if (!event.isInterestedForInteractions ||
+                                            if (!event
+                                                    .isInterestedForInteractions ||
                                                 pieTouchResponse == null ||
-                                                pieTouchResponse.touchedSection == null) {
+                                                pieTouchResponse
+                                                        .touchedSection ==
+                                                    null) {
                                               _touchedPieIndex = -1;
                                               return;
                                             }
-                                            _touchedPieIndex = pieTouchResponse.touchedSection!.touchedSectionIndex;
+                                            _touchedPieIndex = pieTouchResponse
+                                                .touchedSection!
+                                                .touchedSectionIndex;
                                           });
                                         },
                                       ),
                                       borderData: FlBorderData(show: false),
                                       sectionsSpace: 3,
                                       centerSpaceRadius: 50,
-                                      sections: List.generate(insight.categoryBreakdown.length, (i) {
-                                        final item = insight.categoryBreakdown[i];
-                                        final isTouched = i == _touchedPieIndex;
-                                        final radius = isTouched ? 45.0 : 36.0;
-                                        final catColor = AppColors.getCategoryColor(item.category);
+                                      sections: List.generate(
+                                        insight.categoryBreakdown.length,
+                                        (i) {
+                                          final item =
+                                              insight.categoryBreakdown[i];
+                                          final isTouched =
+                                              i == _touchedPieIndex;
+                                          final radius = isTouched
+                                              ? 45.0
+                                              : 36.0;
+                                          final catColor =
+                                              AppColors.getCategoryColor(
+                                                item.category,
+                                              );
 
-                                        return PieChartSectionData(
-                                          color: catColor,
-                                          value: item.total,
-                                          title: '${item.percentage.toStringAsFixed(0)}%',
-                                          radius: radius,
-                                          titleStyle: TextStyle(
-                                            fontSize: isTouched ? 14 : 11,
-                                            fontWeight: FontWeight.w800,
-                                            color: Colors.white,
-                                          ),
-                                        );
-                                      }),
+                                          return PieChartSectionData(
+                                            color: catColor,
+                                            value: item.total,
+                                            title:
+                                                '${item.percentage.toStringAsFixed(0)}%',
+                                            radius: radius,
+                                            titleStyle: TextStyle(
+                                              fontSize: isTouched ? 14 : 11,
+                                              fontWeight: FontWeight.w800,
+                                              color: Colors.white,
+                                            ),
+                                          );
+                                        },
+                                      ),
                                     ),
                                   ),
                                 ),
                                 const SizedBox(height: 20),
                                 // Category Legends
                                 ...insight.categoryBreakdown.map((cat) {
-                                  final color = AppColors.getCategoryColor(cat.category);
+                                  final color = AppColors.getCategoryColor(
+                                    cat.category,
+                                  );
                                   return Padding(
                                     padding: const EdgeInsets.only(bottom: 8),
                                     child: Row(
@@ -321,19 +411,30 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                         Expanded(
                                           child: Text(
                                             cat.category,
-                                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 13,
+                                            ),
                                           ),
                                         ),
                                         Text(
-                                          CurrencyFormatter.format(cat.total, currencyCode: currency),
-                                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                                          CurrencyFormatter.format(
+                                            cat.total,
+                                            currencyCode: currency,
+                                          ),
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 13,
+                                          ),
                                         ),
                                         const SizedBox(width: 8),
                                         Text(
                                           '(${cat.percentage}%)',
                                           style: TextStyle(
                                             fontSize: 12,
-                                            color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                                            color: isDark
+                                                ? AppColors.darkTextTertiary
+                                                : AppColors.lightTextTertiary,
                                           ),
                                         ),
                                       ],
@@ -354,23 +455,33 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                           fontSize: 18,
                           fontWeight: FontWeight.w800,
                           letterSpacing: -0.3,
-                          color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                          color: isDark
+                              ? AppColors.darkTextPrimary
+                              : AppColors.lightTextPrimary,
                         ),
                       ),
                       const SizedBox(height: 12),
                       GlassCard(
                         borderRadius: 20,
                         padding: const EdgeInsets.all(18),
-                        border: Border.all(color: AppColors.primaryViolet.withValues(alpha: 0.4)),
+                        border: Border.all(
+                          color: AppColors.primaryViolet.withValues(alpha: 0.4),
+                        ),
                         child: Row(
                           children: [
                             Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                color: AppColors.primaryViolet.withValues(alpha: 0.18),
+                                color: AppColors.primaryViolet.withValues(
+                                  alpha: 0.18,
+                                ),
                               ),
-                              child: const Icon(Icons.star_rounded, color: AppColors.primaryViolet, size: 28),
+                              child: const Icon(
+                                Icons.star_rounded,
+                                color: AppColors.primaryViolet,
+                                size: 28,
+                              ),
                             ),
                             const SizedBox(width: 14),
                             Expanded(
@@ -379,21 +490,29 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                                 children: [
                                   Text(
                                     insight.highestExpense!.title,
-                                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                                    style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                    ),
                                   ),
                                   const SizedBox(height: 3),
                                   Text(
                                     '${insight.highestExpense!.category} • ${DateHelpers.formatDate(insight.highestExpense!.date)}',
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                                      color: isDark
+                                          ? AppColors.darkTextTertiary
+                                          : AppColors.lightTextTertiary,
                                     ),
                                   ),
                                 ],
                               ),
                             ),
                             Text(
-                              CurrencyFormatter.format(insight.highestExpense!.amount, currencyCode: currency),
+                              CurrencyFormatter.format(
+                                insight.highestExpense!.amount,
+                                currencyCode: currency,
+                              ),
                               style: const TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.w800,
@@ -453,7 +572,11 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
             ),
             Text(
               value,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white),
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+              ),
             ),
           ],
         ),

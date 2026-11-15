@@ -38,15 +38,22 @@ class FinancialInsight {
     final double avg = rawAvg is num ? rawAvg.toDouble() : 0.0;
 
     ExpenseHighlight? highest;
-    if (json['highest_expense'] != null && json['highest_expense'] is Map && (json['highest_expense'] as Map).isNotEmpty) {
-      highest = ExpenseHighlight.fromJson(Map<String, dynamic>.from(json['highest_expense'] as Map));
+    if (json['highest_expense'] != null &&
+        json['highest_expense'] is Map &&
+        (json['highest_expense'] as Map).isNotEmpty) {
+      highest = ExpenseHighlight.fromJson(
+        Map<String, dynamic>.from(json['highest_expense'] as Map),
+      );
     }
 
     final List<CategoryExpense> categories = [];
-    if (json['category_breakdown'] != null && json['category_breakdown'] is List) {
+    if (json['category_breakdown'] != null &&
+        json['category_breakdown'] is List) {
       for (final item in json['category_breakdown'] as List) {
         if (item is Map) {
-          categories.add(CategoryExpense.fromJson(Map<String, dynamic>.from(item)));
+          categories.add(
+            CategoryExpense.fromJson(Map<String, dynamic>.from(item)),
+          );
         }
       }
     }

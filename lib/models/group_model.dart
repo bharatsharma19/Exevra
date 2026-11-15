@@ -116,7 +116,8 @@ class GroupMember {
       userId: json['user_id'] as String,
       role: json['role'] as String? ?? 'member',
       displayName: json['profiles'] != null
-          ? (json['profiles'] as Map<String, dynamic>)['display_name'] as String?
+          ? (json['profiles'] as Map<String, dynamic>)['display_name']
+                as String?
           : json['display_name'] as String?,
       avatarUrl: json['profiles'] != null
           ? (json['profiles'] as Map<String, dynamic>)['avatar_url'] as String?
@@ -167,7 +168,8 @@ class GroupInvitation {
   final String email;
   final String role;
   final String token;
-  final String status; // 'pending', 'accepted', 'declined', 'expired', 'revoked'
+  final String
+  status; // 'pending', 'accepted', 'declined', 'expired', 'revoked'
   final DateTime expiresAt;
   final DateTime createdAt;
   final DateTime? acceptedAt;
@@ -297,4 +299,3 @@ class Settlement {
     };
   }
 }
-

@@ -54,3 +54,7 @@ config/*.json
 android/key.properties
 *.jks
 *.keystore
+
+# Gradle reports written outside /build/ and Supabase CLI scratch files
+/android/build/
+supabase/.temp/

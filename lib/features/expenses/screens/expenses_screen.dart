@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -32,9 +34,11 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
     AppHaptics.heavy();
     final auth = ref.read(authNotifierProvider);
     final currentUserId = auth.user?.id ?? 'demo-user-id';
-    final isGroupAdmin = ref.read(expenseProvider).currentGroup?.isAdmin(currentUserId) ?? true;
+    final isGroupAdmin =
+        ref.read(expenseProvider).currentGroup?.isAdmin(currentUserId) ?? true;
 
-    if (!expense.canDelete(currentUserId, isGroupAdmin) && currentUserId != 'demo-user-id') {
+    if (!expense.canDelete(currentUserId, isGroupAdmin) &&
+        currentUserId != 'demo-user-id') {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -48,28 +52,34 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
       return;
     }
 
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Expense?'),
-        content: Text('Are you sure you want to delete "${expense.title}"? This action cannot be reversed.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Delete Expense?'),
+          content: Text(
+            'Are you sure you want to delete "${expense.title}"? This action cannot be reversed.',
           ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              ref.read(expenseProvider.notifier).deleteExpense(expense.id);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error,
-              foregroundColor: Colors.white,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
             ),
-            child: const Text('Delete'),
-          ),
-        ],
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                unawaited(
+                  ref.read(expenseProvider.notifier).deleteExpense(expense.id),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.error,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -90,7 +100,7 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
             icon: const Icon(Icons.refresh_rounded),
             onPressed: () {
               AppHaptics.light();
-              ref.read(expenseProvider.notifier).loadAll();
+              unawaited(ref.read(expenseProvider.notifier).loadAll());
             },
           ),
         ],
@@ -102,7 +112,8 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
             child: TextField(
               controller: _searchController,
-              onChanged: (val) => ref.read(expenseProvider.notifier).setSearchQuery(val),
+              onChanged: (val) =>
+                  ref.read(expenseProvider.notifier).setSearchQuery(val),
               decoration: InputDecoration(
                 hintText: 'Search by title, category, or note...',
                 prefixIcon: const Icon(Icons.search_rounded, size: 22),
@@ -115,7 +126,10 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
                         },
                       )
                     : null,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
               ),
             ),
           ),
@@ -126,14 +140,28 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
             child: Container(
               padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
-                color: isDark ? AppColors.darkCardElevated : AppColors.lightCardElevated,
+                color: isDark
+                    ? AppColors.darkCardElevated
+                    : AppColors.lightCardElevated,
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Row(
                 children: [
-                  _buildTypeTab('All', ExpenseTypeFilter.all, expenseState.filter.type),
-                  _buildTypeTab('Personal', ExpenseTypeFilter.personal, expenseState.filter.type),
-                  _buildTypeTab('Group', ExpenseTypeFilter.group, expenseState.filter.type),
+                  _buildTypeTab(
+                    'All',
+                    ExpenseTypeFilter.all,
+                    expenseState.filter.type,
+                  ),
+                  _buildTypeTab(
+                    'Personal',
+                    ExpenseTypeFilter.personal,
+                    expenseState.filter.type,
+                  ),
+                  _buildTypeTab(
+                    'Group',
+                    ExpenseTypeFilter.group,
+                    expenseState.filter.type,
+                  ),
                 ],
               ),
             ),
@@ -146,9 +174,15 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
               children: [
-                _buildCategoryChip('All', expenseState.filter.category == 'All'),
+                _buildCategoryChip(
+                  'All',
+                  expenseState.filter.category == 'All',
+                ),
                 ...AppConstants.categories.map(
-                  (c) => _buildCategoryChip(c.name, expenseState.filter.category == c.name),
+                  (c) => _buildCategoryChip(
+                    c.name,
+                    expenseState.filter.category == c.name,
+                  ),
                 ),
               ],
             ),
@@ -159,64 +193,80 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
             child: (expenseState.isLoading && expenseState.expenses.isEmpty)
                 ? const Center(child: CircularProgressIndicator())
                 : filtered.isEmpty
-                    ? _buildEmptyState()
-                    : RefreshIndicator(
-                        onRefresh: () => ref.read(expenseProvider.notifier).loadAll(),
-                        child: ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(20, 8, 20, 90),
-                          itemCount: filtered.length,
-                          itemBuilder: (context, index) {
-                            final expense = filtered[index];
-                            final showHeader = index == 0 ||
-                                DateHelpers.getDateSectionHeader(expense.date) !=
-                                    DateHelpers.getDateSectionHeader(filtered[index - 1].date);
+                ? _buildEmptyState()
+                : RefreshIndicator(
+                    onRefresh: () =>
+                        ref.read(expenseProvider.notifier).loadAll(),
+                    child: ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(20, 8, 20, 90),
+                      itemCount: filtered.length,
+                      itemBuilder: (context, index) {
+                        final expense = filtered[index];
+                        final showHeader =
+                            index == 0 ||
+                            DateHelpers.getDateSectionHeader(expense.date) !=
+                                DateHelpers.getDateSectionHeader(
+                                  filtered[index - 1].date,
+                                );
 
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (showHeader)
-                                  Padding(
-                                    padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
-                                    child: Text(
-                                      DateHelpers.getDateSectionHeader(expense.date),
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        letterSpacing: 0.5,
-                                        color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
-                                      ),
-                                    ),
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (showHeader)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
+                                child: Text(
+                                  DateHelpers.getDateSectionHeader(
+                                    expense.date,
                                   ),
-                                _buildExpenseTile(expense, currency, isDark),
-                              ],
-                            );
-                          },
-                        ),
-                      ),
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5,
+                                    color: isDark
+                                        ? AppColors.darkTextTertiary
+                                        : AppColors.lightTextTertiary,
+                                  ),
+                                ),
+                              ),
+                            _buildExpenseTile(expense, currency, isDark),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
           AppHaptics.selection();
-          AddEditExpenseSheet.show(context);
+          unawaited(AddEditExpenseSheet.show(context));
         },
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Theme.of(context).colorScheme.onPrimary,
         icon: const Icon(Icons.add_rounded, size: 24),
-        label: const Text('Add Expense', style: TextStyle(fontWeight: FontWeight.w700)),
+        label: const Text(
+          'Add Expense',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
       ).animate().scale(delay: 200.ms, curve: Curves.easeOutBack),
     );
   }
 
-  Widget _buildTypeTab(String label, ExpenseTypeFilter filterType, ExpenseTypeFilter current) {
+  Widget _buildTypeTab(
+    String label,
+    ExpenseTypeFilter filterType,
+    ExpenseTypeFilter current,
+  ) {
     final isSelected = filterType == current;
     final primaryColor = Theme.of(context).colorScheme.primary;
     final onPrimaryColor = Theme.of(context).colorScheme.onPrimary;
 
     return Expanded(
       child: GestureDetector(
-        onTap: () => ref.read(expenseProvider.notifier).setTypeFilter(filterType),
+        onTap: () =>
+            ref.read(expenseProvider.notifier).setTypeFilter(filterType),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
@@ -243,7 +293,8 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
       child: FilterChip(
         label: Text(categoryName),
         selected: isSelected,
-        onSelected: (_) => ref.read(expenseProvider.notifier).setCategoryFilter(categoryName),
+        onSelected: (_) =>
+            ref.read(expenseProvider.notifier).setCategoryFilter(categoryName),
         selectedColor: AppColors.primaryCyan.withValues(alpha: 0.2),
         checkmarkColor: AppColors.primaryCyan,
         labelStyle: TextStyle(
@@ -267,7 +318,8 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
     final catIcon = AppConstants.getCategoryIcon(expense.category);
     final auth = ref.watch(authNotifierProvider);
     final currentUserId = auth.user?.id ?? 'demo-user-id';
-    final isGroupAdmin = ref.watch(expenseProvider).currentGroup?.isAdmin(currentUserId) ?? true;
+    final isGroupAdmin =
+        ref.watch(expenseProvider).currentGroup?.isAdmin(currentUserId) ?? true;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -276,8 +328,9 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
         padding: const EdgeInsets.all(14),
         onTap: () {
           AppHaptics.selection();
-          if (expense.canEdit(currentUserId) || currentUserId == 'demo-user-id') {
-            AddEditExpenseSheet.show(context, expense: expense);
+          if (expense.canEdit(currentUserId) ||
+              currentUserId == 'demo-user-id') {
+            unawaited(AddEditExpenseSheet.show(context, expense: expense));
           } else {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
@@ -314,7 +367,9 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
-                      color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                      color: isDark
+                          ? AppColors.darkTextPrimary
+                          : AppColors.lightTextPrimary,
                     ),
                   ),
                   const SizedBox(height: 3),
@@ -324,15 +379,22 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
                         '${DateHelpers.formatShortDate(expense.date)} • ${DateHelpers.formatTime(expense.date)}',
                         style: TextStyle(
                           fontSize: 12,
-                          color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                          color: isDark
+                              ? AppColors.darkTextTertiary
+                              : AppColors.lightTextTertiary,
                         ),
                       ),
                       if (!expense.isPersonal) ...[
                         const SizedBox(width: 6),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 1.5,
+                          ),
                           decoration: BoxDecoration(
-                            color: AppColors.primaryViolet.withValues(alpha: 0.15),
+                            color: AppColors.primaryViolet.withValues(
+                              alpha: 0.15,
+                            ),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
@@ -356,7 +418,10 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  CurrencyFormatter.format(expense.amount, currencyCode: currency),
+                  CurrencyFormatter.format(
+                    expense.amount,
+                    currencyCode: currency,
+                  ),
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
@@ -365,16 +430,23 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
                 ),
                 PopupMenuButton<String>(
                   padding: EdgeInsets.zero,
-                  icon: const Icon(Icons.more_horiz_rounded, size: 20, color: Colors.grey),
+                  icon: const Icon(
+                    Icons.more_horiz_rounded,
+                    size: 20,
+                    color: Colors.grey,
+                  ),
                   onSelected: (val) {
                     if (val == 'edit') {
-                      AddEditExpenseSheet.show(context, expense: expense);
+                      unawaited(
+                        AddEditExpenseSheet.show(context, expense: expense),
+                      );
                     } else if (val == 'delete') {
                       _confirmDelete(expense);
                     }
                   },
                   itemBuilder: (ctx) => [
-                    if (expense.canEdit(currentUserId) || currentUserId == 'demo-user-id')
+                    if (expense.canEdit(currentUserId) ||
+                        currentUserId == 'demo-user-id')
                       const PopupMenuItem(
                         value: 'edit',
                         child: Row(
@@ -385,14 +457,22 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
                           ],
                         ),
                       ),
-                    if (expense.canDelete(currentUserId, isGroupAdmin) || currentUserId == 'demo-user-id')
+                    if (expense.canDelete(currentUserId, isGroupAdmin) ||
+                        currentUserId == 'demo-user-id')
                       const PopupMenuItem(
                         value: 'delete',
                         child: Row(
                           children: [
-                            Icon(Icons.delete_outline, size: 18, color: AppColors.error),
+                            Icon(
+                              Icons.delete_outline,
+                              size: 18,
+                              color: AppColors.error,
+                            ),
                             SizedBox(width: 8),
-                            Text('Delete', style: TextStyle(color: AppColors.error)),
+                            Text(
+                              'Delete',
+                              style: TextStyle(color: AppColors.error),
+                            ),
                           ],
                         ),
                       ),
@@ -419,7 +499,11 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
                 shape: BoxShape.circle,
                 color: AppColors.primaryCyan.withValues(alpha: 0.1),
               ),
-              child: const Icon(Icons.savings_outlined, size: 48, color: AppColors.primaryCyan),
+              child: const Icon(
+                Icons.savings_outlined,
+                size: 48,
+                color: AppColors.primaryCyan,
+              ),
             ),
             const SizedBox(height: 18),
             const Text(

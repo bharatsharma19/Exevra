@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -29,100 +31,119 @@ class DashboardScreen extends ConsumerWidget {
     final userGroups = expenseState.userGroups;
     final currentGroupId = expenseState.currentGroup?.id;
 
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        final isDark = Theme.of(ctx).brightness == Brightness.dark;
-        return Container(
-          decoration: BoxDecoration(
-            color: isDark ? AppColors.darkCard : AppColors.lightCard,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: isDark ? Colors.white24 : Colors.black12,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
+    unawaited(
+      showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        builder: (ctx) {
+          final isDark = Theme.of(ctx).brightness == Brightness.dark;
+          return Container(
+            decoration: BoxDecoration(
+              color: isDark ? AppColors.darkCard : AppColors.lightCard,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
               ),
-              const SizedBox(height: 16),
-              const Text(
-                'Switch Active Group',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 12),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: CircleAvatar(
-                  backgroundColor: currentGroupId == null
-                      ? AppColors.primaryCyan
-                      : Colors.grey.withValues(alpha: 0.2),
-                  child: Icon(
-                    Icons.person_rounded,
-                    color: currentGroupId == null ? Colors.black : Colors.grey,
-                  ),
-                ),
-                title: const Text(
-                  'Personal Outflow Only',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
-                trailing: currentGroupId == null
-                    ? const Icon(Icons.check_rounded, color: AppColors.primaryCyan)
-                    : null,
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  ref.read(expenseProvider.notifier).switchGroup(null);
-                },
-              ),
-              if (userGroups.isNotEmpty) const Divider(),
-              ...userGroups.map((g) {
-                final isCurrent = g.id == currentGroupId;
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: CircleAvatar(
-                    backgroundColor: isCurrent
-                        ? AppColors.primaryViolet
-                        : Colors.grey.withValues(alpha: 0.2),
-                    child: Icon(
-                      Icons.groups_rounded,
-                      color: isCurrent ? Colors.white : Colors.grey,
+            ),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.white24 : Colors.black12,
+                      borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  title: Text(g.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-                  trailing: isCurrent
-                      ? const Icon(Icons.check_rounded, color: AppColors.primaryViolet)
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Switch Active Group',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 12),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: CircleAvatar(
+                    backgroundColor: currentGroupId == null
+                        ? AppColors.primaryCyan
+                        : Colors.grey.withValues(alpha: 0.2),
+                    child: Icon(
+                      Icons.person_rounded,
+                      color: currentGroupId == null
+                          ? Colors.black
+                          : Colors.grey,
+                    ),
+                  ),
+                  title: const Text(
+                    'Personal Outflow Only',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  trailing: currentGroupId == null
+                      ? const Icon(
+                          Icons.check_rounded,
+                          color: AppColors.primaryCyan,
+                        )
                       : null,
                   onTap: () {
                     Navigator.of(ctx).pop();
-                    ref.read(expenseProvider.notifier).switchGroup(g.id);
+                    unawaited(
+                      ref.read(expenseProvider.notifier).switchGroup(null),
+                    );
                   },
-                );
-              }),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.of(ctx).pop();
-                    context.push('/profile');
-                  },
-                  icon: const Icon(Icons.settings_outlined, size: 16),
-                  label: const Text('Manage Groups in Profile'),
                 ),
-              ),
-            ],
-          ),
-        );
-      },
+                if (userGroups.isNotEmpty) const Divider(),
+                ...userGroups.map((g) {
+                  final isCurrent = g.id == currentGroupId;
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: CircleAvatar(
+                      backgroundColor: isCurrent
+                          ? AppColors.primaryViolet
+                          : Colors.grey.withValues(alpha: 0.2),
+                      child: Icon(
+                        Icons.groups_rounded,
+                        color: isCurrent ? Colors.white : Colors.grey,
+                      ),
+                    ),
+                    title: Text(
+                      g.name,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    trailing: isCurrent
+                        ? const Icon(
+                            Icons.check_rounded,
+                            color: AppColors.primaryViolet,
+                          )
+                        : null,
+                    onTap: () {
+                      Navigator.of(ctx).pop();
+                      unawaited(
+                        ref.read(expenseProvider.notifier).switchGroup(g.id),
+                      );
+                    },
+                  );
+                }),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      unawaited(context.push('/profile'));
+                    },
+                    icon: const Icon(Icons.settings_outlined, size: 16),
+                    label: const Text('Manage Groups in Profile'),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -134,9 +155,12 @@ class DashboardScreen extends ConsumerWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final profile = authState.profile;
-    final resolvedDisplayName = (profile?.displayName != null && profile!.displayName.trim().isNotEmpty)
+    final resolvedDisplayName =
+        (profile?.displayName != null && profile!.displayName.trim().isNotEmpty)
         ? profile.displayName
-        : (authState.user?.userMetadata?['full_name'] as String? ?? authState.user?.email?.split('@').first ?? 'User');
+        : (authState.user?.userMetadata?['full_name'] as String? ??
+              authState.user?.email?.split('@').first ??
+              'User');
     final currency = profile?.currency ?? AppConstants.defaultCurrency;
     final group = expenseState.currentGroup;
 
@@ -199,7 +223,9 @@ class DashboardScreen extends ConsumerWidget {
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
-                                color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                                color: isDark
+                                    ? AppColors.darkTextTertiary
+                                    : AppColors.lightTextTertiary,
                               ),
                             ),
                             const SizedBox(height: 2),
@@ -209,7 +235,9 @@ class DashboardScreen extends ConsumerWidget {
                                 fontSize: 22,
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: -0.5,
-                                color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                                color: isDark
+                                    ? AppColors.darkTextPrimary
+                                    : AppColors.lightTextPrimary,
                               ),
                             ),
                           ],
@@ -218,12 +246,19 @@ class DashboardScreen extends ConsumerWidget {
                         GestureDetector(
                           onTap: () => _showGroupSwitcher(context, ref),
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
                             decoration: BoxDecoration(
-                              color: isDark ? AppColors.darkCardElevated : AppColors.lightCardElevated,
+                              color: isDark
+                                  ? AppColors.darkCardElevated
+                                  : AppColors.lightCardElevated,
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
-                                color: group != null ? AppColors.primaryViolet : AppColors.primaryCyan,
+                                color: group != null
+                                    ? AppColors.primaryViolet
+                                    : AppColors.primaryCyan,
                                 width: 1.2,
                               ),
                             ),
@@ -231,9 +266,13 @@ class DashboardScreen extends ConsumerWidget {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
-                                  group != null ? Icons.groups_rounded : Icons.person_rounded,
+                                  group != null
+                                      ? Icons.groups_rounded
+                                      : Icons.person_rounded,
                                   size: 16,
-                                  color: group != null ? AppColors.primaryViolet : AppColors.primaryCyan,
+                                  color: group != null
+                                      ? AppColors.primaryViolet
+                                      : AppColors.primaryCyan,
                                 ),
                                 const SizedBox(width: 6),
                                 Text(
@@ -241,7 +280,9 @@ class DashboardScreen extends ConsumerWidget {
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w700,
-                                    color: group != null ? AppColors.primaryViolet : AppColors.primaryCyan,
+                                    color: group != null
+                                        ? AppColors.primaryViolet
+                                        : AppColors.primaryCyan,
                                   ),
                                 ),
                               ],
@@ -255,101 +296,162 @@ class DashboardScreen extends ConsumerWidget {
 
                     // Main Total Expense Neon Card
                     GlassCard(
-                      borderRadius: 24,
-                      gradient: AppColors.darkCardGradient,
-                      padding: const EdgeInsets.all(22),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          borderRadius: 24,
+                          gradient: AppColors.darkCardGradient,
+                          padding: const EdgeInsets.all(22),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'TOTAL OUTFLOW',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 1.8,
-                                  color: AppColors.primaryCyan,
-                                ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: AppColors.primaryCyan.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text(
-                                  currency,
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w800,
-                                    color: AppColors.primaryCyan,
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text(
+                                    'TOTAL OUTFLOW',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 1.8,
+                                      color: AppColors.primaryCyan,
+                                    ),
                                   ),
-                                ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 3,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.primaryCyan.withValues(
+                                        alpha: 0.15,
+                                      ),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      currency,
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w800,
+                                        color: AppColors.primaryCyan,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            CurrencyFormatter.format(totalSpent, currencyCode: currency),
-                            style: const TextStyle(
-                              fontSize: 38,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -1,
-                              color: Colors.white,
-                            ),
-                          ).animate().fadeIn(delay: 150.ms).slideX(begin: -0.1, end: 0),
-                          const SizedBox(height: 16),
+                              const SizedBox(height: 10),
+                              Text(
+                                    CurrencyFormatter.format(
+                                      totalSpent,
+                                      currencyCode: currency,
+                                    ),
+                                    style: const TextStyle(
+                                      fontSize: 38,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -1,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                  .animate()
+                                  .fadeIn(delay: 150.ms)
+                                  .slideX(begin: -0.1, end: 0),
+                              const SizedBox(height: 16),
 
-                          // Personal vs Group Split Bar
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
+                              // Personal vs Group Split Bar
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        Container(width: 8, height: 8, decoration: const BoxDecoration(shape: BoxShape.circle, color: AppColors.primaryCyan)),
-                                        const SizedBox(width: 6),
-                                        const Text('Personal', style: TextStyle(fontSize: 12, color: Colors.white70)),
+                                        Row(
+                                          children: [
+                                            Container(
+                                              width: 8,
+                                              height: 8,
+                                              decoration: const BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                color: AppColors.primaryCyan,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            const Text(
+                                              'Personal',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.white70,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          CurrencyFormatter.format(
+                                            personalSpent,
+                                            currencyCode: currency,
+                                          ),
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.white,
+                                          ),
+                                        ),
                                       ],
                                     ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      CurrencyFormatter.format(personalSpent, currencyCode: currency),
-                                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Container(width: 1, height: 32, color: Colors.white12),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
+                                  ),
+                                  Container(
+                                    width: 1,
+                                    height: 32,
+                                    color: Colors.white12,
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        Container(width: 8, height: 8, decoration: const BoxDecoration(shape: BoxShape.circle, color: AppColors.primaryViolet)),
-                                        const SizedBox(width: 6),
-                                        const Text('Group Share', style: TextStyle(fontSize: 12, color: Colors.white70)),
+                                        Row(
+                                          children: [
+                                            Container(
+                                              width: 8,
+                                              height: 8,
+                                              decoration: const BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                color: AppColors.primaryViolet,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            const Text(
+                                              'Group Share',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.white70,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          CurrencyFormatter.format(
+                                            groupSpent,
+                                            currencyCode: currency,
+                                          ),
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.white,
+                                          ),
+                                        ),
                                       ],
                                     ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      CurrencyFormatter.format(groupSpent, currencyCode: currency),
-                                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white),
-                                    ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
-                        ],
-                      ),
-                    ).animate().fadeIn(delay: 200.ms).slideY(begin: 0.1, end: 0),
+                        )
+                        .animate()
+                        .fadeIn(delay: 200.ms)
+                        .slideY(begin: 0.1, end: 0),
 
                     const SizedBox(height: 18),
 
@@ -360,17 +462,30 @@ class DashboardScreen extends ConsumerWidget {
                           child: GestureDetector(
                             onTap: () {
                               AppHaptics.selection();
-                              AddEditExpenseSheet.show(context);
+                              unawaited(AddEditExpenseSheet.show(context));
                             },
-                            child: GlassCard(
+                            child: const GlassCard(
                               borderRadius: 18,
-                              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                              padding: EdgeInsets.symmetric(
+                                vertical: 14,
+                                horizontal: 16,
+                              ),
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
-                                children: const [
-                                  Icon(Icons.add_circle_outline_rounded, color: AppColors.primaryCyan, size: 20),
+                                children: [
+                                  Icon(
+                                    Icons.add_circle_outline_rounded,
+                                    color: AppColors.primaryCyan,
+                                    size: 20,
+                                  ),
                                   SizedBox(width: 8),
-                                  Text('Quick Add', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                                  Text(
+                                    'Quick Add',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -381,17 +496,30 @@ class DashboardScreen extends ConsumerWidget {
                           child: GestureDetector(
                             onTap: () {
                               AppHaptics.selection();
-                              context.push('/chat');
+                              unawaited(context.push('/chat'));
                             },
-                            child: GlassCard(
+                            child: const GlassCard(
                               borderRadius: 18,
-                              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                              padding: EdgeInsets.symmetric(
+                                vertical: 14,
+                                horizontal: 16,
+                              ),
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
-                                children: const [
-                                  Icon(Icons.auto_awesome_rounded, color: AppColors.primaryViolet, size: 20),
+                                children: [
+                                  Icon(
+                                    Icons.auto_awesome_rounded,
+                                    color: AppColors.primaryViolet,
+                                    size: 20,
+                                  ),
                                   SizedBox(width: 8),
-                                  Text('AI Advisor', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                                  Text(
+                                    'AI Advisor',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -400,7 +528,8 @@ class DashboardScreen extends ConsumerWidget {
                       ],
                     ).animate().fadeIn(delay: 250.ms),
 
-                    if (group != null && expenseState.settlements.isNotEmpty) ...[
+                    if (group != null &&
+                        expenseState.settlements.isNotEmpty) ...[
                       const SizedBox(height: 18),
                       GlassCard(
                         borderRadius: 20,
@@ -446,21 +575,24 @@ class DashboardScreen extends ConsumerWidget {
                               final iOwe = d.fromUserId == currentUserId;
                               final owedToMe = d.toUserId == currentUserId;
                               return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 4,
+                                ),
                                 child: Row(
                                   children: [
                                     Icon(
                                       iOwe
                                           ? Icons.arrow_circle_up_rounded
                                           : (owedToMe
-                                              ? Icons.arrow_circle_down_rounded
-                                              : Icons.swap_horiz_rounded),
+                                                ? Icons
+                                                      .arrow_circle_down_rounded
+                                                : Icons.swap_horiz_rounded),
                                       size: 16,
                                       color: iOwe
                                           ? AppColors.primaryRose
                                           : (owedToMe
-                                              ? AppColors.primaryEmerald
-                                              : AppColors.primaryCyan),
+                                                ? AppColors.primaryEmerald
+                                                : AppColors.primaryCyan),
                                     ),
                                     const SizedBox(width: 6),
                                     Expanded(
@@ -468,8 +600,8 @@ class DashboardScreen extends ConsumerWidget {
                                         iOwe
                                             ? 'You owe ${d.toUserName}'
                                             : (owedToMe
-                                                ? '${d.fromUserName} owes you'
-                                                : '${d.fromUserName} owes ${d.toUserName}'),
+                                                  ? '${d.fromUserName} owes you'
+                                                  : '${d.fromUserName} owes ${d.toUserName}'),
                                         style: const TextStyle(
                                           fontSize: 12,
                                           fontWeight: FontWeight.w600,
@@ -488,8 +620,8 @@ class DashboardScreen extends ConsumerWidget {
                                         color: iOwe
                                             ? AppColors.primaryRose
                                             : (owedToMe
-                                                ? AppColors.primaryEmerald
-                                                : null),
+                                                  ? AppColors.primaryEmerald
+                                                  : null),
                                       ),
                                     ),
                                   ],
@@ -513,7 +645,9 @@ class DashboardScreen extends ConsumerWidget {
                             fontSize: 16,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -0.3,
-                            color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                            color: isDark
+                                ? AppColors.darkTextPrimary
+                                : AppColors.lightTextPrimary,
                           ),
                         ),
                         GestureDetector(
@@ -540,19 +674,31 @@ class DashboardScreen extends ConsumerWidget {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Icon(Icons.speed_rounded, color: AppColors.primaryEmerald, size: 22),
+                                const Icon(
+                                  Icons.speed_rounded,
+                                  color: AppColors.primaryEmerald,
+                                  size: 22,
+                                ),
                                 const SizedBox(height: 10),
                                 Text(
                                   'Daily Average',
                                   style: TextStyle(
                                     fontSize: 11,
-                                    color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                                    color: isDark
+                                        ? AppColors.darkTextTertiary
+                                        : AppColors.lightTextTertiary,
                                   ),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  CurrencyFormatter.format(insightState.insight.averageDaily, currencyCode: currency),
-                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                                  CurrencyFormatter.format(
+                                    insightState.insight.averageDaily,
+                                    currencyCode: currency,
+                                  ),
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                  ),
                                 ),
                               ],
                             ),
@@ -566,23 +712,39 @@ class DashboardScreen extends ConsumerWidget {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Icon(Icons.pie_chart_outline_rounded, color: AppColors.primaryAmber, size: 22),
+                                const Icon(
+                                  Icons.pie_chart_outline_rounded,
+                                  color: AppColors.primaryAmber,
+                                  size: 22,
+                                ),
                                 const SizedBox(height: 10),
                                 Text(
                                   'Top Category',
                                   style: TextStyle(
                                     fontSize: 11,
-                                    color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                                    color: isDark
+                                        ? AppColors.darkTextTertiary
+                                        : AppColors.lightTextTertiary,
                                   ),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  insightState.insight.categoryBreakdown.isNotEmpty
-                                      ? insightState.insight.categoryBreakdown.first.category
+                                  insightState
+                                          .insight
+                                          .categoryBreakdown
+                                          .isNotEmpty
+                                      ? insightState
+                                            .insight
+                                            .categoryBreakdown
+                                            .first
+                                            .category
                                       : 'None',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                  ),
                                 ),
                               ],
                             ),
@@ -603,7 +765,9 @@ class DashboardScreen extends ConsumerWidget {
                             fontSize: 16,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -0.3,
-                            color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                            color: isDark
+                                ? AppColors.darkTextPrimary
+                                : AppColors.lightTextPrimary,
                           ),
                         ),
                         GestureDetector(
@@ -621,32 +785,42 @@ class DashboardScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: 12),
 
-                    if (expenseState.isLoading && expenseState.expenses.isEmpty) ...[
-                      GlassCard(
+                    if (expenseState.isLoading &&
+                        expenseState.expenses.isEmpty) ...[
+                      const GlassCard(
                         borderRadius: 20,
-                        padding: const EdgeInsets.all(24),
-                        child: Center(
-                          child: CircularProgressIndicator(),
-                        ),
+                        padding: EdgeInsets.all(24),
+                        child: Center(child: CircularProgressIndicator()),
                       ),
                     ] else if (recentExpenses.isEmpty) ...[
-                      GlassCard(
+                      const GlassCard(
                         borderRadius: 20,
-                        padding: const EdgeInsets.all(24),
+                        padding: EdgeInsets.all(24),
                         child: Center(
                           child: Column(
-                            children: const [
-                              Icon(Icons.receipt_long_outlined, size: 36, color: Colors.grey),
+                            children: [
+                              Icon(
+                                Icons.receipt_long_outlined,
+                                size: 36,
+                                color: Colors.grey,
+                              ),
                               SizedBox(height: 8),
-                              Text('No expenses logged yet.', style: TextStyle(color: Colors.grey)),
+                              Text(
+                                'No expenses logged yet.',
+                                style: TextStyle(color: Colors.grey),
+                              ),
                             ],
                           ),
                         ),
                       ),
                     ] else ...[
                       ...recentExpenses.map((expense) {
-                        final catColor = AppColors.getCategoryColor(expense.category);
-                        final catIcon = AppConstants.getCategoryIcon(expense.category);
+                        final catColor = AppColors.getCategoryColor(
+                          expense.category,
+                        );
+                        final catIcon = AppConstants.getCategoryIcon(
+                          expense.category,
+                        );
 
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 10),
@@ -655,7 +829,12 @@ class DashboardScreen extends ConsumerWidget {
                             padding: const EdgeInsets.all(14),
                             onTap: () {
                               AppHaptics.selection();
-                              AddEditExpenseSheet.show(context, expense: expense);
+                              unawaited(
+                                AddEditExpenseSheet.show(
+                                  context,
+                                  expense: expense,
+                                ),
+                              );
                             },
                             child: Row(
                               children: [
@@ -666,33 +845,49 @@ class DashboardScreen extends ConsumerWidget {
                                     shape: BoxShape.circle,
                                     color: catColor.withValues(alpha: 0.16),
                                   ),
-                                  child: Icon(catIcon, color: catColor, size: 20),
+                                  child: Icon(
+                                    catIcon,
+                                    color: catColor,
+                                    size: 20,
+                                  ),
                                 ),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         expense.title,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w700,
+                                        ),
                                       ),
                                       const SizedBox(height: 2),
                                       Text(
                                         '${expense.category} • ${DateHelpers.formatTime(expense.date)} • ${DateHelpers.formatRelative(expense.date)}',
                                         style: TextStyle(
                                           fontSize: 11,
-                                          color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                                          color: isDark
+                                              ? AppColors.darkTextTertiary
+                                              : AppColors.lightTextTertiary,
                                         ),
                                       ),
                                     ],
                                   ),
                                 ),
                                 Text(
-                                  CurrencyFormatter.format(expense.amount, currencyCode: currency),
-                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                                  CurrencyFormatter.format(
+                                    expense.amount,
+                                    currencyCode: currency,
+                                  ),
+                                  style: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                  ),
                                 ),
                               ],
                             ),
@@ -710,7 +905,7 @@ class DashboardScreen extends ConsumerWidget {
       floatingActionButton: FloatingActionButton(
         onPressed: () {
           AppHaptics.selection();
-          AddEditExpenseSheet.show(context);
+          unawaited(AddEditExpenseSheet.show(context));
         },
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Theme.of(context).colorScheme.onPrimary,

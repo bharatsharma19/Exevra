@@ -11,10 +11,12 @@ class DateHelpers {
   static final DateFormat _monthYearFormat = DateFormat('MMMM yyyy');
 
   static String formatDate(DateTime date) => _dayFormat.format(date.toLocal());
-  static String formatShortDate(DateTime date) => _shortDayFormat.format(date.toLocal());
+  static String formatShortDate(DateTime date) =>
+      _shortDayFormat.format(date.toLocal());
   static String formatTime(DateTime date) => _timeFormat.format(date.toLocal());
   static String formatIso(DateTime date) => _isoFormat.format(date);
-  static String formatMonthYear(DateTime date) => _monthYearFormat.format(date.toLocal());
+  static String formatMonthYear(DateTime date) =>
+      _monthYearFormat.format(date.toLocal());
 
   static String formatRelative(DateTime date) {
     final now = DateTime.now();
@@ -28,7 +30,8 @@ class DateHelpers {
     } else if (difference.inHours < 24 && date.day == now.day) {
       final hours = difference.inHours;
       return '$hours ${hours == 1 ? 'hour' : 'hours'} ago';
-    } else if (difference.inDays < 2 && date.day == now.subtract(const Duration(days: 1)).day) {
+    } else if (difference.inDays < 2 &&
+        date.day == now.subtract(const Duration(days: 1)).day) {
       return 'Yesterday';
     } else if (difference.inDays < 7) {
       return DateFormat('EEEE').format(date);
@@ -46,7 +49,8 @@ class DateHelpers {
       return 'Today';
     } else if (itemDate == today.subtract(const Duration(days: 1))) {
       return 'Yesterday';
-    } else if (today.difference(itemDate).inDays < 7 && today.weekday >= itemDate.weekday) {
+    } else if (today.difference(itemDate).inDays < 7 &&
+        today.weekday >= itemDate.weekday) {
       return 'This Week';
     } else if (itemDate.year == now.year && itemDate.month == now.month) {
       return 'This Month';

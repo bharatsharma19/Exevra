@@ -33,7 +33,8 @@ class AuthService {
         email: email.trim(),
         password: password,
         data: {
-          if (displayName != null && displayName.isNotEmpty) 'full_name': displayName.trim(),
+          if (displayName != null && displayName.isNotEmpty)
+            'full_name': displayName.trim(),
         },
       );
       return response;
@@ -65,9 +66,7 @@ class AuthService {
 
   Future<void> sendPhoneOtp(String phone) async {
     try {
-      await _client.auth.signInWithOtp(
-        phone: phone.trim(),
-      );
+      await _client.auth.signInWithOtp(phone: phone.trim());
     } catch (e) {
       debugPrint('[AuthService] sendPhoneOtp error: $e');
       rethrow;
@@ -95,30 +94,62 @@ class AuthService {
   // SOCIAL SIGN-INS: GOOGLE & APPLE
   // ---------------------------------------------------------------------------
 
-  Future<AuthResponse> signInWithGoogle() async {
+  static const String _googleWebClientId = String.fromEnvironment(
+    'GOOGLE_WEB_CLIENT_ID',
+  );
+  static const String _googleIosClientId = String.fromEnvironment(
+    'GOOGLE_IOS_CLIENT_ID',
+  );
+  static const List<String> _googleScopes = ['email', 'profile'];
+
+  Future<void>? _googleInit;
+
+  /// Whether Google sign-in has the client configuration it needs.
+  bool get isGoogleSignInConfigured => _googleWebClientId.isNotEmpty;
+
+  Future<void> _ensureGoogleInitialized() {
+    return _googleInit ??= GoogleSignIn.instance.initialize(
+      serverClientId: _googleWebClientId,
+      clientId: _googleIosClientId.isEmpty ? null : _googleIosClientId,
+    );
+  }
+
+  /// Signs in with Google and exchanges the ID token with Supabase.
+  ///
+  /// Returns `null` when the user cancels the Google account picker.
+  /// Throws [GoogleSignInUnavailableException] when the build carries no
+  /// Google client configuration.
+  Future<AuthResponse?> signInWithGoogle() async {
+    if (!isGoogleSignInConfigured) {
+      throw const GoogleSignInUnavailableException();
+    }
     try {
-      final GoogleSignIn googleSignIn = GoogleSignIn(
-        scopes: ['email', 'profile'],
+      await _ensureGoogleInitialized();
+      final googleSignIn = GoogleSignIn.instance;
+
+      final GoogleSignInAccount account = await googleSignIn.authenticate(
+        scopeHint: _googleScopes,
       );
 
-      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
-      if (googleUser == null) {
-        throw Exception('Google sign-in was cancelled by user');
-      }
-
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-      final accessToken = googleAuth.accessToken;
-      final idToken = googleAuth.idToken;
-
+      final idToken = account.authentication.idToken;
       if (idToken == null) {
         throw Exception('Failed to obtain Google ID Token');
       }
 
+      final authorization = await account.authorizationClient
+          .authorizationForScopes(_googleScopes);
+
       return await _client.auth.signInWithIdToken(
         provider: OAuthProvider.google,
         idToken: idToken,
-        accessToken: accessToken,
+        accessToken: authorization?.accessToken,
       );
+    } on GoogleSignInException catch (e) {
+      if (e.code == GoogleSignInExceptionCode.canceled) {
+        return null;
+      }
+      debugPrint('[AuthService] Google Sign-In: ${e.code}');
+      rethrow;
     } catch (e) {
       debugPrint('[AuthService] Google Sign-In: $e');
       rethrow;
@@ -192,10 +223,7 @@ class AuthService {
 
   Future<void> resendVerificationEmail(String email) async {
     try {
-      await _client.auth.resend(
-        type: OtpType.signup,
-        email: email.trim(),
-      );
+      await _client.auth.resend(type: OtpType.signup, email: email.trim());
     } catch (e) {
       debugPrint('[AuthService] resendVerificationEmail error: $e');
       rethrow;
@@ -213,4 +241,12 @@ class AuthService {
       debugPrint('[AuthService] signOut error: $e');
     }
   }
+}
+
+/// Thrown when Google sign-in is not configured for this build.
+class GoogleSignInUnavailableException implements Exception {
+  const GoogleSignInUnavailableException();
+
+  @override
+  String toString() => 'Google sign-in is not available right now.';
 }

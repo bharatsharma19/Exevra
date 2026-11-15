@@ -117,7 +117,9 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // 2. Authenticated but unverified: redirect to /verify-email (except invite route to allow viewing)
       if (isAuth && !isVerified) {
-        if (loc != '/verify-email' && !isInviteRoute && loc != '/reset-password') {
+        if (loc != '/verify-email' &&
+            !isInviteRoute &&
+            loc != '/reset-password') {
           if (safeReturnTo != null) {
             return '/verify-email?returnTo=${Uri.encodeComponent(safeReturnTo)}';
           }
@@ -128,7 +130,9 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // 3. Authenticated & verified: exit auth entry screens
       // NOTE: /reset-password is purposefully excluded so users recovering passwords can submit new password!
-      if (isAuth && isVerified && (isAuthScreenToExit || loc == '/verify-email')) {
+      if (isAuth &&
+          isVerified &&
+          (isAuthScreenToExit || loc == '/verify-email')) {
         if (safeReturnTo != null) {
           return safeReturnTo;
         }

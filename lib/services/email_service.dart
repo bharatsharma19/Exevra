@@ -12,20 +12,27 @@ class EmailService {
 
   // In-memory log of sent emails for auditing and verification
   final List<Map<String, dynamic>> _sentEmailsLog = [];
-  List<Map<String, dynamic>> get sentEmailsLog => List.unmodifiable(_sentEmailsLog);
+  List<Map<String, dynamic>> get sentEmailsLog =>
+      List.unmodifiable(_sentEmailsLog);
 
   String get _smtpHost =>
-      (dotenv.isInitialized ? dotenv.env['SMTP_HOST'] : null) ?? 'smtp.gmail.com';
+      (dotenv.isInitialized ? dotenv.env['SMTP_HOST'] : null) ??
+      'smtp.gmail.com';
   int get _smtpPort =>
-      int.tryParse((dotenv.isInitialized ? dotenv.env['SMTP_PORT'] : null) ?? '587') ?? 587;
+      int.tryParse(
+        (dotenv.isInitialized ? dotenv.env['SMTP_PORT'] : null) ?? '587',
+      ) ??
+      587;
   String get _smtpUser =>
       (dotenv.isInitialized ? dotenv.env['SMTP_USER'] : null) ?? '';
   String get _smtpPass =>
       (dotenv.isInitialized ? dotenv.env['SMTP_PASS'] : null) ?? '';
   String get _senderName =>
-      (dotenv.isInitialized ? dotenv.env['SMTP_SENDER_NAME'] : null) ?? 'Exevra';
+      (dotenv.isInitialized ? dotenv.env['SMTP_SENDER_NAME'] : null) ??
+      'Exevra';
   String get _appBaseUrl =>
-      (dotenv.isInitialized ? dotenv.env['APP_BASE_URL'] : null) ?? 'https://exevra.com';
+      (dotenv.isInitialized ? dotenv.env['APP_BASE_URL'] : null) ??
+      'https://exevra.com';
 
   bool get isSmtpConfigured {
     final pass = _smtpPass.trim();
@@ -46,7 +53,8 @@ class EmailService {
     final joinUrl = '$_appBaseUrl/invite?token=$token';
     final subject = "$inviterName invited you to join '$groupName' on Exevra";
 
-    final htmlContent = '''
+    final htmlContent =
+        '''
 <!DOCTYPE html>
 <html>
 <head>
@@ -92,7 +100,8 @@ class EmailService {
 </html>
 ''';
 
-    final textContent = '''
+    final textContent =
+        '''
 Hello!
 
 $inviterName has invited you to join "$groupName" on Exevra.
@@ -138,7 +147,9 @@ This link is valid for 7 days.
           ..html = htmlContent;
 
         await send(message, smtpServer);
-        debugPrint('[EmailService] Successfully sent SMTP invite email to $toEmail');
+        debugPrint(
+          '[EmailService] Successfully sent SMTP invite email to $toEmail',
+        );
         return true;
       } catch (e) {
         debugPrint('[EmailService] SMTP send error: $e');
@@ -146,7 +157,9 @@ This link is valid for 7 days.
         return false;
       }
     } else {
-      debugPrint('[EmailService] Simulated delivery: SMTP not configured or using demo password. Recorded invitation link for $toEmail: $joinUrl');
+      debugPrint(
+        '[EmailService] Simulated delivery: SMTP not configured or using demo password. Recorded invitation link for $toEmail: $joinUrl',
+      );
       return true;
     }
   }

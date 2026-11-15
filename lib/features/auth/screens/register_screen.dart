@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -45,11 +47,15 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         return;
       }
 
-      ref.read(authNotifierProvider.notifier).signUpWithEmail(
-            _emailController.text,
-            _passwordController.text,
-            _nameController.text,
-          );
+      unawaited(
+        ref
+            .read(authNotifierProvider.notifier)
+            .signUpWithEmail(
+              _emailController.text,
+              _passwordController.text,
+              _nameController.text,
+            ),
+      );
     }
   }
 
@@ -86,7 +92,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       fontSize: 28,
                       fontWeight: FontWeight.w800,
                       letterSpacing: -0.5,
-                      color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                      color: isDark
+                          ? AppColors.darkTextPrimary
+                          : AppColors.lightTextPrimary,
                     ),
                   ).animate().fadeIn().slideY(begin: 0.2, end: 0),
                   const SizedBox(height: 6),
@@ -94,7 +102,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     'Start tracking expenses with real-time financial telemetry',
                     style: TextStyle(
                       fontSize: 14,
-                      color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                      color: isDark
+                          ? AppColors.darkTextSecondary
+                          : AppColors.lightTextSecondary,
                     ),
                   ).animate().fadeIn(delay: 100.ms),
 
@@ -106,16 +116,25 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       decoration: BoxDecoration(
                         color: AppColors.error.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.error.withValues(alpha: 0.4)),
+                        border: Border.all(
+                          color: AppColors.error.withValues(alpha: 0.4),
+                        ),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.error_outline_rounded, color: AppColors.error, size: 20),
+                          const Icon(
+                            Icons.error_outline_rounded,
+                            color: AppColors.error,
+                            size: 20,
+                          ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               authState.errorMessage!,
-                              style: const TextStyle(color: AppColors.error, fontSize: 13),
+                              style: const TextStyle(
+                                color: AppColors.error,
+                                fontSize: 13,
+                              ),
                             ),
                           ),
                         ],
@@ -133,7 +152,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           controller: _nameController,
                           textCapitalization: TextCapitalization.words,
                           textInputAction: TextInputAction.next,
-                          validator: (v) => Validators.validateRequired(v, 'Full Name'),
+                          validator: (v) =>
+                              Validators.validateRequired(v, 'Full Name'),
                           decoration: const InputDecoration(
                             labelText: 'Full Name',
                             hintText: 'Alex Mercer',
@@ -160,10 +180,15 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           textInputAction: TextInputAction.next,
                           validator: Validators.validatePassword,
                           decoration: InputDecoration(
-                            labelText: 'Password (min 8 chars, 1 num, 1 letter)',
+                            labelText:
+                                'Password (min 8 chars, 1 num, 1 letter)',
                             prefixIcon: const Icon(Icons.lock_outline_rounded),
                             suffixIcon: IconButton(
-                              icon: Icon(_obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                              icon: Icon(
+                                _obscurePassword
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                              ),
                               onPressed: () {
                                 setState(() {
                                   _obscurePassword = !_obscurePassword;
@@ -179,15 +204,23 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           textInputAction: TextInputAction.done,
                           onFieldSubmitted: (_) => _submitRegister(),
                           validator: (v) {
-                            if (v == null || v.isEmpty) return 'Confirm Password is required';
-                            if (v != _passwordController.text) return 'Passwords do not match';
+                            if (v == null || v.isEmpty) {
+                              return 'Confirm Password is required';
+                            }
+                            if (v != _passwordController.text) {
+                              return 'Passwords do not match';
+                            }
                             return null;
                           },
                           decoration: InputDecoration(
                             labelText: 'Confirm Password',
                             prefixIcon: const Icon(Icons.lock_reset_rounded),
                             suffixIcon: IconButton(
-                              icon: Icon(_obscureConfirm ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                              icon: Icon(
+                                _obscureConfirm
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                              ),
                               onPressed: () {
                                 setState(() {
                                   _obscureConfirm = !_obscureConfirm;
@@ -200,7 +233,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                         SizedBox(
                           width: double.infinity,
                           child: ElevatedButton(
-                            onPressed: authState.isLoading ? null : _submitRegister,
+                            onPressed: authState.isLoading
+                                ? null
+                                : _submitRegister,
                             style: ElevatedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 16),
                               shape: RoundedRectangleBorder(
@@ -213,7 +248,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                     width: 20,
                                     child: CircularProgressIndicator(
                                       strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation(Colors.black),
+                                      valueColor: AlwaysStoppedAnimation(
+                                        Colors.black,
+                                      ),
                                     ),
                                   )
                                 : const Text(
@@ -237,7 +274,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       Text(
                         'Already have an account?',
                         style: TextStyle(
-                          color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                          color: isDark
+                              ? AppColors.darkTextSecondary
+                              : AppColors.lightTextSecondary,
                           fontSize: 14,
                         ),
                       ),

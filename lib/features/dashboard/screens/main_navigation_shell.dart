@@ -11,10 +11,7 @@ import '../../../providers/chat_provider.dart';
 class MainNavigationShell extends ConsumerWidget {
   final StatefulNavigationShell navigationShell;
 
-  const MainNavigationShell({
-    super.key,
-    required this.navigationShell,
-  });
+  const MainNavigationShell({super.key, required this.navigationShell});
 
   void _onTap(int index) {
     AppHaptics.selection();
@@ -39,19 +36,22 @@ class MainNavigationShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.listen<ExpenseState>(expenseProvider, (prev, next) {
-      if (next.errorMessage != null && (prev?.errorMessage != next.errorMessage)) {
+      if (next.errorMessage != null &&
+          (prev?.errorMessage != next.errorMessage)) {
         _showError(context, next.errorMessage!);
       }
     });
 
     ref.listen<InsightState>(insightProvider, (prev, next) {
-      if (next.errorMessage != null && (prev?.errorMessage != next.errorMessage)) {
+      if (next.errorMessage != null &&
+          (prev?.errorMessage != next.errorMessage)) {
         _showError(context, next.errorMessage!);
       }
     });
 
     ref.listen<ChatState>(chatProvider, (prev, next) {
-      if (next.errorMessage != null && (prev?.errorMessage != next.errorMessage)) {
+      if (next.errorMessage != null &&
+          (prev?.errorMessage != next.errorMessage)) {
         _showError(context, next.errorMessage!);
       }
     });
@@ -73,31 +73,48 @@ class MainNavigationShell extends ConsumerWidget {
           selectedIndex: navigationShell.currentIndex,
           onDestinationSelected: _onTap,
           backgroundColor: isDark ? AppColors.darkCard : AppColors.lightCard,
-          indicatorColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
+          indicatorColor: Theme.of(
+            context,
+          ).colorScheme.primary.withValues(alpha: 0.2),
           destinations: [
             NavigationDestination(
               icon: const Icon(Icons.dashboard_outlined),
-              selectedIcon: Icon(Icons.dashboard_rounded, color: Theme.of(context).colorScheme.primary),
+              selectedIcon: Icon(
+                Icons.dashboard_rounded,
+                color: Theme.of(context).colorScheme.primary,
+              ),
               label: 'Dashboard',
             ),
             NavigationDestination(
               icon: const Icon(Icons.receipt_long_outlined),
-              selectedIcon: Icon(Icons.receipt_long_rounded, color: Theme.of(context).colorScheme.primary),
+              selectedIcon: Icon(
+                Icons.receipt_long_rounded,
+                color: Theme.of(context).colorScheme.primary,
+              ),
               label: 'Expenses',
             ),
             NavigationDestination(
               icon: const Icon(Icons.insert_chart_outlined_rounded),
-              selectedIcon: Icon(Icons.insert_chart_rounded, color: Theme.of(context).colorScheme.primary),
+              selectedIcon: Icon(
+                Icons.insert_chart_rounded,
+                color: Theme.of(context).colorScheme.primary,
+              ),
               label: 'Insights',
             ),
-            NavigationDestination(
-              icon: const Icon(Icons.auto_awesome_outlined),
-              selectedIcon: Icon(Icons.auto_awesome_rounded, color: AppColors.primaryViolet),
+            const NavigationDestination(
+              icon: Icon(Icons.auto_awesome_outlined),
+              selectedIcon: Icon(
+                Icons.auto_awesome_rounded,
+                color: AppColors.primaryViolet,
+              ),
               label: 'AI Advisor',
             ),
             NavigationDestination(
               icon: const Icon(Icons.person_outline_rounded),
-              selectedIcon: Icon(Icons.person_rounded, color: Theme.of(context).colorScheme.primary),
+              selectedIcon: Icon(
+                Icons.person_rounded,
+                color: Theme.of(context).colorScheme.primary,
+              ),
               label: 'Profile',
             ),
           ],

@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import '../models/insight_model.dart';
 import '../services/supabase_service.dart';
 import '../core/utils/haptics.dart';
@@ -28,7 +31,9 @@ class InsightState {
       timeframe: timeframe ?? this.timeframe,
       insight: insight ?? this.insight,
       isLoading: isLoading ?? this.isLoading,
-      errorMessage: errorMessage == const Object() ? this.errorMessage : errorMessage as String?,
+      errorMessage: errorMessage == const Object()
+          ? this.errorMessage
+          : errorMessage as String?,
     );
   }
 }
@@ -38,8 +43,8 @@ class InsightNotifier extends StateNotifier<InsightState> {
   final Ref _ref;
 
   InsightNotifier(this._service, this._ref)
-      : super(InsightState(insight: FinancialInsight.empty('monthly'))) {
-    loadInsights();
+    : super(InsightState(insight: FinancialInsight.empty('monthly'))) {
+    unawaited(loadInsights());
   }
 
   Future<void> setTimeframe(String timeframe) async {
@@ -60,20 +65,16 @@ class InsightNotifier extends StateNotifier<InsightState> {
         groupId: groupId,
       );
 
-      state = state.copyWith(
-        insight: data,
-        isLoading: false,
-      );
+      state = state.copyWith(insight: data, isLoading: false);
     } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage: e.toString(),
-      );
+      state = state.copyWith(isLoading: false, errorMessage: e.toString());
     }
   }
 }
 
-final insightProvider = StateNotifierProvider<InsightNotifier, InsightState>((ref) {
+final insightProvider = StateNotifierProvider<InsightNotifier, InsightState>((
+  ref,
+) {
   final service = ref.watch(supabaseServiceProvider);
   // Auto-refresh when expenses change
   ref.watch(expenseProvider.select((s) => s.expenses.length));

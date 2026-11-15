@@ -11,10 +11,12 @@ class EmailVerificationScreen extends ConsumerStatefulWidget {
   const EmailVerificationScreen({super.key});
 
   @override
-  ConsumerState<EmailVerificationScreen> createState() => _EmailVerificationScreenState();
+  ConsumerState<EmailVerificationScreen> createState() =>
+      _EmailVerificationScreenState();
 }
 
-class _EmailVerificationScreenState extends ConsumerState<EmailVerificationScreen> {
+class _EmailVerificationScreenState
+    extends ConsumerState<EmailVerificationScreen> {
   int _cooldownSeconds = 60;
   Timer? _timer;
   bool _canResend = false;
@@ -94,48 +96,52 @@ class _EmailVerificationScreenState extends ConsumerState<EmailVerificationScree
     final authState = ref.read(authNotifierProvider);
     final email = authState.user?.email ?? '';
 
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Complete Verification Sign-In'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Once you click the link in your email, enter your password below to finalize sign-in and save your session.',
-              style: TextStyle(fontSize: 13, height: 1.4),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: passwordController,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Password',
-                prefixIcon: Icon(Icons.lock_outline_rounded),
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Complete Verification Sign-In'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Once you click the link in your email, enter your password below to finalize sign-in and save your session.',
+                style: TextStyle(fontSize: 13, height: 1.4),
               ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: passwordController,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Password',
+                  prefixIcon: Icon(Icons.lock_outline_rounded),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                unawaited(ref.read(authNotifierProvider.notifier).signOut());
+              },
+              child: const Text('Back to Login'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final pwd = passwordController.text.trim();
+                if (pwd.isNotEmpty) {
+                  Navigator.of(ctx).pop();
+                  await ref
+                      .read(authNotifierProvider.notifier)
+                      .signInWithEmail(email, pwd);
+                }
+              },
+              child: const Text('Sign In'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              ref.read(authNotifierProvider.notifier).signOut();
-            },
-            child: const Text('Back to Login'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final pwd = passwordController.text.trim();
-              if (pwd.isNotEmpty) {
-                Navigator.of(ctx).pop();
-                await ref.read(authNotifierProvider.notifier).signInWithEmail(email, pwd);
-              }
-            },
-            child: const Text('Sign In'),
-          ),
-        ],
       ),
     );
   }
@@ -150,7 +156,9 @@ class _EmailVerificationScreenState extends ConsumerState<EmailVerificationScree
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Verification link dispatched. Please check your inbox and spam.'),
+        content: Text(
+          'Verification link dispatched. Please check your inbox and spam.',
+        ),
         backgroundColor: AppColors.primaryCyan,
         duration: Duration(seconds: 3),
       ),
@@ -186,37 +194,41 @@ class _EmailVerificationScreenState extends ConsumerState<EmailVerificationScree
               children: [
                 // Animated Glowing Email Icon
                 Container(
-                  width: 96,
-                  height: 96,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(
-                      colors: [
-                        AppColors.primaryCyan.withValues(alpha: 0.2),
-                        AppColors.primaryViolet.withValues(alpha: 0.2),
-                      ],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    border: Border.all(
-                      color: AppColors.primaryCyan.withValues(alpha: 0.4),
-                      width: 2,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primaryCyan.withValues(alpha: 0.25),
-                        blurRadius: 30,
-                        spreadRadius: 2,
+                      width: 96,
+                      height: 96,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          colors: [
+                            AppColors.primaryCyan.withValues(alpha: 0.2),
+                            AppColors.primaryViolet.withValues(alpha: 0.2),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        border: Border.all(
+                          color: AppColors.primaryCyan.withValues(alpha: 0.4),
+                          width: 2,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.primaryCyan.withValues(
+                              alpha: 0.25,
+                            ),
+                            blurRadius: 30,
+                            spreadRadius: 2,
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.mark_email_unread_rounded,
-                    size: 48,
-                    color: AppColors.primaryCyan,
-                  ),
-                )
-                    .animate(onPlay: (controller) => controller.repeat(reverse: true))
+                      child: const Icon(
+                        Icons.mark_email_unread_rounded,
+                        size: 48,
+                        color: AppColors.primaryCyan,
+                      ),
+                    )
+                    .animate(
+                      onPlay: (controller) => controller.repeat(reverse: true),
+                    )
                     .scale(
                       begin: const Offset(0.96, 0.96),
                       end: const Offset(1.04, 1.04),
@@ -233,7 +245,9 @@ class _EmailVerificationScreenState extends ConsumerState<EmailVerificationScree
                     fontSize: 26,
                     fontWeight: FontWeight.w900,
                     letterSpacing: -0.5,
-                    color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                    color: isDark
+                        ? AppColors.darkTextPrimary
+                        : AppColors.lightTextPrimary,
                   ),
                 ).animate().fadeIn(duration: 400.ms).slideY(begin: 0.1, end: 0),
 
@@ -246,7 +260,9 @@ class _EmailVerificationScreenState extends ConsumerState<EmailVerificationScree
                   style: TextStyle(
                     fontSize: 14,
                     height: 1.4,
-                    color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                    color: isDark
+                        ? AppColors.darkTextSecondary
+                        : AppColors.lightTextSecondary,
                   ),
                 ).animate().fadeIn(delay: 100.ms, duration: 400.ms),
 
@@ -255,11 +271,18 @@ class _EmailVerificationScreenState extends ConsumerState<EmailVerificationScree
                 // Highlighted User Email Badge
                 GlassCard(
                   borderRadius: 14,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.alternate_email_rounded, size: 18, color: AppColors.primaryCyan),
+                      const Icon(
+                        Icons.alternate_email_rounded,
+                        size: 18,
+                        color: AppColors.primaryCyan,
+                      ),
                       const SizedBox(width: 8),
                       Flexible(
                         child: Text(
@@ -284,7 +307,9 @@ class _EmailVerificationScreenState extends ConsumerState<EmailVerificationScree
                   style: TextStyle(
                     fontSize: 13,
                     height: 1.4,
-                    color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                    color: isDark
+                        ? AppColors.darkTextTertiary
+                        : AppColors.lightTextTertiary,
                   ),
                 ).animate().fadeIn(delay: 250.ms, duration: 400.ms),
 
@@ -305,9 +330,14 @@ class _EmailVerificationScreenState extends ConsumerState<EmailVerificationScree
                               color: Colors.black,
                             ),
                           )
-                        : const Icon(Icons.check_circle_outline_rounded, size: 20),
+                        : const Icon(
+                            Icons.check_circle_outline_rounded,
+                            size: 20,
+                          ),
                     label: Text(
-                      _isRefreshing ? 'Checking Confirmation...' : "I've Verified My Email",
+                      _isRefreshing
+                          ? 'Checking Confirmation...'
+                          : "I've Verified My Email",
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
@@ -346,7 +376,9 @@ class _EmailVerificationScreenState extends ConsumerState<EmailVerificationScree
                         borderRadius: BorderRadius.circular(16),
                       ),
                       side: BorderSide(
-                        color: _canResend ? AppColors.primaryCyan : Colors.white24,
+                        color: _canResend
+                            ? AppColors.primaryCyan
+                            : Colors.white24,
                       ),
                     ),
                   ),
@@ -360,7 +392,11 @@ class _EmailVerificationScreenState extends ConsumerState<EmailVerificationScree
                     AppHaptics.selection();
                     _showPasswordSignInDialog();
                   },
-                  icon: const Icon(Icons.vpn_key_rounded, size: 16, color: AppColors.primaryCyan),
+                  icon: const Icon(
+                    Icons.vpn_key_rounded,
+                    size: 16,
+                    color: AppColors.primaryCyan,
+                  ),
                   label: const Text(
                     'Already confirmed in browser? Enter Password to Sign In',
                     style: TextStyle(
@@ -377,9 +413,15 @@ class _EmailVerificationScreenState extends ConsumerState<EmailVerificationScree
                 TextButton.icon(
                   onPressed: () {
                     AppHaptics.light();
-                    ref.read(authNotifierProvider.notifier).signOut();
+                    unawaited(
+                      ref.read(authNotifierProvider.notifier).signOut(),
+                    );
                   },
-                  icon: const Icon(Icons.logout_rounded, size: 16, color: AppColors.darkTextSecondary),
+                  icon: const Icon(
+                    Icons.logout_rounded,
+                    size: 16,
+                    color: AppColors.darkTextSecondary,
+                  ),
                   label: const Text(
                     'Sign Out / Back to Login',
                     style: TextStyle(

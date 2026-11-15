@@ -20,14 +20,29 @@ class AppConstants {
   );
 
   // AI Inference Endpoints & Models
-  static const String geminiModel = String.fromEnvironment('GEMINI_MODEL', defaultValue: 'gemini-2.5-flash');
-  static const String geminiEndpoint = 'https://generativelanguage.googleapis.com/v1beta/models';
-  static const String openAiModel = String.fromEnvironment('OPENAI_MODEL', defaultValue: 'gpt-4o-mini');
-  static const String openAiEndpoint = 'https://api.openai.com/v1/chat/completions';
-  static const String claudeModel = String.fromEnvironment('CLAUDE_MODEL', defaultValue: 'claude-3-5-haiku-20241022');
+  static const String geminiModel = String.fromEnvironment(
+    'GEMINI_MODEL',
+    defaultValue: 'gemini-2.5-flash',
+  );
+  static const String geminiEndpoint =
+      'https://generativelanguage.googleapis.com/v1beta/models';
+  static const String openAiModel = String.fromEnvironment(
+    'OPENAI_MODEL',
+    defaultValue: 'gpt-4o-mini',
+  );
+  static const String openAiEndpoint =
+      'https://api.openai.com/v1/chat/completions';
+  static const String claudeModel = String.fromEnvironment(
+    'CLAUDE_MODEL',
+    defaultValue: 'claude-3-5-haiku-20241022',
+  );
   static const String claudeEndpoint = 'https://api.anthropic.com/v1/messages';
-  static const String deepseekModel = String.fromEnvironment('DEEPSEEK_MODEL', defaultValue: 'deepseek-chat');
-  static const String deepseekEndpoint = 'https://api.deepseek.com/v1/chat/completions';
+  static const String deepseekModel = String.fromEnvironment(
+    'DEEPSEEK_MODEL',
+    defaultValue: 'deepseek-chat',
+  );
+  static const String deepseekEndpoint =
+      'https://api.deepseek.com/v1/chat/completions';
 
   // Secure Storage Keys for AI Credentials
   static const String keyGeminiApiKey = 'secure_gemini_api_key';
@@ -52,7 +67,10 @@ class AppConstants {
     ExpenseCategoryInfo(name: 'Food', icon: Icons.restaurant_rounded),
     ExpenseCategoryInfo(name: 'Transport', icon: Icons.directions_car_rounded),
     ExpenseCategoryInfo(name: 'Housing', icon: Icons.home_rounded),
-    ExpenseCategoryInfo(name: 'Entertainment', icon: Icons.movie_filter_rounded),
+    ExpenseCategoryInfo(
+      name: 'Entertainment',
+      icon: Icons.movie_filter_rounded,
+    ),
     ExpenseCategoryInfo(name: 'Healthcare', icon: Icons.local_hospital_rounded),
     ExpenseCategoryInfo(name: 'Utilities', icon: Icons.bolt_rounded),
     ExpenseCategoryInfo(name: 'Shopping', icon: Icons.shopping_bag_rounded),
@@ -100,8 +118,5 @@ class ExpenseCategoryInfo {
   final String name;
   final IconData icon;
 
-  const ExpenseCategoryInfo({
-    required this.name,
-    required this.icon,
-  });
+  const ExpenseCategoryInfo({required this.name, required this.icon});
 }

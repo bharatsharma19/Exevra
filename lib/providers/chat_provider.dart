@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import '../core/constants/app_constants.dart';
 import '../services/ai_chatbot_service.dart';
 import '../core/utils/haptics.dart';
@@ -65,7 +66,9 @@ class ChatState {
       messages: messages ?? this.messages,
       isGenerating: isGenerating ?? this.isGenerating,
       activeModel: activeModel ?? this.activeModel,
-      errorMessage: errorMessage == const Object() ? this.errorMessage : errorMessage as String?,
+      errorMessage: errorMessage == const Object()
+          ? this.errorMessage
+          : errorMessage as String?,
     );
   }
 }
@@ -81,7 +84,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
   void _initWelcomeMessage() {
     final welcome = ChatMessage(
       id: 'msg-welcome',
-      text: '👋 **Welcome to Antigravity AI Advisor**\n\n'
+      text:
+          '👋 **Welcome to Antigravity AI Advisor**\n\n'
           'I am your low-latency, privacy-first financial intelligence co-pilot. '
           'I can analyze your category expenditures, suggest budget limits, simulate scenarios, and uncover spending leaks.\n\n'
           'Tap any quick prompt below or ask me anything regarding your finances!',
@@ -167,7 +171,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
       final updatedList = state.messages.map((m) {
         if (m.id == assistantMsgId) {
           return m.copyWith(
-            text: '⚠️ An error occurred while contacting AI services: ${e.toString()}',
+            text:
+                '⚠️ An error occurred while contacting AI services: ${e.toString()}',
             isStreaming: false,
           );
         }
@@ -187,7 +192,9 @@ class ChatNotifier extends StateNotifier<ChatState> {
   }
 }
 
-final aiChatbotServiceProvider = Provider<AiChatbotService>((ref) => AiChatbotService.instance);
+final aiChatbotServiceProvider = Provider<AiChatbotService>(
+  (ref) => AiChatbotService.instance,
+);
 
 final chatProvider = StateNotifierProvider<ChatNotifier, ChatState>((ref) {
   final aiService = ref.watch(aiChatbotServiceProvider);

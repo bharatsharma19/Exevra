@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -49,82 +51,146 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
     const presets = ['🚀', '⚛️', '💎', '🛡️', '🤖', '✨', '⚡', '🪐'];
 
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Edit Profile & Avatar'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: _nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Display Name',
-                    prefixIcon: Icon(Icons.person_rounded),
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Edit Profile & Avatar'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: _nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Display Name',
+                      prefixIcon: Icon(Icons.person_rounded),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 18),
-                const Text(
-                  'Select Avatar Icon',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: presets.map((emoji) {
-                    final isSelected = currentPreset == emoji;
-                    return GestureDetector(
-                      onTap: () {
-                        setDialogState(() {
-                          currentPreset = emoji;
-                          _avatarUrlController.clear();
-                        });
-                      },
-                      child: Container(
-                        width: 44,
-                        height: 44,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: isSelected
-                              ? AppColors.primaryCyan.withValues(alpha: 0.25)
-                              : Colors.white.withValues(alpha: 0.05),
-                          border: Border.all(
+                  const SizedBox(height: 18),
+                  const Text(
+                    'Select Avatar Icon',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: presets.map((emoji) {
+                      final isSelected = currentPreset == emoji;
+                      return GestureDetector(
+                        onTap: () {
+                          setDialogState(() {
+                            currentPreset = emoji;
+                            _avatarUrlController.clear();
+                          });
+                        },
+                        child: Container(
+                          width: 44,
+                          height: 44,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
                             color: isSelected
-                                ? AppColors.primaryCyan
-                                : Colors.white12,
-                            width: isSelected ? 2 : 1,
+                                ? AppColors.primaryCyan.withValues(alpha: 0.25)
+                                : Colors.white.withValues(alpha: 0.05),
+                            border: Border.all(
+                              color: isSelected
+                                  ? AppColors.primaryCyan
+                                  : Colors.white12,
+                              width: isSelected ? 2 : 1,
+                            ),
+                          ),
+                          child: Text(
+                            emoji,
+                            style: const TextStyle(fontSize: 22),
                           ),
                         ),
-                        child: Text(
-                          emoji,
-                          style: const TextStyle(fontSize: 22),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _avatarUrlController,
-                  decoration: const InputDecoration(
-                    labelText: 'Or Custom Image URL',
-                    prefixIcon: Icon(Icons.link_rounded),
-                    hintText: 'https://...',
+                      );
+                    }).toList(),
                   ),
-                  onChanged: (val) {
-                    if (val.isNotEmpty && currentPreset != null) {
-                      setDialogState(() {
-                        currentPreset = null;
-                      });
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _avatarUrlController,
+                    decoration: const InputDecoration(
+                      labelText: 'Or Custom Image URL',
+                      prefixIcon: Icon(Icons.link_rounded),
+                      hintText: 'https://...',
+                    ),
+                    onChanged: (val) {
+                      if (val.isNotEmpty && currentPreset != null) {
+                        setDialogState(() {
+                          currentPreset = null;
+                        });
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  if (profile != null) {
+                    final String? newAvatar =
+                        _avatarUrlController.text.trim().isNotEmpty
+                        ? _avatarUrlController.text.trim()
+                        : (currentPreset != null
+                              ? 'preset:$currentPreset'
+                              : profile.avatarUrl);
+
+                    final updated = profile.copyWith(
+                      displayName: _nameController.text.trim(),
+                      avatarUrl: newAvatar,
+                    );
+                    Navigator.of(ctx).pop();
+                    await ref
+                        .read(authNotifierProvider.notifier)
+                        .updateProfile(updated);
+                    AppHaptics.success();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Profile updated & synchronized with Supabase!',
+                          ),
+                          backgroundColor: AppColors.primaryEmerald,
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
                     }
-                  },
-                ),
-              ],
+                  } else {
+                    Navigator.of(ctx).pop();
+                  }
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showCreateGroupDialog() {
+    _groupNameController.clear();
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Create Household / Group'),
+          content: TextField(
+            controller: _groupNameController,
+            decoration: const InputDecoration(
+              labelText: 'Group Name',
+              hintText: 'e.g. Mercer Household',
+              prefixIcon: Icon(Icons.group_add_rounded),
             ),
           ),
           actions: [
@@ -134,39 +200,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ),
             ElevatedButton(
               onPressed: () async {
-                if (profile != null) {
-                  final String? newAvatar =
-                      _avatarUrlController.text.trim().isNotEmpty
-                      ? _avatarUrlController.text.trim()
-                      : (currentPreset != null
-                            ? 'preset:$currentPreset'
-                            : profile.avatarUrl);
-
-                  final updated = profile.copyWith(
-                    displayName: _nameController.text.trim(),
-                    avatarUrl: newAvatar,
-                  );
+                final name = _groupNameController.text.trim();
+                if (name.isNotEmpty) {
                   Navigator.of(ctx).pop();
-                  await ref
-                      .read(authNotifierProvider.notifier)
-                      .updateProfile(updated);
-                  AppHaptics.success();
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Profile updated & synchronized with Supabase!',
-                        ),
-                        backgroundColor: AppColors.primaryEmerald,
-                        duration: Duration(seconds: 2),
-                      ),
-                    );
-                  }
-                } else {
-                  Navigator.of(ctx).pop();
+                  await ref.read(expenseProvider.notifier).createGroup(name);
                 }
               },
-              child: const Text('Save'),
+              child: const Text('Create'),
             ),
           ],
         ),
@@ -174,85 +214,55 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
   }
 
-  void _showCreateGroupDialog() {
-    _groupNameController.clear();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Create Household / Group'),
-        content: TextField(
-          controller: _groupNameController,
-          decoration: const InputDecoration(
-            labelText: 'Group Name',
-            hintText: 'e.g. Mercer Household',
-            prefixIcon: Icon(Icons.group_add_rounded),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final name = _groupNameController.text.trim();
-              if (name.isNotEmpty) {
-                Navigator.of(ctx).pop();
-                await ref.read(expenseProvider.notifier).createGroup(name);
-              }
-            },
-            child: const Text('Create'),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _showJoinGroupDialog() {
     _inviteCodeController.clear();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Join via Invite Code'),
-        content: TextField(
-          controller: _inviteCodeController,
-          textCapitalization: TextCapitalization.characters,
-          decoration: const InputDecoration(
-            labelText: 'Invite Code',
-            hintText: 'e.g. INV-12345',
-            prefixIcon: Icon(Icons.vpn_key_rounded),
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Join via Invite Code'),
+          content: TextField(
+            controller: _inviteCodeController,
+            textCapitalization: TextCapitalization.characters,
+            decoration: const InputDecoration(
+              labelText: 'Invite Code',
+              hintText: 'e.g. INV-12345',
+              prefixIcon: Icon(Icons.vpn_key_rounded),
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              String code = _inviteCodeController.text.trim();
-              if (code.isNotEmpty) {
-                Navigator.of(ctx).pop();
-                if (code.contains('invite?token=')) {
-                  final token = code
-                      .split('invite?token=')
-                      .last
-                      .split('&')
-                      .first
-                      .split(' ')
-                      .first;
-                  try {
-                    final normalizedToken = base64Url.normalize(token);
-                    final decoded = utf8.decode(base64Url.decode(normalizedToken));
-                    code = decoded.split('|')[0];
-                  } catch (_) {}
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                String code = _inviteCodeController.text.trim();
+                if (code.isNotEmpty) {
+                  Navigator.of(ctx).pop();
+                  if (code.contains('invite?token=')) {
+                    final token = code
+                        .split('invite?token=')
+                        .last
+                        .split('&')
+                        .first
+                        .split(' ')
+                        .first;
+                    try {
+                      final normalizedToken = base64Url.normalize(token);
+                      final decoded = utf8.decode(
+                        base64Url.decode(normalizedToken),
+                      );
+                      code = decoded.split('|')[0];
+                    } catch (_) {}
+                  }
+                  await ref.read(expenseProvider.notifier).joinGroup(code);
                 }
-                await ref.read(expenseProvider.notifier).joinGroup(code);
-              }
-            },
-            child: const Text('Join Group'),
-          ),
-        ],
+              },
+              child: const Text('Join Group'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -263,137 +273,141 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     bool isSending = false;
     String? statusMessage;
 
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Row(
-            children: [
-              Icon(Icons.email_outlined, color: AppColors.primaryCyan),
-              SizedBox(width: 8),
-              Text('Invite by Email'),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Row(
               children: [
-                const Text(
-                  'Send an official invitation link directly to the recipient\'s email address.',
-                  style: TextStyle(fontSize: 13),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    labelText: 'Recipient Email',
-                    hintText: 'member@example.com',
-                    prefixIcon: Icon(Icons.alternate_email_rounded),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                DropdownButtonFormField<String>(
-                  initialValue: selectedRole,
-                  decoration: const InputDecoration(
-                    labelText: 'Role',
-                    prefixIcon: Icon(Icons.badge_outlined),
-                  ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'member',
-                      child: Text('Member (Add & Manage Expenses)'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'admin',
-                      child: Text('Admin (Full Control)'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'viewer',
-                      child: Text('Viewer (Read Only)'),
-                    ),
-                  ],
-                  onChanged: (val) {
-                    if (val != null) {
-                      setDialogState(() => selectedRole = val);
-                    }
-                  },
-                ),
-                if (statusMessage != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    statusMessage!,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppColors.primaryEmerald,
-                    ),
-                  ),
-                ],
+                Icon(Icons.email_outlined, color: AppColors.primaryCyan),
+                SizedBox(width: 8),
+                Text('Invite by Email'),
               ],
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
-            ),
-            isSending
-                ? const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Send an official invitation link directly to the recipient\'s email address.',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: const InputDecoration(
+                      labelText: 'Recipient Email',
+                      hintText: 'member@example.com',
+                      prefixIcon: Icon(Icons.alternate_email_rounded),
                     ),
-                  )
-                : ElevatedButton(
-                    onPressed: () async {
-                      final email = emailController.text.trim();
-                      if (email.isEmpty || !email.contains('@')) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Please enter a valid email address'),
-                            backgroundColor: AppColors.error,
-                          ),
-                        );
-                        return;
-                      }
-
-                      setDialogState(() {
-                        isSending = true;
-                        statusMessage = 'Dispatching invitation...';
-                      });
-
-                      final success = await ref
-                          .read(expenseProvider.notifier)
-                          .inviteMemberByEmail(
-                            email: email,
-                            role: selectedRole,
-                          );
-
-                      if (ctx.mounted) {
-                        Navigator.of(ctx).pop();
-                      }
-
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              success
-                                  ? 'Invitation dispatched to $email!'
-                                  : 'Could not send invitation. Please try again.',
-                            ),
-                            backgroundColor: success
-                                ? AppColors.primaryEmerald
-                                : AppColors.error,
-                          ),
-                        );
+                  ),
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedRole,
+                    decoration: const InputDecoration(
+                      labelText: 'Role',
+                      prefixIcon: Icon(Icons.badge_outlined),
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'member',
+                        child: Text('Member (Add & Manage Expenses)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'admin',
+                        child: Text('Admin (Full Control)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'viewer',
+                        child: Text('Viewer (Read Only)'),
+                      ),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) {
+                        setDialogState(() => selectedRole = val);
                       }
                     },
-                    child: const Text('Send Invitation'),
                   ),
-          ],
+                  if (statusMessage != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      statusMessage!,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.primaryEmerald,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Cancel'),
+              ),
+              isSending
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16),
+                      child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : ElevatedButton(
+                      onPressed: () async {
+                        final email = emailController.text.trim();
+                        if (email.isEmpty || !email.contains('@')) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Please enter a valid email address',
+                              ),
+                              backgroundColor: AppColors.error,
+                            ),
+                          );
+                          return;
+                        }
+
+                        setDialogState(() {
+                          isSending = true;
+                          statusMessage = 'Dispatching invitation...';
+                        });
+
+                        final success = await ref
+                            .read(expenseProvider.notifier)
+                            .inviteMemberByEmail(
+                              email: email,
+                              role: selectedRole,
+                            );
+
+                        if (ctx.mounted) {
+                          Navigator.of(ctx).pop();
+                        }
+
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                success
+                                    ? 'Invitation dispatched to $email!'
+                                    : 'Could not send invitation. Please try again.',
+                              ),
+                              backgroundColor: success
+                                  ? AppColors.primaryEmerald
+                                  : AppColors.error,
+                            ),
+                          );
+                        }
+                      },
+                      child: const Text('Send Invitation'),
+                    ),
+            ],
+          ),
         ),
       ),
     );
@@ -425,9 +439,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
     String selectedRecipientId =
         (prefilledToUserId != null &&
-                otherMembers.any((m) => m.userId == prefilledToUserId))
-            ? prefilledToUserId
-            : otherMembers.first.userId;
+            otherMembers.any((m) => m.userId == prefilledToUserId))
+        ? prefilledToUserId
+        : otherMembers.first.userId;
 
     final amountController = TextEditingController(
       text: prefilledAmount != null && prefilledAmount > 0
@@ -437,252 +451,270 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final notesController = TextEditingController(text: 'Settled via Exevra');
     bool isSubmitting = false;
 
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Row(
-            children: [
-              Icon(Icons.handshake_rounded, color: AppColors.primaryEmerald),
-              SizedBox(width: 8),
-              Text('Settle Up Debt'),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Row(
               children: [
-                const Text(
-                  'Record a debt settlement payment between you and a group member.',
-                  style: TextStyle(fontSize: 13),
-                ),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<String>(
-                  initialValue: selectedRecipientId,
-                  decoration: const InputDecoration(
-                    labelText: 'Paid To',
-                    prefixIcon: Icon(Icons.person_rounded),
-                  ),
-                  items: otherMembers.map((m) {
-                    final name = (m.displayName != null &&
-                            m.displayName!.trim().isNotEmpty)
-                        ? m.displayName!
-                        : 'Member';
-                    return DropdownMenuItem(value: m.userId, child: Text(name));
-                  }).toList(),
-                  onChanged: (val) {
-                    if (val != null) {
-                      setDialogState(() => selectedRecipientId = val);
-                    }
-                  },
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: amountController,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  decoration: InputDecoration(
-                    labelText: 'Amount ($currency)',
-                    prefixIcon: const Icon(Icons.payments_rounded),
-                    hintText: '0.00',
-                  ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: notesController,
-                  decoration: const InputDecoration(
-                    labelText: 'Notes / Reference',
-                    prefixIcon: Icon(Icons.note_alt_outlined),
-                    hintText: 'e.g. Bank transfer, Cash, UPI',
-                  ),
-                ),
+                Icon(Icons.handshake_rounded, color: AppColors.primaryEmerald),
+                SizedBox(width: 8),
+                Text('Settle Up Debt'),
               ],
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
-            ),
-            isSubmitting
-                ? const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Record a debt settlement payment between you and a group member.',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedRecipientId,
+                    decoration: const InputDecoration(
+                      labelText: 'Paid To',
+                      prefixIcon: Icon(Icons.person_rounded),
                     ),
-                  )
-                : ElevatedButton(
-                    onPressed: () async {
-                      final amount =
-                          double.tryParse(amountController.text.trim());
-                      if (amount == null || amount <= 0) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Please enter a valid amount'),
-                            backgroundColor: AppColors.error,
-                          ),
-                        );
-                        return;
-                      }
-
-                      setDialogState(() => isSubmitting = true);
-
-                      final ok = await ref
-                          .read(expenseProvider.notifier)
-                          .recordSettlement(
-                            toUserId: selectedRecipientId,
-                            amount: amount,
-                            notes: notesController.text.trim(),
-                          );
-
-                      if (ctx.mounted) {
-                        Navigator.of(ctx).pop();
-                      }
-
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              ok
-                                  ? 'Settlement payment recorded successfully!'
-                                  : 'Failed to record settlement payment.',
-                            ),
-                            backgroundColor: ok
-                                ? AppColors.primaryEmerald
-                                : AppColors.error,
-                          ),
-                        );
+                    items: otherMembers.map((m) {
+                      final name =
+                          (m.displayName != null &&
+                              m.displayName!.trim().isNotEmpty)
+                          ? m.displayName!
+                          : 'Member';
+                      return DropdownMenuItem(
+                        value: m.userId,
+                        child: Text(name),
+                      );
+                    }).toList(),
+                    onChanged: (val) {
+                      if (val != null) {
+                        setDialogState(() => selectedRecipientId = val);
                       }
                     },
-                    child: const Text('Record Payment'),
                   ),
-          ],
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: amountController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: 'Amount ($currency)',
+                      prefixIcon: const Icon(Icons.payments_rounded),
+                      hintText: '0.00',
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: notesController,
+                    decoration: const InputDecoration(
+                      labelText: 'Notes / Reference',
+                      prefixIcon: Icon(Icons.note_alt_outlined),
+                      hintText: 'e.g. Bank transfer, Cash, UPI',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Cancel'),
+              ),
+              isSubmitting
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16),
+                      child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : ElevatedButton(
+                      onPressed: () async {
+                        final amount = double.tryParse(
+                          amountController.text.trim(),
+                        );
+                        if (amount == null || amount <= 0) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Please enter a valid amount'),
+                              backgroundColor: AppColors.error,
+                            ),
+                          );
+                          return;
+                        }
+
+                        setDialogState(() => isSubmitting = true);
+
+                        final ok = await ref
+                            .read(expenseProvider.notifier)
+                            .recordSettlement(
+                              toUserId: selectedRecipientId,
+                              amount: amount,
+                              notes: notesController.text.trim(),
+                            );
+
+                        if (ctx.mounted) {
+                          Navigator.of(ctx).pop();
+                        }
+
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                ok
+                                    ? 'Settlement payment recorded successfully!'
+                                    : 'Failed to record settlement payment.',
+                              ),
+                              backgroundColor: ok
+                                  ? AppColors.primaryEmerald
+                                  : AppColors.error,
+                            ),
+                          );
+                        }
+                      },
+                      child: const Text('Record Payment'),
+                    ),
+            ],
+          ),
         ),
       ),
     );
   }
 
   void _showConfirmLeaveGroupDialog() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Leave Group?'),
-        content: const Text(
-          'Are you sure you want to leave this group? You will no longer see shared expenses and balances for this group.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Leave Group?'),
+          content: const Text(
+            'Are you sure you want to leave this group? You will no longer see shared expenses and balances for this group.',
           ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              ref.read(expenseProvider.notifier).leaveGroup();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error,
-              foregroundColor: Colors.white,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
             ),
-            child: const Text('Leave Group'),
-          ),
-        ],
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                unawaited(ref.read(expenseProvider.notifier).leaveGroup());
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.error,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Leave Group'),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   void _showConfirmDeleteGroupDialog() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Group Permanently?'),
-        content: const Text(
-          'Are you sure you want to permanently delete this group? All shared expenses, debts, and member associations will be erased for everyone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Delete Group Permanently?'),
+          content: const Text(
+            'Are you sure you want to permanently delete this group? All shared expenses, debts, and member associations will be erased for everyone.',
           ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              ref.read(expenseProvider.notifier).deleteGroup();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error,
-              foregroundColor: Colors.white,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
             ),
-            child: const Text('Delete Group'),
-          ),
-        ],
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                unawaited(ref.read(expenseProvider.notifier).deleteGroup());
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.error,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Delete Group'),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   void _showSignOutDialog() {
     AppHaptics.medium();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Sign Out'),
-        content: const Text(
-          'Are you sure you want to sign out of your account on this device?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Sign Out'),
+          content: const Text(
+            'Are you sure you want to sign out of your account on this device?',
           ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              ref.read(authNotifierProvider.notifier).signOut();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error,
-              foregroundColor: Colors.white,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
             ),
-            child: const Text('Sign Out'),
-          ),
-        ],
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                unawaited(ref.read(authNotifierProvider.notifier).signOut());
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.error,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Sign Out'),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   void _showDeleteAccountDialog() {
     AppHaptics.heavy();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text(
-          'Delete Account Permanently',
-          style: TextStyle(color: AppColors.error),
-        ),
-        content: const Text(
-          'This action is irreversible according to Store Compliance policies. '
-          'All your personal expenses, records, profile metadata, and group associations will be permanently purged.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text(
+            'Delete Account Permanently',
+            style: TextStyle(color: AppColors.error),
           ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              ref.read(authNotifierProvider.notifier).deleteAccount();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error,
-              foregroundColor: Colors.white,
+          content: const Text(
+            'This action is irreversible according to Store Compliance policies. '
+            'All your personal expenses, records, profile metadata, and group associations will be permanently purged.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
             ),
-            child: const Text('Permanently Delete'),
-          ),
-        ],
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                unawaited(
+                  ref.read(authNotifierProvider.notifier).deleteAccount(),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.error,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Permanently Delete'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1021,8 +1053,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
                           onPressed: () {
-                            Clipboard.setData(
-                              ClipboardData(text: group.inviteCode),
+                            unawaited(
+                              Clipboard.setData(
+                                ClipboardData(text: group.inviteCode),
+                              ),
                             );
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
@@ -1067,8 +1101,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                               );
                               final shareText =
                                   'Join my group "${group.name}" on Exevra!\n\nClick this link to join:\nhttps://exevra.com/invite?token=$token';
-                              Clipboard.setData(
-                                ClipboardData(text: shareText),
+                              unawaited(
+                                Clipboard.setData(
+                                  ClipboardData(text: shareText),
+                                ),
                               );
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
@@ -1406,15 +1442,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Row(
+                        const Row(
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.account_balance_wallet_rounded,
                               size: 18,
                               color: AppColors.primaryEmerald,
                             ),
-                            const SizedBox(width: 8),
-                            const Text(
+                            SizedBox(width: 8),
+                            Text(
                               'Group Balances & Debts',
                               style: TextStyle(
                                 fontSize: 15,
@@ -1437,7 +1473,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(12),
-                          color: AppColors.primaryEmerald.withValues(alpha: 0.1),
+                          color: AppColors.primaryEmerald.withValues(
+                            alpha: 0.1,
+                          ),
                           border: Border.all(
                             color: AppColors.primaryEmerald.withValues(
                               alpha: 0.3,
@@ -1490,14 +1528,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                   : AppColors.lightCardElevated,
                               border: Border.all(
                                 color: iOwe
-                                    ? AppColors.primaryRose.withValues(alpha: 0.4)
+                                    ? AppColors.primaryRose.withValues(
+                                        alpha: 0.4,
+                                      )
                                     : (owedToMe
-                                        ? AppColors.primaryEmerald.withValues(
-                                            alpha: 0.4,
-                                          )
-                                        : (isDark
-                                            ? AppColors.darkBorder
-                                            : AppColors.lightBorder)),
+                                          ? AppColors.primaryEmerald.withValues(
+                                              alpha: 0.4,
+                                            )
+                                          : (isDark
+                                                ? AppColors.darkBorder
+                                                : AppColors.lightBorder)),
                               ),
                             ),
                             child: Row(
@@ -1506,13 +1546,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                   iOwe
                                       ? Icons.arrow_circle_up_rounded
                                       : (owedToMe
-                                          ? Icons.arrow_circle_down_rounded
-                                          : Icons.swap_horiz_rounded),
+                                            ? Icons.arrow_circle_down_rounded
+                                            : Icons.swap_horiz_rounded),
                                   color: iOwe
                                       ? AppColors.primaryRose
                                       : (owedToMe
-                                          ? AppColors.primaryEmerald
-                                          : AppColors.primaryCyan),
+                                            ? AppColors.primaryEmerald
+                                            : AppColors.primaryCyan),
                                   size: 22,
                                 ),
                                 const SizedBox(width: 10),
@@ -1525,8 +1565,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                         iOwe
                                             ? 'You owe ${debt.toUserName}'
                                             : (owedToMe
-                                                ? '${debt.fromUserName} owes you'
-                                                : '${debt.fromUserName} owes ${debt.toUserName}'),
+                                                  ? '${debt.fromUserName} owes you'
+                                                  : '${debt.fromUserName} owes ${debt.toUserName}'),
                                         style: const TextStyle(
                                           fontSize: 13,
                                           fontWeight: FontWeight.w700,
@@ -1545,12 +1585,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                           color: iOwe
                                               ? AppColors.primaryRose
                                               : (owedToMe
-                                                  ? AppColors.primaryEmerald
-                                                  : (isDark
-                                                      ? AppColors
-                                                          .darkTextPrimary
-                                                      : AppColors
-                                                          .lightTextPrimary)),
+                                                    ? AppColors.primaryEmerald
+                                                    : (isDark
+                                                          ? AppColors
+                                                                .darkTextPrimary
+                                                          : AppColors
+                                                                .lightTextPrimary)),
                                         ),
                                       ),
                                     ],
@@ -1731,9 +1771,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       onChanged: (val) {
                         if (val != null) {
                           AppHaptics.selection();
-                          ref
-                              .read(authNotifierProvider.notifier)
-                              .setCurrency(val);
+                          unawaited(
+                            ref
+                                .read(authNotifierProvider.notifier)
+                                .setCurrency(val),
+                          );
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text(
@@ -1775,9 +1817,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       onChanged: (val) {
                         if (val != null) {
                           AppHaptics.selection();
-                          ref
-                              .read(authNotifierProvider.notifier)
-                              .setThemeMode(val);
+                          unawaited(
+                            ref
+                                .read(authNotifierProvider.notifier)
+                                .setThemeMode(val),
+                          );
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text(
@@ -1825,9 +1869,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     activeThumbColor: AppColors.primaryEmerald,
                     onChanged: (val) {
                       AppHaptics.selection();
-                      ref
-                          .read(authNotifierProvider.notifier)
-                          .setHapticsEnabled(val);
+                      unawaited(
+                        ref
+                            .read(authNotifierProvider.notifier)
+                            .setHapticsEnabled(val),
+                      );
                     },
                   ),
                   const Divider(height: 1),
@@ -1854,7 +1900,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     activeThumbColor: AppColors.primaryRose,
                     onChanged: (val) {
                       AppHaptics.selection();
-                      ref.read(authNotifierProvider.notifier).setAiConsent(val);
+                      unawaited(
+                        ref
+                            .read(authNotifierProvider.notifier)
+                            .setAiConsent(val),
+                      );
                     },
                   ),
                 ],

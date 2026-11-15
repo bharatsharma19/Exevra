@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import '../models/expense_model.dart';
 import '../models/group_model.dart';
 import '../services/supabase_service.dart';
@@ -84,9 +87,8 @@ class ExpenseState {
 
   double get totalSpent => expenses.fold(0.0, (sum, e) => sum + e.amount);
 
-  double get personalSpent => expenses
-      .where((e) => e.isPersonal)
-      .fold(0.0, (sum, e) => sum + e.amount);
+  double get personalSpent =>
+      expenses.where((e) => e.isPersonal).fold(0.0, (sum, e) => sum + e.amount);
 
   double get groupSpent => expenses
       .where((e) => !e.isPersonal)
@@ -268,7 +270,7 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
   final Ref _ref;
 
   ExpenseNotifier(this._service, this._ref) : super(const ExpenseState()) {
-    loadAll();
+    unawaited(loadAll());
   }
 
   Future<void> loadAll({String? preferredGroupId}) async {
@@ -293,7 +295,11 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
 
       // 3. Keep profile synchronized if active group changed
       if (activeGroupId != authState.profile?.groupId) {
-        _ref.read(authNotifierProvider.notifier).setActiveGroupId(activeGroupId);
+        unawaited(
+          _ref
+              .read(authNotifierProvider.notifier)
+              .setActiveGroupId(activeGroupId),
+        );
       }
 
       // 4. Fetch expenses: includes both user's personal expenses and active group's expenses
@@ -321,10 +327,7 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
         isLoading: false,
       );
     } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage: e.toString(),
-      );
+      state = state.copyWith(isLoading: false, errorMessage: e.toString());
     }
   }
 
@@ -364,7 +367,9 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       AppHaptics.light();
       final auth = _ref.read(authNotifierProvider);
       final userId = auth.user?.id ?? 'demo-user-id';
-      final groupId = isGroup ? (state.currentGroup?.id ?? auth.profile?.groupId) : null;
+      final groupId = isGroup
+          ? (state.currentGroup?.id ?? auth.profile?.groupId)
+          : null;
 
       final newExpense = Expense(
         id: 'opt-${DateTime.now().millisecondsSinceEpoch}',
@@ -414,8 +419,11 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       final auth = _ref.read(authNotifierProvider);
       final currentUserId = auth.user?.id ?? 'demo-user-id';
 
-      if (!updatedExpense.canEdit(currentUserId) && currentUserId != 'demo-user-id') {
-        throw Exception('Permission denied: You can only edit expenses you created.');
+      if (!updatedExpense.canEdit(currentUserId) &&
+          currentUserId != 'demo-user-id') {
+        throw Exception(
+          'Permission denied: You can only edit expenses you created.',
+        );
       }
 
       final previousExpenses = state.expenses;
@@ -465,8 +473,9 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       }
 
       final previousExpenses = state.expenses;
-      final optimisticList =
-          state.expenses.where((e) => e.id != expenseId).toList();
+      final optimisticList = state.expenses
+          .where((e) => e.id != expenseId)
+          .toList();
       state = state.copyWith(expenses: optimisticList);
       AppHaptics.medium();
 
@@ -528,7 +537,9 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       AppHaptics.light();
       final group = await _service.joinGroupByInvite(inviteCode);
       if (group != null) {
-        await _ref.read(authNotifierProvider.notifier).setActiveGroupId(group.id);
+        await _ref
+            .read(authNotifierProvider.notifier)
+            .setActiveGroupId(group.id);
         await loadAll(preferredGroupId: group.id);
         AppHaptics.success();
         return true;
@@ -548,12 +559,16 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       AppHaptics.light();
       final group = await _service.acceptGroupInvitation(token);
       if (group != null) {
-        await _ref.read(authNotifierProvider.notifier).setActiveGroupId(group.id);
+        await _ref
+            .read(authNotifierProvider.notifier)
+            .setActiveGroupId(group.id);
         await loadAll(preferredGroupId: group.id);
         AppHaptics.success();
         return true;
       } else {
-        throw Exception('Unable to accept invitation. It may be expired or already used.');
+        throw Exception(
+          'Unable to accept invitation. It may be expired or already used.',
+        );
       }
     } catch (e) {
       AppHaptics.error();
@@ -733,8 +748,9 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
   }
 }
 
-final expenseProvider =
-    StateNotifierProvider<ExpenseNotifier, ExpenseState>((ref) {
+final expenseProvider = StateNotifierProvider<ExpenseNotifier, ExpenseState>((
+  ref,
+) {
   final service = ref.watch(supabaseServiceProvider);
   return ExpenseNotifier(service, ref);
 });

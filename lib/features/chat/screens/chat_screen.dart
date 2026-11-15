@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -33,15 +35,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (query.trim().isEmpty) return;
 
     AppHaptics.light();
-    ref.read(chatProvider.notifier).sendMessage(query);
+    unawaited(ref.read(chatProvider.notifier).sendMessage(query));
     _textController.clear();
 
     Future.delayed(const Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent + 200,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
+        unawaited(
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent + 200,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          ),
         );
       }
     });
@@ -60,20 +64,30 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           children: [
             Container(
               padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: AppColors.primaryGradient,
               ),
-              child: const Icon(Icons.bolt_rounded, size: 18, color: Colors.black),
+              child: const Icon(
+                Icons.bolt_rounded,
+                size: 18,
+                color: Colors.black,
+              ),
             ),
             const SizedBox(width: 10),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('AI Financial Co-Pilot', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                const Text(
+                  'AI Financial Co-Pilot',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
                 Text(
                   chatState.activeModel ?? 'Multi-Model Failover Active',
-                  style: const TextStyle(fontSize: 11, color: AppColors.primaryCyan),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: AppColors.primaryCyan,
+                  ),
                 ),
               ],
             ),
@@ -108,11 +122,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        aiConsent ? 'Spending Record Analysis: Enabled' : 'Privacy Mode: Theoretical Advisor Only',
+                        aiConsent
+                            ? 'Spending Record Analysis: Enabled'
+                            : 'Privacy Mode: Theoretical Advisor Only',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
-                          color: aiConsent ? AppColors.primaryCyan : AppColors.warning,
+                          color: aiConsent
+                              ? AppColors.primaryCyan
+                              : AppColors.warning,
                         ),
                       ),
                       Text(
@@ -121,7 +139,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             : 'AI has zero access to your database records.',
                         style: TextStyle(
                           fontSize: 11,
-                          color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                          color: isDark
+                              ? AppColors.darkTextSecondary
+                              : AppColors.lightTextSecondary,
                         ),
                       ),
                     ],
@@ -132,7 +152,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   activeThumbColor: AppColors.primaryCyan,
                   onChanged: (val) {
                     AppHaptics.selection();
-                    ref.read(authNotifierProvider.notifier).setAiConsent(val);
+                    unawaited(
+                      ref.read(authNotifierProvider.notifier).setAiConsent(val),
+                    );
                   },
                 ),
               ],
@@ -165,11 +187,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 final prompt = AppConstants.aiQuickPrompts[idx];
                 return ActionChip(
                   label: Text(prompt, style: const TextStyle(fontSize: 12)),
-                  backgroundColor: isDark ? AppColors.darkCardElevated : AppColors.lightCardElevated,
+                  backgroundColor: isDark
+                      ? AppColors.darkCardElevated
+                      : AppColors.lightCardElevated,
                   side: BorderSide(
-                    color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                    color: isDark
+                        ? AppColors.darkBorder
+                        : AppColors.lightBorder,
                   ),
-                  onPressed: chatState.isGenerating ? null : () => _sendMessage(prompt),
+                  onPressed: chatState.isGenerating
+                      ? null
+                      : () => _sendMessage(prompt),
                 );
               },
             ),
@@ -202,11 +230,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     onSubmitted: (v) => _sendMessage(),
                     decoration: InputDecoration(
                       hintText: 'Ask about budgets, cutbacks, categories...',
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(20),
                         borderSide: BorderSide(
-                          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                          color: isDark
+                              ? AppColors.darkBorder
+                              : AppColors.lightBorder,
                         ),
                       ),
                     ),
@@ -214,7 +247,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 ),
                 const SizedBox(width: 10),
                 Container(
-                  decoration: BoxDecoration(
+                  decoration: const BoxDecoration(
                     shape: BoxShape.circle,
                     gradient: AppColors.primaryGradient,
                   ),
@@ -223,10 +256,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         ? const SizedBox(
                             width: 18,
                             height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(Colors.black)),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation(Colors.black),
+                            ),
                           )
-                        : const Icon(Icons.send_rounded, color: Colors.black, size: 20),
-                    onPressed: chatState.isGenerating ? null : () => _sendMessage(),
+                        : const Icon(
+                            Icons.send_rounded,
+                            color: Colors.black,
+                            size: 20,
+                          ),
+                    onPressed: chatState.isGenerating
+                        ? null
+                        : () => _sendMessage(),
                   ),
                 ),
               ],
@@ -278,7 +320,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.auto_awesome, size: 14, color: AppColors.primaryCyan),
+                const Icon(
+                  Icons.auto_awesome,
+                  size: 14,
+                  color: AppColors.primaryCyan,
+                ),
                 const SizedBox(width: 6),
                 Text(
                   msg.modelUsed ?? 'Antigravity Intelligence Core',
@@ -293,7 +339,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   DateHelpers.formatTime(msg.timestamp),
                   style: TextStyle(
                     fontSize: 10,
-                    color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                    color: isDark
+                        ? AppColors.darkTextTertiary
+                        : AppColors.lightTextTertiary,
                   ),
                 ),
               ],
@@ -320,7 +368,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           style: TextStyle(
                             fontSize: 13,
                             fontStyle: FontStyle.italic,
-                            color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                            color: isDark
+                                ? AppColors.darkTextSecondary
+                                : AppColors.lightTextSecondary,
                           ),
                         ),
                       ],
@@ -328,25 +378,36 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   else
                     MarkdownBody(
                       data: msg.text,
-                      styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-                        p: TextStyle(
-                          fontSize: 14,
-                          height: 1.45,
-                          color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
-                        ),
-                      ),
+                      styleSheet:
+                          MarkdownStyleSheet.fromTheme(
+                            Theme.of(context),
+                          ).copyWith(
+                            p: TextStyle(
+                              fontSize: 14,
+                              height: 1.45,
+                              color: isDark
+                                  ? AppColors.darkTextPrimary
+                                  : AppColors.lightTextPrimary,
+                            ),
+                          ),
                     ),
                   if (msg.isStreaming && msg.text.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
-                      child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                      ).animate(onPlay: (c) => c.repeat(reverse: true)).scale(begin: const Offset(0.5, 0.5), end: const Offset(1.3, 1.3)),
+                      child:
+                          Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                              )
+                              .animate(onPlay: (c) => c.repeat(reverse: true))
+                              .scale(
+                                begin: const Offset(0.5, 0.5),
+                                end: const Offset(1.3, 1.3),
+                              ),
                     ),
                 ],
               ),

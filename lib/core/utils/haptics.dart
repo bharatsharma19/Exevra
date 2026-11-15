@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 /// Tactile Haptic Feedback Utility respecting user preferences
@@ -8,31 +10,31 @@ class AppHaptics {
 
   static void light() {
     if (!isEnabled) return;
-    HapticFeedback.lightImpact();
+    unawaited(HapticFeedback.lightImpact());
   }
 
   static void medium() {
     if (!isEnabled) return;
-    HapticFeedback.mediumImpact();
+    unawaited(HapticFeedback.mediumImpact());
   }
 
   static void heavy() {
     if (!isEnabled) return;
-    HapticFeedback.heavyImpact();
+    unawaited(HapticFeedback.heavyImpact());
   }
 
   static void selection() {
     if (!isEnabled) return;
-    HapticFeedback.selectionClick();
+    unawaited(HapticFeedback.selectionClick());
   }
 
   static void success() {
     if (!isEnabled) return;
-    HapticFeedback.mediumImpact();
+    unawaited(HapticFeedback.mediumImpact());
   }
 
   static void error() {
     if (!isEnabled) return;
-    HapticFeedback.heavyImpact();
+    unawaited(HapticFeedback.heavyImpact());
   }
 }

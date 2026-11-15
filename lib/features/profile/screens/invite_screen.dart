@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -34,7 +36,7 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
   @override
   void initState() {
     super.initState();
-    _loadInvitationDetails();
+    unawaited(_loadInvitationDetails());
   }
 
   Future<void> _loadInvitationDetails() async {
@@ -54,21 +56,26 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
 
     try {
       // 1. First attempt to query cryptographic token via RPC / table
-      final details =
-          await SupabaseService.instance.getInvitationDetails(token);
+      final details = await SupabaseService.instance.getInvitationDetails(
+        token,
+      );
 
       if (details != null) {
         final expiresAtStr = details['expires_at'] as String?;
-        final expiresAt =
-            expiresAtStr != null ? DateTime.tryParse(expiresAtStr) : null;
-        final isExpired = details['is_expired'] == true ||
+        final expiresAt = expiresAtStr != null
+            ? DateTime.tryParse(expiresAtStr)
+            : null;
+        final isExpired =
+            details['is_expired'] == true ||
             (expiresAt != null && DateTime.now().isAfter(expiresAt));
 
         setState(() {
           _groupName = details['group_name'] as String? ?? 'Shared Group';
           _inviterName = details['inviter_name'] as String? ?? 'A member';
           _recipientEmail = details['email'] as String?;
-          _status = isExpired ? 'expired' : (details['status'] as String? ?? 'pending');
+          _status = isExpired
+              ? 'expired'
+              : (details['status'] as String? ?? 'pending');
           _expiresAt = expiresAt;
           _isLoading = false;
         });
@@ -133,9 +140,7 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
         AppHaptics.success();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              'Successfully joined ${_groupName ?? "the group"}!',
-            ),
+            content: Text('Successfully joined ${_groupName ?? "the group"}!'),
             backgroundColor: AppColors.primaryEmerald,
           ),
         );
@@ -143,7 +148,8 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
       } else if (mounted) {
         setState(() {
           _isAccepting = false;
-          _error = 'Could not accept invitation. It may have expired or already been accepted.';
+          _error =
+              'Could not accept invitation. It may have expired or already been accepted.';
         });
         AppHaptics.error();
       }
@@ -272,10 +278,11 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: (isExpired || isRevoked
-                          ? Colors.orange
-                          : AppColors.primaryCyan)
-                      .withValues(alpha: 0.3),
+                  color:
+                      (isExpired || isRevoked
+                              ? Colors.orange
+                              : AppColors.primaryCyan)
+                          .withValues(alpha: 0.3),
                   blurRadius: 20,
                   spreadRadius: 2,
                 ),
@@ -285,8 +292,8 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
               isExpired || isRevoked
                   ? Icons.hourglass_disabled_rounded
                   : (isAlreadyAccepted
-                      ? Icons.check_circle_rounded
-                      : Icons.group_add_rounded),
+                        ? Icons.check_circle_rounded
+                        : Icons.group_add_rounded),
               size: 40,
               color: Colors.white,
             ),
@@ -299,10 +306,10 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
           isAlreadyAccepted
               ? 'Already Joined!'
               : (isExpired
-                  ? 'Invitation Expired'
-                  : (isRevoked
-                      ? 'Invitation Revoked'
-                      : "You're Invited to Join")),
+                    ? 'Invitation Expired'
+                    : (isRevoked
+                          ? 'Invitation Revoked'
+                          : "You're Invited to Join")),
           style: const TextStyle(
             fontSize: 24,
             fontWeight: FontWeight.w800,
@@ -317,10 +324,10 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
           isAlreadyAccepted
               ? 'You are already an active member of this group.'
               : (isExpired
-                  ? 'This invitation link has expired. Please ask an admin or member to send a new invite.'
-                  : (isRevoked
-                      ? 'This invitation has been cancelled by the group admin.'
-                      : '$_inviterName has invited you to join their shared group on Exevra.')),
+                    ? 'This invitation link has expired. Please ask an admin or member to send a new invite.'
+                    : (isRevoked
+                          ? 'This invitation has been cancelled by the group admin.'
+                          : '$_inviterName has invited you to join their shared group on Exevra.')),
           style: TextStyle(
             fontSize: 14,
             color: isDark
@@ -343,8 +350,9 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
                 children: [
                   CircleAvatar(
                     radius: 20,
-                    backgroundColor:
-                        AppColors.primaryCyan.withValues(alpha: 0.15),
+                    backgroundColor: AppColors.primaryCyan.withValues(
+                      alpha: 0.15,
+                    ),
                     child: const Icon(
                       Icons.groups_rounded,
                       color: AppColors.primaryCyan,
@@ -426,8 +434,8 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
                         color: isExpired
                             ? AppColors.error
                             : (isDark
-                                ? AppColors.darkTextTertiary
-                                : AppColors.lightTextTertiary),
+                                  ? AppColors.darkTextTertiary
+                                  : AppColors.lightTextTertiary),
                       ),
                     ),
                   ],
@@ -483,8 +491,9 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
           const SizedBox(height: 14),
           ElevatedButton(
             onPressed: () {
-              final returnTo =
-                  Uri.encodeComponent('/invite?token=${widget.token}');
+              final returnTo = Uri.encodeComponent(
+                '/invite?token=${widget.token}',
+              );
               context.go('/login?returnTo=$returnTo');
             },
             child: const Text('Sign In to Accept'),
@@ -492,8 +501,9 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
           const SizedBox(height: 10),
           OutlinedButton(
             onPressed: () {
-              final returnTo =
-                  Uri.encodeComponent('/invite?token=${widget.token}');
+              final returnTo = Uri.encodeComponent(
+                '/invite?token=${widget.token}',
+              );
               context.go('/register?returnTo=$returnTo');
             },
             child: const Text('Create New Account'),

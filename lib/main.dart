@@ -33,13 +33,17 @@ void main() async {
   try {
     await dotenv.load(fileName: '.env');
   } catch (e) {
-    debugPrint('[main.dart] Dotenv load notice (using compile-time fallback): $e');
+    debugPrint(
+      '[main.dart] Dotenv load notice (using compile-time fallback): $e',
+    );
   }
 
   // 4. Initialize Supabase Backend Client (with resilient fallback for local offline execution)
-  final supabaseUrl = (dotenv.isInitialized ? dotenv.env['SUPABASE_URL'] : null) ??
+  final supabaseUrl =
+      (dotenv.isInitialized ? dotenv.env['SUPABASE_URL'] : null) ??
       AppConstants.defaultSupabaseUrl;
-  final supabaseKey = (dotenv.isInitialized ? dotenv.env['SUPABASE_ANON_KEY'] : null) ??
+  final supabaseKey =
+      (dotenv.isInitialized ? dotenv.env['SUPABASE_ANON_KEY'] : null) ??
       AppConstants.defaultSupabaseAnonKey;
 
   try {
@@ -56,8 +60,10 @@ void main() async {
 
   // 5. Launch Application with Riverpod State Container
   runApp(
-    const ProviderScope(
-      child: AntigravityExpenseApp(),
+    ProviderScope(
+      // Failed providers surface their error instead of retrying silently.
+      retry: (_, _) => null,
+      child: const AntigravityExpenseApp(),
     ),
   );
 }
@@ -66,7 +72,8 @@ class AntigravityExpenseApp extends ConsumerStatefulWidget {
   const AntigravityExpenseApp({super.key});
 
   @override
-  ConsumerState<AntigravityExpenseApp> createState() => _AntigravityExpenseAppState();
+  ConsumerState<AntigravityExpenseApp> createState() =>
+      _AntigravityExpenseAppState();
 }
 
 class _AntigravityExpenseAppState extends ConsumerState<AntigravityExpenseApp>
@@ -86,7 +93,8 @@ class _AntigravityExpenseAppState extends ConsumerState<AntigravityExpenseApp>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
       ref.read(appLockProvider.notifier).onAppPaused();
     } else if (state == AppLifecycleState.resumed) {
       ref.read(appLockProvider.notifier).onAppResumed();
@@ -126,7 +134,7 @@ class _AntigravityExpenseAppState extends ConsumerState<AntigravityExpenseApp>
             appLockState.isBiometricsEnabled) {
           return Stack(
             children: [
-              if (child != null) child,
+              ?child,
               const Positioned.fill(child: AppLockScreen()),
             ],
           );

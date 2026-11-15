@@ -12,7 +12,8 @@ class ResetPasswordScreen extends ConsumerStatefulWidget {
   const ResetPasswordScreen({super.key});
 
   @override
-  ConsumerState<ResetPasswordScreen> createState() => _ResetPasswordScreenState();
+  ConsumerState<ResetPasswordScreen> createState() =>
+      _ResetPasswordScreenState();
 }
 
 class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
@@ -41,7 +42,9 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
         return;
       }
 
-      await ref.read(authNotifierProvider.notifier).updatePassword(_passwordController.text);
+      await ref
+          .read(authNotifierProvider.notifier)
+          .updatePassword(_passwordController.text);
       final auth = ref.read(authNotifierProvider);
       if (auth.errorMessage == null) {
         setState(() {
@@ -76,10 +79,14 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: AppColors.primaryEmerald.withValues(alpha: 0.15),
-                      border: Border.all(color: AppColors.primaryEmerald.withValues(alpha: 0.3)),
+                      border: Border.all(
+                        color: AppColors.primaryEmerald.withValues(alpha: 0.3),
+                      ),
                     ),
                     child: Icon(
-                      _isSuccess ? Icons.check_circle_outline_rounded : Icons.lock_open_rounded,
+                      _isSuccess
+                          ? Icons.check_circle_outline_rounded
+                          : Icons.lock_open_rounded,
                       size: 40,
                       color: AppColors.primaryEmerald,
                     ),
@@ -95,7 +102,9 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                     fontSize: 26,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.5,
-                    color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                    color: isDark
+                        ? AppColors.darkTextPrimary
+                        : AppColors.lightTextPrimary,
                   ),
                 ).animate().fadeIn(),
 
@@ -108,7 +117,9 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 14,
-                    color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                    color: isDark
+                        ? AppColors.darkTextSecondary
+                        : AppColors.lightTextSecondary,
                   ),
                 ).animate().fadeIn(delay: 100.ms),
 
@@ -120,16 +131,25 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                     decoration: BoxDecoration(
                       color: AppColors.error.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.error.withValues(alpha: 0.4)),
+                      border: Border.all(
+                        color: AppColors.error.withValues(alpha: 0.4),
+                      ),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.error_outline_rounded, color: AppColors.error, size: 20),
+                        const Icon(
+                          Icons.error_outline_rounded,
+                          color: AppColors.error,
+                          size: 20,
+                        ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             authState.errorMessage!,
-                            style: const TextStyle(color: AppColors.error, fontSize: 13),
+                            style: const TextStyle(
+                              color: AppColors.error,
+                              fontSize: 13,
+                            ),
                           ),
                         ),
                       ],
@@ -153,9 +173,15 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                             validator: Validators.validatePassword,
                             decoration: InputDecoration(
                               labelText: 'New Password',
-                              prefixIcon: const Icon(Icons.lock_outline_rounded),
+                              prefixIcon: const Icon(
+                                Icons.lock_outline_rounded,
+                              ),
                               suffixIcon: IconButton(
-                                icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                                icon: Icon(
+                                  _obscure
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                ),
                                 onPressed: () {
                                   setState(() {
                                     _obscure = !_obscure;
@@ -171,8 +197,12 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                             textInputAction: TextInputAction.done,
                             onFieldSubmitted: (_) => _submitNewPassword(),
                             validator: (v) {
-                              if (v == null || v.isEmpty) return 'Confirm Password is required';
-                              if (v != _passwordController.text) return 'Passwords do not match';
+                              if (v == null || v.isEmpty) {
+                                return 'Confirm Password is required';
+                              }
+                              if (v != _passwordController.text) {
+                                return 'Passwords do not match';
+                              }
                               return null;
                             },
                             decoration: const InputDecoration(
@@ -184,14 +214,18 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton(
-                              onPressed: authState.isLoading ? null : _submitNewPassword,
+                              onPressed: authState.isLoading
+                                  ? null
+                                  : _submitNewPassword,
                               child: authState.isLoading
                                   ? const SizedBox(
                                       height: 20,
                                       width: 20,
                                       child: CircularProgressIndicator(
                                         strokeWidth: 2,
-                                        valueColor: AlwaysStoppedAnimation(Colors.black),
+                                        valueColor: AlwaysStoppedAnimation(
+                                          Colors.black,
+                                        ),
                                       ),
                                     )
                                   : const Text('Save New Password'),

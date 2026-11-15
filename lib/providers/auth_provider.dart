@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 import '../models/user_profile.dart';
@@ -28,7 +29,8 @@ class AppAuthState {
     this.themeMode = 'system',
   });
 
-  bool get isAuthenticated => status == AuthStatus.authenticated && user != null;
+  bool get isAuthenticated =>
+      status == AuthStatus.authenticated && user != null;
 
   bool get isEmailVerified {
     if (user == null) return false;
@@ -51,7 +53,9 @@ class AppAuthState {
       status: status ?? this.status,
       user: user ?? this.user,
       profile: profile ?? this.profile,
-      errorMessage: errorMessage == const Object() ? this.errorMessage : errorMessage as String?,
+      errorMessage: errorMessage == const Object()
+          ? this.errorMessage
+          : errorMessage as String?,
       isLoading: isLoading ?? this.isLoading,
       themeMode: themeMode ?? this.themeMode,
     );
@@ -63,8 +67,9 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
   final SupabaseService _supabaseService;
   StreamSubscription<supabase.AuthState>? _authSub;
 
-  AuthNotifier(this._authService, this._supabaseService) : super(const AppAuthState()) {
-    _init();
+  AuthNotifier(this._authService, this._supabaseService)
+    : super(const AppAuthState()) {
+    unawaited(_init());
   }
 
   Future<void> _init() async {
@@ -74,17 +79,19 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
     String cachedTheme = 'system';
     bool cachedHaptics = true;
     bool cachedAiConsent = false;
-    
+
     try {
       final prefs = await SharedPreferences.getInstance();
-      cachedCurrency = prefs.getString(AppConstants.keyCurrency) ?? AppConstants.defaultCurrency;
+      cachedCurrency =
+          prefs.getString(AppConstants.keyCurrency) ??
+          AppConstants.defaultCurrency;
       cachedTheme = prefs.getString(AppConstants.keyThemeMode) ?? 'system';
       cachedHaptics = prefs.getBool(AppConstants.keyHapticsEnabled) ?? true;
       cachedAiConsent = prefs.getBool(AppConstants.keyAiConsent) ?? false;
     } catch (e) {
       debugPrint('[AuthNotifier] Failed to load preferences: $e');
     }
-    
+
     AppHaptics.isEnabled = cachedHaptics;
 
     final currentUser = _authService.currentUser;
@@ -156,7 +163,10 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
     try {
       state = state.copyWith(isLoading: true, errorMessage: null);
       AppHaptics.light();
-      final res = await _authService.signInWithEmail(email: email, password: password);
+      final res = await _authService.signInWithEmail(
+        email: email,
+        password: password,
+      );
       final user = res.user;
       if (user != null) {
         final profile = await _supabaseService.fetchProfile(user.id);
@@ -170,20 +180,30 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
       }
     } catch (e) {
       final isDemoUrl = _supabaseService.isDemoMode;
-      if (isDemoUrl && (e.toString().contains('Invalid login credentials') || e.toString().contains('Failed host lookup'))) {
+      if (isDemoUrl &&
+          (e.toString().contains('Invalid login credentials') ||
+              e.toString().contains('Failed host lookup'))) {
         _enterDemoSession(email);
         return;
       }
       state = state.copyWith(
         status: AuthStatus.unauthenticated,
-        errorMessage: e.toString().replaceAll('Exception:', '').replaceAll('AuthException:', '').trim(),
+        errorMessage: e
+            .toString()
+            .replaceAll('Exception:', '')
+            .replaceAll('AuthException:', '')
+            .trim(),
         isLoading: false,
       );
       AppHaptics.error();
     }
   }
 
-  Future<void> signUpWithEmail(String email, String password, String displayName) async {
+  Future<void> signUpWithEmail(
+    String email,
+    String password,
+    String displayName,
+  ) async {
     try {
       state = state.copyWith(isLoading: true, errorMessage: null);
       AppHaptics.light();
@@ -195,33 +215,43 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
       final user = res.user;
       if (user != null) {
         final profile = await _supabaseService.fetchProfile(user.id);
-        final effectiveName = displayName.trim().isNotEmpty ? displayName.trim() : email.split('@').first;
+        final effectiveName = displayName.trim().isNotEmpty
+            ? displayName.trim()
+            : email.split('@').first;
         state = state.copyWith(
           status: AuthStatus.authenticated,
           user: user,
-          profile: (profile ?? UserProfile(
-            id: user.id,
-            displayName: effectiveName,
-            email: email.trim(),
-            createdAt: DateTime.now(),
-            updatedAt: DateTime.now(),
-          )).copyWith(displayName: effectiveName),
+          profile:
+              (profile ??
+                      UserProfile(
+                        id: user.id,
+                        displayName: effectiveName,
+                        email: email.trim(),
+                        createdAt: DateTime.now(),
+                        updatedAt: DateTime.now(),
+                      ))
+                  .copyWith(displayName: effectiveName),
           isLoading: false,
         );
         AppHaptics.success();
       }
     } catch (e) {
       final isDemoUrl = _supabaseService.isDemoMode;
-      if (isDemoUrl && (e.toString().contains('Failed host lookup') ||
-          e.toString().contains('Network') ||
-          e.toString().contains('Invalid API key') ||
-          e.toString().contains('ClientException'))) {
+      if (isDemoUrl &&
+          (e.toString().contains('Failed host lookup') ||
+              e.toString().contains('Network') ||
+              e.toString().contains('Invalid API key') ||
+              e.toString().contains('ClientException'))) {
         _enterDemoSession(email, displayName: displayName, isVerified: false);
         return;
       }
       state = state.copyWith(
         status: AuthStatus.unauthenticated,
-        errorMessage: e.toString().replaceAll('Exception:', '').replaceAll('AuthException:', '').trim(),
+        errorMessage: e
+            .toString()
+            .replaceAll('Exception:', '')
+            .replaceAll('AuthException:', '')
+            .trim(),
         isLoading: false,
       );
       AppHaptics.error();
@@ -262,7 +292,11 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
       }
     } catch (e) {
       if (_supabaseService.isDemoMode && token == '123456') {
-        _enterDemoSession('phone-user@antigravity.io', displayName: 'Phone User', phone: phone);
+        _enterDemoSession(
+          'phone-user@antigravity.io',
+          displayName: 'Phone User',
+          phone: phone,
+        );
         return;
       }
       state = state.copyWith(
@@ -278,6 +312,11 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
       state = state.copyWith(isLoading: true, errorMessage: null);
       AppHaptics.light();
       final res = await _authService.signInWithGoogle();
+      if (res == null) {
+        // The user closed the Google account picker: nothing to report.
+        state = state.copyWith(isLoading: false);
+        return;
+      }
       final user = res.user;
       if (user != null) {
         final profile = await _supabaseService.fetchProfile(user.id);
@@ -289,16 +328,23 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
         );
         AppHaptics.success();
       }
+    } on GoogleSignInUnavailableException catch (e) {
+      state = state.copyWith(isLoading: false, errorMessage: e.toString());
+      AppHaptics.error();
     } catch (e) {
       debugPrint('[AuthNotifier] Google sign-in error: $e');
       final isDemoUrl = _supabaseService.isDemoMode;
       if (isDemoUrl) {
-        _enterDemoSession('google.user@antigravity.io', displayName: 'Google User');
+        _enterDemoSession(
+          'google.user@antigravity.io',
+          displayName: 'Google User',
+        );
         return;
       }
       state = state.copyWith(
         isLoading: false,
-        errorMessage: 'Google Sign-In failed: ${e.toString().replaceAll('Exception:', '').trim()}',
+        errorMessage:
+            'Google Sign-In failed: ${e.toString().replaceAll('Exception:', '').trim()}',
       );
       AppHaptics.error();
     }
@@ -324,12 +370,16 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
       debugPrint('[AuthNotifier] Apple sign-in error: $e');
       final isDemoUrl = _supabaseService.isDemoMode;
       if (isDemoUrl) {
-        _enterDemoSession('apple.user@antigravity.io', displayName: 'Apple User');
+        _enterDemoSession(
+          'apple.user@antigravity.io',
+          displayName: 'Apple User',
+        );
         return;
       }
       state = state.copyWith(
         isLoading: false,
-        errorMessage: 'Apple Sign-In failed: ${e.toString().replaceAll('Exception:', '').trim()}',
+        errorMessage:
+            'Apple Sign-In failed: ${e.toString().replaceAll('Exception:', '').trim()}',
       );
       AppHaptics.error();
     }
@@ -469,10 +519,7 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
       final res = await _authService.refreshSession();
       final refreshedUser = res.user ?? _authService.currentUser;
       if (refreshedUser != null) {
-        state = state.copyWith(
-          user: refreshedUser,
-          isLoading: false,
-        );
+        state = state.copyWith(user: refreshedUser, isLoading: false);
         if (state.isEmailVerified) {
           AppHaptics.success();
           return true;
@@ -492,10 +539,7 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
           phone: state.user!.phone,
           emailConfirmedAt: DateTime.now().toIso8601String(),
         );
-        state = state.copyWith(
-          user: verifiedUser,
-          isLoading: false,
-        );
+        state = state.copyWith(user: verifiedUser, isLoading: false);
         AppHaptics.success();
         return true;
       }
@@ -504,7 +548,12 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
     return state.isEmailVerified;
   }
 
-  void _enterDemoSession(String email, {String? displayName, String? phone, bool isVerified = true}) {
+  void _enterDemoSession(
+    String email, {
+    String? displayName,
+    String? phone,
+    bool isVerified = true,
+  }) {
     final stubProfile = UserProfile(
       id: 'demo-user-id',
       displayName: displayName ?? email.split('@').first,
@@ -539,15 +588,21 @@ class AuthNotifier extends StateNotifier<AppAuthState> {
 
   @override
   void dispose() {
-    _authSub?.cancel();
+    unawaited(_authSub?.cancel());
     super.dispose();
   }
 }
 
-final authServiceProvider = Provider<AuthService>((ref) => AuthService.instance);
-final supabaseServiceProvider = Provider<SupabaseService>((ref) => SupabaseService.instance);
+final authServiceProvider = Provider<AuthService>(
+  (ref) => AuthService.instance,
+);
+final supabaseServiceProvider = Provider<SupabaseService>(
+  (ref) => SupabaseService.instance,
+);
 
-final authNotifierProvider = StateNotifierProvider<AuthNotifier, AppAuthState>((ref) {
+final authNotifierProvider = StateNotifierProvider<AuthNotifier, AppAuthState>((
+  ref,
+) {
   final authService = ref.watch(authServiceProvider);
   final supabaseService = ref.watch(supabaseServiceProvider);
   return AuthNotifier(authService, supabaseService);

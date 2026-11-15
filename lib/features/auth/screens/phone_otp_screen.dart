@@ -53,7 +53,9 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
   Future<void> _sendOtp() async {
     if (_phoneFormKey.currentState?.validate() ?? false) {
       AppHaptics.light();
-      await ref.read(authNotifierProvider.notifier).sendPhoneOtp(_phoneController.text);
+      await ref
+          .read(authNotifierProvider.notifier)
+          .sendPhoneOtp(_phoneController.text);
       final auth = ref.read(authNotifierProvider);
       if (auth.errorMessage == null) {
         setState(() {
@@ -67,10 +69,9 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
   Future<void> _verifyOtp() async {
     if (_otpFormKey.currentState?.validate() ?? false) {
       AppHaptics.light();
-      await ref.read(authNotifierProvider.notifier).verifyPhoneOtp(
-            _phoneController.text,
-            _otpController.text,
-          );
+      await ref
+          .read(authNotifierProvider.notifier)
+          .verifyPhoneOtp(_phoneController.text, _otpController.text);
     }
   }
 
@@ -99,10 +100,14 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: AppColors.primaryCyan.withValues(alpha: 0.15),
-                      border: Border.all(color: AppColors.primaryCyan.withValues(alpha: 0.3)),
+                      border: Border.all(
+                        color: AppColors.primaryCyan.withValues(alpha: 0.3),
+                      ),
                     ),
                     child: Icon(
-                      _isOtpSent ? Icons.mark_email_read_rounded : Icons.phone_android_rounded,
+                      _isOtpSent
+                          ? Icons.mark_email_read_rounded
+                          : Icons.phone_android_rounded,
                       size: 40,
                       color: AppColors.primaryCyan,
                     ),
@@ -118,7 +123,9 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
                     fontSize: 26,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.5,
-                    color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                    color: isDark
+                        ? AppColors.darkTextPrimary
+                        : AppColors.lightTextPrimary,
                   ),
                 ).animate().fadeIn(),
 
@@ -131,7 +138,9 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 14,
-                    color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                    color: isDark
+                        ? AppColors.darkTextSecondary
+                        : AppColors.lightTextSecondary,
                   ),
                 ).animate().fadeIn(delay: 100.ms),
 
@@ -143,16 +152,25 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
                     decoration: BoxDecoration(
                       color: AppColors.error.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.error.withValues(alpha: 0.4)),
+                      border: Border.all(
+                        color: AppColors.error.withValues(alpha: 0.4),
+                      ),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.error_outline_rounded, color: AppColors.error, size: 20),
+                        const Icon(
+                          Icons.error_outline_rounded,
+                          color: AppColors.error,
+                          size: 20,
+                        ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             authState.errorMessage!,
-                            style: const TextStyle(color: AppColors.error, fontSize: 13),
+                            style: const TextStyle(
+                              color: AppColors.error,
+                              fontSize: 13,
+                            ),
                           ),
                         ),
                       ],
@@ -192,7 +210,9 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
                                       width: 20,
                                       child: CircularProgressIndicator(
                                         strokeWidth: 2,
-                                        valueColor: AlwaysStoppedAnimation(Colors.black),
+                                        valueColor: AlwaysStoppedAnimation(
+                                          Colors.black,
+                                        ),
                                       ),
                                     )
                                   : const Text('Send Verification Code'),
@@ -234,14 +254,18 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton(
-                              onPressed: authState.isLoading ? null : _verifyOtp,
+                              onPressed: authState.isLoading
+                                  ? null
+                                  : _verifyOtp,
                               child: authState.isLoading
                                   ? const SizedBox(
                                       height: 20,
                                       width: 20,
                                       child: CircularProgressIndicator(
                                         strokeWidth: 2,
-                                        valueColor: AlwaysStoppedAnimation(Colors.black),
+                                        valueColor: AlwaysStoppedAnimation(
+                                          Colors.black,
+                                        ),
                                       ),
                                     )
                                   : const Text('Verify & Enter'),
@@ -260,7 +284,9 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
                                 child: const Text('Change Number'),
                               ),
                               TextButton(
-                                onPressed: _resendCountdown == 0 ? _sendOtp : null,
+                                onPressed: _resendCountdown == 0
+                                    ? _sendOtp
+                                    : null,
                                 child: Text(
                                   _resendCountdown > 0
                                       ? 'Resend in ${_resendCountdown}s'
