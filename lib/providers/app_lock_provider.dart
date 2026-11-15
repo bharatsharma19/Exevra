@@ -87,6 +87,13 @@ final localAuthProvider = Provider<LocalAuthentication>(
 /// still while the device sleeps, so the wall clock ([now]) also counts:
 /// the app locks when either says the time away was long enough (a wall
 /// clock moved forward can only lock sooner).
+///
+/// Accepted limit: when the device slept while the app was away (so the
+/// stopwatch missed that time) AND the wall clock was set back during the
+/// same absence, neither clock may reach the timeout and the app does not
+/// relock on return. Closing it needs a monotonic clock that counts sleep
+/// (Android `SystemClock.elapsedRealtime`, iOS `mach_continuous_time`),
+/// which needs a platform channel.
 class AppLockClock {
   AppLockClock({Duration Function()? elapsed, DateTime Function()? now})
     : elapsed = elapsed ?? _stopwatch(),
