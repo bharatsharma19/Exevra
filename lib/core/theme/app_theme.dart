@@ -248,8 +248,8 @@ class AppTheme {
         // SnackBar gives its action its own TextButtonTheme, so the text
         // button focus ring never reaches it (and focusRing is under 3:1 on
         // inverseSurface anyway). A focused action inverts instead: an
-        // onInverseSurface fill with inverseSurface text. Actions with their
-        // own textColor (AppSnackbar) keep it on the fill.
+        // onInverseSurface fill with inverseSurface text. AppSnackbar's
+        // tinted kinds pass their own colour pair, which inverts the same way.
         actionTextColor: WidgetStateColor.resolveWith(
           (states) => states.contains(WidgetState.disabled)
               ? p.onInverseSurface

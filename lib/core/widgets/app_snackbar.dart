@@ -311,24 +311,38 @@ abstract final class AppSnackbar {
       backgroundColor: style.background,
       behavior: SnackBarBehavior.floating,
       shape: style.shape,
-      // The theme's action colour is meant for the inverse surface; on the
-      // tinted containers only the kind's foreground reaches 4.5:1.
+      // The theme's action colours are meant for the inverse surface; on the
+      // tinted containers only the kind's foreground reaches 4.5:1. A focused
+      // action inverts within the kind's pair (foreground fill, container
+      // label), so the focus indicator is at least 4.5:1 against the
+      // snackbar instead of the theme's near-invisible onInverseSurface fill.
       action: action == null
           ? null
           : SnackBarAction(
               key: action.key,
               label: action.label,
               onPressed: action.onPressed,
-              textColor: style.foreground,
+              textColor: WidgetStateColor.resolveWith(
+                (states) => _actionFocused(states)
+                    ? style.background
+                    : style.foreground,
+              ),
               disabledTextColor: style.foreground,
-              backgroundColor: action.backgroundColor,
-              disabledBackgroundColor: action.disabledBackgroundColor,
+              backgroundColor: WidgetStateColor.resolveWith(
+                (states) => _actionFocused(states)
+                    ? style.foreground
+                    : Colors.transparent,
+              ),
             ),
       persist: persist ?? MediaQuery.accessibleNavigationOf(context),
       content: AppSnackbarContent(message, kind: kind),
     );
   }
 }
+
+bool _actionFocused(Set<WidgetState> states) =>
+    states.contains(WidgetState.focused) &&
+    !states.contains(WidgetState.disabled);
 
 /// The icon and message row of an [AppSnackbar], with its screen reader
 /// label ("Error. Could not save").

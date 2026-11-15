@@ -2,6 +2,7 @@ import 'package:expense_manager/core/accessibility/accessibility.dart';
 import 'package:expense_manager/core/theme/app_palette.dart';
 import 'package:expense_manager/core/theme/app_theme.dart';
 import 'package:expense_manager/core/widgets/widgets.dart';
+import 'package:expense_manager/l10n/l10n.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -111,14 +112,18 @@ void main() {
           4.5,
           'focused action label',
         );
-        // AppSnackbar actions keep their own label colour; the fill must not
-        // make them harder to read.
-        for (final label in [
-          p.onSuccessContainer,
-          p.onInfoContainer,
-          p.onDangerContainer,
+      });
+
+      test('a focused AppSnackbar action inverts against its container', () {
+        // AppSnackbar actions sit on tinted containers, so a focused one
+        // fills with the kind's foreground and shows its label in the
+        // container colour.
+        for (final (container, foreground) in [
+          (p.successContainer, p.onSuccessContainer),
+          (p.infoContainer, p.onInfoContainer),
+          (p.dangerContainer, p.onDangerContainer),
         ]) {
-          _expectContrast(label, p.onInverseSurface, 4.5, 'AppSnackbar action');
+          _expectContrast(foreground, container, 4.5, 'AppSnackbar focus fill');
         }
       });
 
@@ -424,6 +429,51 @@ void main() {
         expect(material().color, p.onInverseSurface);
         expect(material().textStyle!.color, p.inverseSurface);
       });
+
+      for (final kind in AppSnackbarKind.values) {
+        testWidgets('a focused ${kind.name} AppSnackbar action stands out', (
+          tester,
+        ) async {
+          _useKeyboardFocus();
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: AppTheme.light(),
+              darkTheme: AppTheme.dark(),
+              themeMode: mode,
+              scaffoldMessengerKey: rootScaffoldMessengerKey,
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              supportedLocales: AppLocalizations.supportedLocales,
+              home: const Scaffold(body: SizedBox.expand()),
+            ),
+          );
+          AppSnackbar.show(
+            'Expense deleted',
+            kind: kind,
+            action: SnackBarAction(label: 'Undo', onPressed: () {}),
+          );
+          await tester.pumpAndSettle();
+          final container = tester
+              .widget<SnackBar>(find.byType(SnackBar))
+              .backgroundColor!;
+          Material material() => tester.widget<Material>(
+            find.descendant(
+              of: find.byType(SnackBarAction),
+              matching: find.byType(Material),
+            ),
+          );
+          expect(material().color!.a, 0);
+          final idleLabel = material().textStyle!.color!;
+          _expectContrast(idleLabel, container, 4.5, 'idle label');
+
+          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+          await tester.pumpAndSettle();
+          final fill = material().color!;
+          final label = material().textStyle!.color!;
+          expect(fill.a, 1, reason: 'the focused action has a solid fill');
+          _expectContrast(fill, container, 3, 'focus fill on container');
+          _expectContrast(label, fill, 4.5, 'focused label on fill');
+        });
+      }
     });
   }
 }
