@@ -88,8 +88,8 @@ Deno.test("readAiEnv applies defaults and bounds", () => {
     geminiApiKey: undefined,
     claudeModel: DEFAULT_CLAUDE_MODEL,
     geminiModel: DEFAULT_GEMINI_MODEL,
-    dailyQuota: 50,
-    perMinute: 6,
+    dailyQuota: 20,
+    perMinute: 4,
   });
   const env = readAiEnv(
     envFromRecord({

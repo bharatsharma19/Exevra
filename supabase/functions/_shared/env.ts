@@ -139,8 +139,8 @@ export function readSupabaseAdminEnv(env: EnvSource = denoEnv): SupabaseAdminEnv
 
 export const DEFAULT_CLAUDE_MODEL = "claude-haiku-5-5";
 export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
-export const DEFAULT_AI_DAILY_QUOTA = 50;
-export const DEFAULT_AI_PER_MINUTE = 6;
+export const DEFAULT_AI_DAILY_QUOTA = 20;
+export const DEFAULT_AI_PER_MINUTE = 4;
 
 /** ai-chat configuration. A provider is usable only when its key is present. */
 export interface AiEnv {
