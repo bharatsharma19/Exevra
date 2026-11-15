@@ -20,11 +20,16 @@ import {
 } from "../_shared/http.ts";
 import { errorName, type Logger, newRequestId } from "../_shared/log.ts";
 import { createSseStream, DEFAULT_PING_INTERVAL_MS, sseResponse } from "../_shared/sse.ts";
-import { type FailedAttempt, type FailoverOutcome, runWithFailover } from "./failover.ts";
+import {
+  type FailedAttempt,
+  type FailoverOutcome,
+  type FailoverSink,
+  runWithFailover,
+} from "./failover.ts";
 import { createOutputFilter } from "./output_filter.ts";
 import { buildContextBlock, localDate, prepareHistory, SYSTEM_INSTRUCTIONS } from "./prompt.ts";
 import { MAX_BODY_BYTES, parseChatRequest } from "./request.ts";
-import type { ChatProvider, ProviderUsage, StreamParams } from "./types.ts";
+import type { ChatProvider, ProviderName, ProviderUsage, StreamParams } from "./types.ts";
 
 /** Output cap per answer. Thinking counts toward it, hence the margin over a typical answer. */
 export const MAX_OUTPUT_TOKENS = 4096;
@@ -292,18 +297,37 @@ export async function handleAiChat<C extends AiChatClient>(
     onCancel: abort,
   });
 
-  // Model text passes through the image filter (see output_filter.ts). `meta` is sent with the
-  // first visible text, so it never appears without a following `delta`.
-  const filter = createOutputFilter();
-  let provider: string | undefined;
+  // Model text passes through the output filter (see output_filter.ts). Protocol invariants:
+  // `meta` is written right before the first `delta`, and `done`, `interrupted` and a
+  // `declined` error with `discard_partial` are only ever sent after `meta` (`ensureMeta`).
+  let filter = createOutputFilter();
   let metaSent = false;
-  const sendText = (text: string): void => {
-    if (text === "" || provider === undefined) return;
-    if (!metaSent) {
-      metaSent = true;
-      writer.event("meta", { provider, request_id: requestId });
-    }
+  const ensureMeta = (provider: string): void => {
+    if (metaSent) return;
+    metaSent = true;
+    writer.event("meta", { provider, request_id: requestId });
+  };
+  /** Writes filtered text; true when anything was written (see FailoverSink). */
+  const sendText = (provider: string, text: string): boolean => {
+    if (text === "") return false;
+    ensureMeta(provider);
     writer.event("delta", { text });
+    return true;
+  };
+  /** The provider whose text was last offered (for the last-resort error path below). */
+  let offered: { provider: ProviderName; model: string } | undefined;
+  const sink: FailoverSink = {
+    text: (provider, model, text) => {
+      offered = { provider, model };
+      return sendText(provider, filter.push(text));
+    },
+    end: (provider, model) => {
+      offered = { provider, model };
+      return sendText(provider, filter.flush());
+    },
+    discard: () => {
+      filter = createOutputFilter();
+    },
   };
 
   const task = (async (): Promise<void> => {
@@ -317,25 +341,26 @@ export async function handleAiChat<C extends AiChatClient>(
         timers: deps.timers,
         firstTokenTimeoutMs: deps.firstTokenTimeoutMs,
         idleTimeoutMs: deps.idleTimeoutMs,
-        sink: {
-          onStart: (name) => {
-            provider = name;
-          },
-          onText: (text) => sendText(filter.push(text)),
-        },
+        sink,
       });
     } catch (err) {
-      // runWithFailover does not throw; this is a last line of defence.
+      // runWithFailover does not throw; this is a last line of defence. It cannot be retried
+      // either: text may already have been delivered.
       logger.error({
         request_id: requestId,
         step: "failover",
         error: errorName(err),
       });
-      outcome = { status: "failed", code: "unavailable", attempts: [] };
+      outcome = metaSent && offered !== undefined
+        ? {
+          ...offered,
+          status: "interrupted",
+          reason: "error",
+          usage: {},
+          attempts: [],
+        }
+        : { status: "failed", code: "unavailable", attempts: [] };
     }
-
-    // Release text held back by the filter before the terminal event (not after an abort).
-    if (outcome.status !== "aborted") sendText(filter.flush());
 
     let record: UsageRecord;
     const latencyMs = clock.now() - started;
@@ -345,11 +370,28 @@ export async function handleAiChat<C extends AiChatClient>(
         providerTtftMs: outcome.ttftMs,
       }
       : {};
+    // Writes never throw in practice (SseWriter swallows enqueue errors), but booking and the
+    // log line below must run even if one did.
+    const emit = (write: () => void): void => {
+      try {
+        write();
+      } catch (err) {
+        logger.warn({
+          request_id: requestId,
+          step: "sse_write",
+          error: errorName(err),
+        });
+      }
+    };
     switch (outcome.status) {
-      case "done":
-        writer.event("done", { truncated: outcome.truncated });
+      case "done": {
+        const { provider, truncated } = outcome;
+        emit(() => {
+          ensureMeta(provider);
+          writer.event("done", { truncated });
+        });
         record = {
-          status: outcome.truncated ? "truncated" : "ok",
+          status: truncated ? "truncated" : "ok",
           provider: outcome.provider,
           model: outcome.model,
           usage: outcome.usage,
@@ -357,24 +399,47 @@ export async function handleAiChat<C extends AiChatClient>(
           latencyMs,
         };
         break;
-      case "declined":
-        writer.event("error", {
-          code: "declined",
-          message: STREAM_MESSAGES.declined,
+      }
+      case "declined": {
+        const { provider, afterText } = outcome;
+        emit(() => {
+          if (afterText) {
+            // Partial text before a refusal must not be kept: the app replaces it with
+            // `message` (see README).
+            ensureMeta(provider);
+            writer.event("error", {
+              code: "declined",
+              discard_partial: true,
+              message: STREAM_MESSAGES.declined,
+            });
+          } else {
+            writer.event("error", {
+              code: "declined",
+              message: STREAM_MESSAGES.declined,
+            });
+          }
         });
         record = {
           status: "declined",
           provider: outcome.provider,
           model: outcome.model,
           usage: outcome.usage,
+          ...ttft,
           latencyMs,
         };
         break;
-      case "interrupted":
-        writer.event("interrupted", {
-          code: "interrupted",
-          reason: outcome.reason,
-          message: STREAM_MESSAGES.interrupted,
+      }
+      case "interrupted": {
+        const { provider, reason } = outcome;
+        emit(() => {
+          // Release text held back by the filter (neutralised), then end the answer.
+          sendText(provider, filter.flush());
+          ensureMeta(provider);
+          writer.event("interrupted", {
+            code: "interrupted",
+            reason,
+            message: STREAM_MESSAGES.interrupted,
+          });
         });
         record = {
           status: "interrupted",
@@ -385,11 +450,10 @@ export async function handleAiChat<C extends AiChatClient>(
           latencyMs,
         };
         break;
+      }
       case "failed": {
-        writer.event("error", {
-          code: outcome.code,
-          message: STREAM_MESSAGES[outcome.code],
-        });
+        const { code } = outcome;
+        emit(() => writer.event("error", { code, message: STREAM_MESSAGES[code] }));
         const last = outcome.attempts[outcome.attempts.length - 1];
         record = {
           status: "failed",

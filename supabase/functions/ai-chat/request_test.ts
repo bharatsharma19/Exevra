@@ -86,3 +86,36 @@ Deno.test("timezone and locale validation", () => {
   assertEquals(canonicalLocale("x"), undefined);
   assertEquals(canonicalLocale("en-US-<script>"), undefined);
 });
+
+Deno.test("roles must alternate: consecutive same-role turns are rejected, not merged", () => {
+  const u = (content: string) => ({ role: "user", content });
+  const a = (content: string) => ({ role: "assistant", content });
+  for (
+    const messages of [
+      [u("a"), u("b")],
+      [u("a"), a("b"), a("c"), u("d")],
+      [a("hi"), a("again"), u("q")],
+      [u("a"), a("b"), u("c"), u("d")],
+    ]
+  ) {
+    assertEquals(
+      code({ ...base, messages }),
+      "invalid_request",
+      JSON.stringify(messages),
+    );
+  }
+  // Two last-message halves that each fit the 2000 cap cannot be sent as one 4000-char question.
+  assertEquals(
+    code({ ...base, messages: [u("x".repeat(2_000)), u("y".repeat(2_000))] }),
+    "invalid_request",
+  );
+  // Alternating, starting with an assistant greeting, ending with the user: accepted.
+  assertEquals(
+    parseChatRequest({
+      ...base,
+      messages: [a("Welcome"), u("a"), a("b"), u("c")],
+    }).messages
+      .length,
+    4,
+  );
+});

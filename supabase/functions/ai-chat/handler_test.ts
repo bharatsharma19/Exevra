@@ -15,6 +15,7 @@ import {
   sdkStreamOpener,
 } from "./providers/claude.ts";
 import { createGeminiProvider } from "./providers/gemini.ts";
+import { envFromRecord, readAiEnv } from "../_shared/env.ts";
 import {
   answer,
   chatRequest,
@@ -195,8 +196,9 @@ Deno.test("413 for each cap, before consent, quota or providers", async () => {
 
 Deno.test("limits are inclusive: exactly at every cap is accepted", async () => {
   const messages = [
+    // 19 alternating turns starting with an assistant greeting, so the roles still alternate.
     ...Array.from({ length: 19 }, (_, i) => ({
-      role: i % 2 === 0 ? "user" : "assistant",
+      role: i % 2 === 0 ? "assistant" : "user",
       content: i < 5 ? "x".repeat(4000) : "y",
     })),
     { role: "user", content: "z".repeat(2000) },
@@ -234,6 +236,20 @@ Deno.test("400 for wrong order, bad roles, bad JSON and bad fields", async () =>
     ["messages not an array", { messages: "hi" }],
     ["content not a string", { messages: [{ role: "user", content: 42 }] }],
     ["invalid JSON", "{not json"],
+    ["two user turns in a row", {
+      messages: [{ role: "user", content: "a" }, {
+        role: "user",
+        content: "b",
+      }],
+    }],
+    ["two assistant turns in a row", {
+      messages: [
+        { role: "user", content: "a" },
+        { role: "assistant", content: "b" },
+        { role: "assistant", content: "c" },
+        { role: "user", content: "d" },
+      ],
+    }],
     ["missing tz", { tz: undefined }],
     ["unknown tz", { tz: "Mars/Olympus_Mons" }],
     ["bad days", { days: 7 }],
@@ -612,14 +628,21 @@ Deno.test("Claude refusal with real adapter and null stop_details", async () => 
   assertEquals(gemini.calls.length, 0);
 });
 
-Deno.test("Claude refusal after text -> interrupted with reason declined", async () => {
+Deno.test("Claude refusal after text -> error declined with discard_partial, after meta", async () => {
   const claude = fakeProvider("claude", answer(["Sure, "], "refusal"));
   const gemini = fakeProvider("gemini", answer(["no"]));
   const h = harness([claude, gemini]);
   const events = await readEvents(await handleAiChat(chatRequest(), h.deps));
-  assertEquals(events.map((e) => e.event), ["meta", "delta", "interrupted"]);
-  assertEquals(events[2].data.reason, "declined");
+  await Promise.all(h.tasks);
+  assertEquals(events.map((e) => e.event), ["meta", "delta", "error"]);
+  assertEquals(events[2].data, {
+    code: "declined",
+    discard_partial: true,
+    message: STREAM_MESSAGES.declined,
+  });
   assertEquals(gemini.calls.length, 0);
+  assertEquals(h.client.rpcCalls.at(-1)?.args.p_status, "declined");
+  assertEquals(h.client.rpcCalls.at(-1)?.args.p_provider, "claude");
 });
 
 // ---- Gemini through the handler --------------------------------------------------------------
@@ -689,7 +712,7 @@ Deno.test("Gemini promptFeedback.blockReason -> declined", async () => {
   assertEquals(events[0].data.code, "declined");
 });
 
-Deno.test("Gemini finishReason SAFETY mid-stream -> interrupted", async () => {
+Deno.test("Gemini finishReason SAFETY mid-stream -> error declined with discard_partial", async () => {
   using _fetch = mockFetch(() =>
     sseResponseOf([
       geminiChunk({
@@ -706,8 +729,9 @@ Deno.test("Gemini finishReason SAFETY mid-stream -> interrupted", async () => {
   });
   const h = harness([gemini]);
   const events = await readEvents(await handleAiChat(chatRequest(), h.deps));
-  assertEquals(events.map((e) => e.event), ["meta", "delta", "interrupted"]);
-  assertEquals(events[2].data.reason, "declined");
+  assertEquals(events.map((e) => e.event), ["meta", "delta", "error"]);
+  assertEquals(events[2].data.code, "declined");
+  assertEquals(events[2].data.discard_partial, true);
 });
 
 // ---- Abort -----------------------------------------------------------------------------------
@@ -779,6 +803,8 @@ Deno.test("history trimming keeps the latest user message and starts with a user
     { role: "user", content: `${old}3` },
     { role: "assistant", content: `${old}4` },
     { role: "user", content: `${old}5` },
+    { role: "assistant", content: `${old}6` },
+    { role: "user", content: "Unanswered question?" },
     { role: "assistant", content: "" },
     { role: "user", content: "Latest question?" },
   ];
@@ -793,6 +819,12 @@ Deno.test("history trimming keeps the latest user message and starts with a user
     turns.some((t) => t.content.endsWith("1")),
     "oldest turn dropped",
   );
+  assertFalse(
+    turns.some((t) => t.content.includes("Unanswered")),
+    "a question with a blank answer is dropped with it",
+  );
+  turns.forEach((turn, i) => assertEquals(turn.role, i % 2 === 0 ? "user" : "assistant"));
+  assertEquals(turns.length, 5);
 });
 
 Deno.test("prompt injection in a category stays JSON-encoded inside the data block", async () => {
@@ -944,10 +976,70 @@ Deno.test("Markdown and HTML images from the model never reach a delta event", a
   }
 });
 
-Deno.test("meta is only sent with visible text: an answer that is only an image ends with done", async () => {
-  const h = harness([fakeProvider("claude", answer(["![](https://evil.example/p?d=1)"]))]);
+Deno.test("an answer the filter removed entirely counts as no text: failover, never a bare done", async () => {
+  const image = "![](https://evil.example/p?d=1)";
+  const gemini = fakeProvider("gemini", answer(["Real answer"]));
+  const h = harness([fakeProvider("claude", answer([image])), gemini]);
   const events = await readEvents(await handleAiChat(chatRequest(), h.deps));
-  assertEquals(events, [{ event: "done", data: { truncated: false } }]);
+  assertEquals(events.map((e) => e.event), ["meta", "delta", "done"]);
+  assertEquals(events[0].data.provider, "gemini");
+  assertEquals(deltaText(events), "Real answer");
+
+  const alone = harness([fakeProvider("claude", answer([image]))]);
+  const only = await readEvents(await handleAiChat(chatRequest(), alone.deps));
+  assertEquals(only, [{
+    event: "error",
+    data: { code: "unavailable", message: STREAM_MESSAGES.unavailable },
+  }]);
+});
+
+Deno.test("an error after filtered-only text fails over; interrupted never comes without meta", async () => {
+  for (
+    const chunks of [
+      ["![](https://evil.example/p?d=1)"], // removed entirely
+      ["![x](https://evil.example/p?d="], // still held back
+      ["<iframe src='https://evil.example/f'>"], // removed entirely
+    ]
+  ) {
+    const claude = fakeProvider(
+      "claude",
+      failingAfter(chunks, new ProviderError("unavailable")),
+    );
+    const gemini = fakeProvider("gemini", answer(["From Gemini"]));
+    const h = harness([claude, gemini]);
+    const events = await readEvents(await handleAiChat(chatRequest(), h.deps));
+    await Promise.all(h.tasks);
+    assertEquals(
+      events.map((e) => e.event),
+      ["meta", "delta", "done"],
+      chunks[0],
+    );
+    assertEquals(events[0].data.provider, "gemini");
+    assertEquals(
+      deltaText(events),
+      "From Gemini",
+      "no held-back Claude text leaks",
+    );
+    assertEquals(String(h.logs.at(-1)?.entry.failover), "claude:unavailable");
+  }
+});
+
+Deno.test("meta precedes delta, done and interrupted in every stream with provider output", async () => {
+  const scripts = [
+    answer(["a", "b"]),
+    answer(["a"], "max_tokens"),
+    failingAfter(["a"], new ProviderError("unavailable")),
+    answer(["a"], "refusal"),
+    answer(["![x](https://e/p) tail"]),
+  ];
+  for (const script of scripts) {
+    const h = harness([fakeProvider("claude", script)]);
+    const events = await readEvents(await handleAiChat(chatRequest(), h.deps));
+    const names = events.map((e) => e.event);
+    assertEquals(names[0], "meta", names.join(","));
+    assertEquals(names.filter((n) => n === "meta").length, 1);
+    assertFalse(names.slice(1).includes("meta"));
+  }
 });
 
 Deno.test("real SDK with production retries: a Claude 429 fails over at once; both 429 -> rate_limited", async () => {
@@ -969,9 +1061,14 @@ Deno.test("real SDK with production retries: a Claude 429 fails over at once; bo
   const claude = createClaudeProvider({
     model: "claude-haiku-5-5",
     // The production client (maxRetries: 1), not the test client with retries disabled.
-    open: sdkStreamOpener(withEmptyProcessEnv(() => createAnthropicClient("test-anthropic-key"))),
+    open: sdkStreamOpener(
+      withEmptyProcessEnv(() => createAnthropicClient("test-anthropic-key")),
+    ),
   });
-  const gemini = createGeminiProvider({ apiKey: "test-gemini-key", model: "gemini-3.8-flash" });
+  const gemini = createGeminiProvider({
+    apiKey: "test-gemini-key",
+    model: "gemini-3.8-flash",
+  });
   const h = harness([claude, gemini]);
   const started = performance.now();
   const events = await readEvents(await handleAiChat(chatRequest(), h.deps));
@@ -1074,4 +1171,141 @@ Deno.test("when every provider fails, the last attempt's tokens are booked", asy
   const entry = h.logs.at(-1)?.entry;
   assertEquals(entry?.failover_input_tokens, 700);
   assertEquals(entry?.failover_output_tokens, 40);
+});
+
+// ---- Phase 2 review --------------------------------------------------------------------------
+
+Deno.test("a long question split into consecutive user turns is rejected, not merged", async () => {
+  const claude = fakeProvider("claude", answer(["hi"]));
+  const h = harness([claude]);
+  const response = await handleAiChat(
+    chatRequest({
+      messages: [
+        { role: "user", content: "x".repeat(2_000) },
+        { role: "user", content: "y".repeat(2_000) },
+      ],
+    }),
+    h.deps,
+  );
+  assertEquals(response.status, 400);
+  assertEquals((await errorBody(response)).code, "invalid_request");
+  assertEquals(claude.calls.length, 0);
+  assertEquals(h.client.rpcCalls.length, 0, "no quota is used");
+});
+
+Deno.test("default quotas are 20 per day and 4 per minute", async () => {
+  const h = harness([fakeProvider("claude", answer(["ok"]))], {}, {
+    ai: readAiEnv(envFromRecord({})),
+  });
+  await readEvents(await handleAiChat(chatRequest(), h.deps));
+  assertEquals(h.client.rpcCalls[0].args, {
+    p_daily_limit: 20,
+    p_per_minute: 4,
+  });
+});
+
+function anthropicStreamError(type: string): Response {
+  const message = {
+    id: "msg_test",
+    type: "message",
+    role: "assistant",
+    content: [],
+    model: "claude-haiku-5-5",
+    stop_reason: null,
+    stop_sequence: null,
+    usage: { input_tokens: 30, output_tokens: 1 },
+  };
+  return new Response(
+    streamFromChunks([
+      `event: message_start\ndata: ${JSON.stringify({ type: "message_start", message })}\n\n`,
+      `event: error\ndata: ${JSON.stringify({ type: "error", error: { type, message: "x" } })}\n\n`,
+    ]),
+    { status: 200, headers: { "content-type": "text/event-stream" } },
+  );
+}
+
+function realProviders() {
+  const claude = createClaudeProvider({
+    model: "claude-haiku-5-5",
+    open: sdkStreamOpener(
+      withEmptyProcessEnv(() => createAnthropicClient("test-anthropic-key")),
+    ),
+  });
+  const gemini = createGeminiProvider({
+    apiKey: "test-gemini-key",
+    model: "gemini-3.8-flash",
+  });
+  return [claude, gemini];
+}
+
+Deno.test("Claude in-stream rate_limit_error + Gemini 429 -> error rate_limited", async () => {
+  using _fetch = mockFetch((req) =>
+    req.url.startsWith("https://api.anthropic.com/")
+      ? anthropicStreamError("rate_limit_error")
+      : new Response(
+        JSON.stringify({
+          error: { code: 429, status: "RESOURCE_EXHAUSTED", message: "slow" },
+        }),
+        { status: 429, headers: { "content-type": "application/json" } },
+      )
+  );
+  const h = harness(realProviders());
+  const events = await readEvents(await handleAiChat(chatRequest(), h.deps));
+  await Promise.all(h.tasks);
+  assertEquals(events, [{
+    event: "error",
+    data: { code: "rate_limited", message: STREAM_MESSAGES.rate_limited },
+  }]);
+  assertEquals(
+    String(h.logs.at(-1)?.entry.failover),
+    "claude:rate_limited,gemini:rate_limited",
+  );
+});
+
+Deno.test("Claude in-stream overloaded_error before text fails over to Gemini", async () => {
+  using _fetch = mockFetch((req) =>
+    req.url.startsWith("https://api.anthropic.com/")
+      ? anthropicStreamError("overloaded_error")
+      : sseResponseOf([
+        geminiChunk({
+          candidates: [{
+            content: { parts: [{ text: "Hi" }] },
+            finishReason: "STOP",
+          }],
+        }),
+      ])
+  );
+  const h = harness(realProviders());
+  const events = await readEvents(await handleAiChat(chatRequest(), h.deps));
+  await Promise.all(h.tasks);
+  assertEquals(events[0].data.provider, "gemini");
+  assertEquals(events.at(-1)?.event, "done");
+  assertEquals(String(h.logs.at(-1)?.entry.failover), "claude:unavailable");
+});
+
+Deno.test("prepaid credits depleted (402) on both providers -> unavailable, not rate_limited", async () => {
+  using fetchMock = mockFetch((req) =>
+    req.url.startsWith("https://api.anthropic.com/")
+      ? new Response(
+        JSON.stringify({
+          type: "error",
+          error: { type: "billing_error", message: "x" },
+        }),
+        { status: 402, headers: { "content-type": "application/json" } },
+      )
+      : new Response(
+        JSON.stringify({
+          error: { code: 402, status: "RESOURCE_EXHAUSTED", message: "x" },
+        }),
+        { status: 402, headers: { "content-type": "application/json" } },
+      )
+  );
+  const h = harness(realProviders());
+  const events = await readEvents(await handleAiChat(chatRequest(), h.deps));
+  await Promise.all(h.tasks);
+  assertEquals(fetchMock.calls.length, 2, "Claude's 402 fails over to Gemini");
+  assertEquals(events, [{
+    event: "error",
+    data: { code: "unavailable", message: STREAM_MESSAGES.unavailable },
+  }]);
 });

@@ -86,23 +86,43 @@ Deno.test("localDate uses the user's timezone", () => {
   assertEquals(localDate(instant, "America/Los_Angeles"), "2026-11-15");
 });
 
-Deno.test("prepareHistory drops blanks, merges same-role turns and starts with user", () => {
+Deno.test("prepareHistory never merges turns; a pair with a blank turn is dropped whole", () => {
   const turns: ChatTurn[] = [
     { role: "assistant", content: "Welcome!" },
     { role: "user", content: "a" },
     { role: "assistant", content: "  " },
     { role: "user", content: "b" },
     { role: "assistant", content: "c" },
+    { role: "user", content: " " },
+    { role: "assistant", content: "e" },
     { role: "user", content: "d" },
   ];
   assertEquals(prepareHistory(turns), [
-    { role: "user", content: "a\n\nb" },
+    { role: "user", content: "b" },
     { role: "assistant", content: "c" },
     { role: "user", content: "d" },
   ]);
 });
 
-Deno.test("prepareHistory keeps the newest turns within the budget", () => {
+Deno.test("prepareHistory output alternates and is never longer per turn than its input", () => {
+  const turns: ChatTurn[] = [];
+  for (let i = 0; i < 9; i++) {
+    turns.push({
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: i % 3 === 0 ? "" : `t${i}`,
+    });
+  }
+  const kept = prepareHistory(turns);
+  assertEquals(kept.at(-1), turns.at(-1));
+  kept.forEach((turn, i) => {
+    assertEquals(turn.role, i % 2 === 0 ? "user" : "assistant");
+    assert(
+      turns.some((t) => t.content === turn.content && t.role === turn.role),
+    );
+  });
+});
+
+Deno.test("prepareHistory keeps the newest question/answer pairs within the budget", () => {
   const turns: ChatTurn[] = [
     { role: "user", content: "1".repeat(10) },
     { role: "assistant", content: "2".repeat(10) },
@@ -110,8 +130,13 @@ Deno.test("prepareHistory keeps the newest turns within the budget", () => {
     { role: "assistant", content: "4".repeat(10) },
     { role: "user", content: "5".repeat(10) },
   ];
-  const kept = prepareHistory(turns, 35);
-  assertEquals(kept.map((t) => t.content[0]), ["3", "4", "5"]);
+  assertEquals(prepareHistory(turns, 35).map((t) => t.content[0]), [
+    "3",
+    "4",
+    "5",
+  ]);
+  // A pair is kept or dropped as a whole, so the history still starts with the user.
+  assertEquals(prepareHistory(turns, 25).map((t) => t.content[0]), ["5"]);
 });
 
 Deno.test("prepareHistory always keeps the latest user message, even over budget", () => {

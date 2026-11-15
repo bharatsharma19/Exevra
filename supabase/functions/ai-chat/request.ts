@@ -80,6 +80,11 @@ export function parseChatRequest(body: unknown): ChatRequest {
         "One of the messages is too long. Please start a new chat.",
       );
     }
+    // Roles must alternate. Same-role runs are rejected rather than merged: merging would let a
+    // client split one long message (or a long last message) into turns that each pass the caps.
+    if (turns.length > 0 && turns[turns.length - 1].role === role) {
+      throw invalid("Messages must alternate between you and the assistant.");
+    }
     total += content.length;
     turns.push({ role, content });
   }

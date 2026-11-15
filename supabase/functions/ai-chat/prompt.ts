@@ -103,36 +103,46 @@ export function localDate(now: number, timeZone: string): string {
 }
 
 /**
- * Prepares validated messages for a provider:
- * - drops blank turns (an interrupted answer can leave an empty assistant turn),
- * - merges consecutive turns with the same role,
- * - keeps the most recent turns whose total length fits `budget` (the latest user turn is always
- *   kept, even if it alone exceeds the budget),
- * - drops leading assistant turns so the history starts with the user.
+ * Prepares validated messages (alternating roles, last one from the user) for a provider. Turns
+ * are never merged, so every turn sent stays within the request caps.
+ *
+ * - The history is read as question/answer pairs (user then assistant) before the latest user
+ *   message. A pair in which either turn is blank is dropped as a whole (for example a question
+ *   whose answer failed and was sent back empty), which keeps the roles alternating. A turn that
+ *   is not part of such a pair (a leading assistant greeting) is dropped too.
+ * - The newest pairs whose total length fits `budget` are kept, together with the latest user
+ *   message, which is always kept even if it alone exceeds the budget.
+ * - The result therefore starts with a user turn, alternates, and ends with the latest user turn.
  */
 export function prepareHistory(
   messages: readonly ChatTurn[],
   budget: number = HISTORY_CHAR_BUDGET,
 ): ChatTurn[] {
-  const merged: ChatTurn[] = [];
-  for (const message of messages) {
-    if (message.content.trim() === "") continue;
-    const last = merged[merged.length - 1];
-    if (last !== undefined && last.role === message.role) {
-      last.content = `${last.content}\n\n${message.content}`;
-    } else {
-      merged.push({ role: message.role, content: message.content });
+  const last = messages[messages.length - 1];
+  if (last === undefined || last.role !== "user") return [];
+
+  const pairs: Array<[ChatTurn, ChatTurn]> = [];
+  for (let i = 0; i < messages.length - 2; i++) {
+    const question = messages[i];
+    const reply = messages[i + 1];
+    if (question.role !== "user" || reply.role !== "assistant") continue;
+    if (question.content.trim() !== "" && reply.content.trim() !== "") {
+      pairs.push([
+        { role: "user", content: question.content },
+        { role: "assistant", content: reply.content },
+      ]);
     }
+    i++;
   }
 
-  const kept: ChatTurn[] = [];
-  let used = 0;
-  for (let i = merged.length - 1; i >= 0; i--) {
-    const turn = merged[i];
-    if (kept.length > 0 && used + turn.content.length > budget) break;
-    kept.unshift(turn);
-    used += turn.content.length;
+  const kept: ChatTurn[] = [{ role: "user", content: last.content }];
+  let used = last.content.length;
+  for (let i = pairs.length - 1; i >= 0; i--) {
+    const [question, reply] = pairs[i];
+    const size = question.content.length + reply.content.length;
+    if (used + size > budget) break;
+    kept.unshift(question, reply);
+    used += size;
   }
-  while (kept.length > 0 && kept[0].role !== "user") kept.shift();
   return kept;
 }

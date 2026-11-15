@@ -6,7 +6,9 @@
  *
  * - inline and reference images (`![alt](url)`, `![alt][ref]`) become their alt text;
  * - any other `![` loses its `!` (so shortcut reference images such as `![ref]` cannot render);
- * - HTML `<img ...>` tags are removed.
+ * - HTML tags that fetch or embed content (`<img>`, `<picture>`, `<source>`, `<iframe>`, `<svg>`,
+ *   `<object>`, `<embed>`, `<link>`, `<video>`, `<audio>`; see {@link BLOCKED_TAGS}) are removed,
+ *   opening and closing tags alike.
  *
  * Text is held back only while a possible image is still incomplete at a chunk boundary, and at
  * most {@link MAX_HOLD_CHARS} characters; past that (or at the end of the stream) the construct
@@ -64,21 +66,66 @@ function matchImage(s: string, i: number): Match {
   return { kind: "image", alt: s.slice(i + 2, close), end: end + 1 };
 }
 
-const IMG_TAG = "<img";
+/**
+ * HTML elements that load a URL by themselves (or embed a document that can), removed wherever
+ * they appear, opening and closing tags alike. Other tags and plain `<` (as in `<5 items` or
+ * `a < b`) are left alone; the app never renders raw HTML anyway (README).
+ */
+export const BLOCKED_TAGS: ReadonlySet<string> = new Set([
+  "img",
+  "picture",
+  "source",
+  "iframe",
+  "svg",
+  "object",
+  "embed",
+  "link",
+  "video",
+  "audio",
+]);
 const TAG_BOUNDARY = /[\s/>]/;
+const LETTER = /[A-Za-z]/;
 
-/** Matches an HTML `<img ...>` tag starting at `s[i] === "<"`. */
-function matchImgTag(s: string, i: number): Match {
-  const head = s.slice(i, i + IMG_TAG.length).toLowerCase();
-  if (head.length < IMG_TAG.length) {
-    return IMG_TAG.startsWith(head) ? { kind: "incomplete" } : { kind: "none" };
+/**
+ * Index of the `>` ending a tag whose attributes start at `from`, or -1 if not seen yet. A `>`
+ * inside a quoted attribute value (`alt="a>b"`) does not end the tag.
+ */
+function tagEnd(s: string, from: number): number {
+  for (let i = from; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === ">") return i;
+    if (ch !== "=") continue;
+    let j = i + 1;
+    while (j < s.length && /\s/.test(s[j])) j++;
+    if (j >= s.length) return -1;
+    const quote = s[j];
+    if (quote !== '"' && quote !== "'") continue;
+    const close = s.indexOf(quote, j + 1);
+    if (close < 0) return -1;
+    i = close;
   }
-  if (head !== IMG_TAG) return { kind: "none" };
-  const after = s[i + IMG_TAG.length];
-  if (after === undefined) return { kind: "incomplete" };
-  if (!TAG_BOUNDARY.test(after)) return { kind: "none" };
-  const end = s.indexOf(">", i + IMG_TAG.length);
-  return end < 0 ? { kind: "incomplete" } : { kind: "tag", end: end + 1 };
+  return -1;
+}
+
+/** Matches an opening or closing {@link BLOCKED_TAGS} tag starting at `s[i] === "<"`. */
+function matchBlockedTag(s: string, i: number): Match {
+  let start = i + 1;
+  if (s[start] === "/") start++;
+  let end = start;
+  while (end < s.length && LETTER.test(s[end])) end++;
+  const name = s.slice(start, end).toLowerCase();
+  if (end >= s.length) {
+    // The name may still be growing: wait only if it can become a blocked tag.
+    for (const tag of BLOCKED_TAGS) {
+      if (tag.startsWith(name)) return { kind: "incomplete" };
+    }
+    return { kind: "none" };
+  }
+  if (!BLOCKED_TAGS.has(name) || !TAG_BOUNDARY.test(s[end])) {
+    return { kind: "none" };
+  }
+  const close = tagEnd(s, end);
+  return close < 0 ? { kind: "incomplete" } : { kind: "tag", end: close + 1 };
 }
 
 /** Filters a complete string (also used for alt text, which may itself contain images). */
@@ -128,14 +175,14 @@ export function createOutputFilter(): OutputFilter {
         i++;
         continue;
       }
-      const match = matchImgTag(s, i);
+      const match = matchBlockedTag(s, i);
       if (match.kind === "incomplete" && canWait) break;
       if (match.kind === "tag") {
         i = match.end;
         continue;
       }
       if (match.kind === "incomplete") {
-        // An `<img` that never closed: drop the "<" so it cannot form a tag.
+        // A blocked tag that never closed: drop the "<" so it cannot form a tag.
         i++;
         continue;
       }
