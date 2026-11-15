@@ -7,7 +7,11 @@
 --   count for the current UTC day and the last 60 seconds and, if both are under the limits, records a
 --   'reserved' event and returns its id. Otherwise raises P0001 'quota_exceeded' (DETAIL reset_at=...)
 --   or 'rate_limited' (DETAIL retry_after=...). Every reservation counts, whatever its final status.
--- * finish_ai_usage(p_event_id, ...) completes the caller's own reserved event with the outcome.
+-- * finish_ai_usage(p_event_id, p_provider, p_model, p_status, p_latency_ms, p_input_tokens,
+--   p_output_tokens) completes the caller's own reserved event with the outcome. p_status is one of the
+--   values the ai-chat Edge Function reports: ok, truncated, declined, interrupted, failed, aborted,
+--   error ('reserved' is the state before). Provider, model and token counts may be NULL (e.g. 'error'
+--   before any provider was called).
 -- * ai_reports: a user can report an assistant answer (reason + excerpt). Insert own only, read own
 --   only, never updated or deleted by clients. At most 30 reports per user per rolling day.
 -- * purge_old_ai_usage(): service_role only, deletes usage events older than 180 days.
@@ -33,7 +37,7 @@ CREATE TABLE IF NOT EXISTS public.ai_usage_events (
 
 ALTER TABLE public.ai_usage_events DROP CONSTRAINT IF EXISTS ai_usage_events_status_valid;
 ALTER TABLE public.ai_usage_events ADD CONSTRAINT ai_usage_events_status_valid
-    CHECK (status IN ('reserved', 'succeeded', 'failed', 'refused', 'interrupted', 'cancelled'));
+    CHECK (status IN ('reserved', 'ok', 'truncated', 'declined', 'interrupted', 'failed', 'aborted', 'error'));
 ALTER TABLE public.ai_usage_events DROP CONSTRAINT IF EXISTS ai_usage_events_provider_format;
 ALTER TABLE public.ai_usage_events ADD CONSTRAINT ai_usage_events_provider_format
     CHECK (provider IS NULL OR provider ~ '^[a-z0-9][a-z0-9._-]{0,39}$');
@@ -149,7 +153,8 @@ BEGIN
     IF v_uid IS NULL THEN
         RAISE EXCEPTION 'not_authenticated' USING ERRCODE = '42501';
     END IF;
-    IF p_status IS NULL OR p_status NOT IN ('succeeded', 'failed', 'refused', 'interrupted', 'cancelled') THEN
+    IF p_status IS NULL
+       OR p_status NOT IN ('ok', 'truncated', 'declined', 'interrupted', 'failed', 'aborted', 'error') THEN
         RAISE EXCEPTION 'invalid_status' USING ERRCODE = '22023';
     END IF;
     IF (p_latency_ms IS NOT NULL AND p_latency_ms NOT BETWEEN 0 AND 3600000)

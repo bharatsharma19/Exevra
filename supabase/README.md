@@ -149,7 +149,9 @@ select cron.schedule('purge-old-ai-usage', '37 3 * * *', 'select public.purge_ol
 ### Account deletion
 
 The `delete-account` Edge Function calls `public.prepare_account_deletion(user_id)` with the service
-role and then `auth.admin.deleteUser(user_id)`. The function hands over or deletes the groups the user
+role and then `auth.admin.deleteUser(user_id)`. A call for a user who is already gone (a retry after
+`deleteUser` succeeded) changes nothing and returns `already_deleted: true`. The function hands over
+or deletes the groups the user
 administers, voids their pending settlements, and deletes their memberships, personal expenses, AI
 data, invitations and profile. Shared group history stays and shows the user as "Former member". A
 trigger on `auth.users` runs the same function before any user is deleted, so deleting a user from the

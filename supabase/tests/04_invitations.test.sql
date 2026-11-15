@@ -108,7 +108,7 @@ $$;
 
 grant execute on all functions in schema tests to anon, authenticated;
 
-select plan(80);
+select plan(81);
 
 -- Stores raw tokens returned by the RPC for later steps (test-only).
 create table tests.tokens (label text primary key, token text not null, invitation_id uuid not null);
@@ -452,6 +452,13 @@ select is((public.get_invitation_details('member-sent-token'))->>'status', 'revo
           'details report an invitation not sent by the admin as revoked');
 select throws_ok($$ select public.accept_group_invitation('member-sent-token') $$, 'P0001', 'invite_revoked',
                  'an invitation not sent by the group admin cannot be accepted');
+
+-- The send-invite Edge Function calls create_group_invitation(p_group_id, p_email, p_role) and reads
+-- invitation_id, token and expires_at from the single returned row.
+select is((select array_to_string(proargnames, ',') from pg_proc
+           where oid = 'public.create_group_invitation(uuid, text, text)'::regprocedure),
+          'p_group_id,p_email,p_role,invitation_id,token,expires_at',
+          'create_group_invitation has the argument and result names send-invite uses');
 
 select * from finish();
 rollback;

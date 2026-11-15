@@ -206,7 +206,7 @@ as $$ select s.id from tests.settlements as s where s.name = p_name $$;
 
 grant execute on all functions in schema tests to anon, authenticated;
 
-select plan(78);
+select plan(81);
 
 select tests.create_user('ann');
 select tests.create_user('ben');
@@ -307,8 +307,8 @@ select throws_ok($$ select public.get_ai_spending_context('Mars/Base', 30) $$, '
 select throws_ok($$ select public.get_ai_spending_context('UTC', 0) $$, '22023', 'invalid_days', 'p_days must be at least 1');
 select throws_ok($$ select public.get_ai_spending_context('UTC', 367) $$, '22023', 'invalid_days', 'p_days is capped at 366');
 select tests.authenticate_as('cat');
-select throws_ok($$ select public.get_ai_spending_context('UTC', 30) $$, '42501', 'ai_consent_required',
-                 'no spending context without AI consent');
+select throws_ok($$ select public.get_ai_spending_context('UTC', 30) $$, 'P0001', 'consent_required',
+                 'no spending context without AI consent (the business key the ai-chat function maps to consent_required)');
 reset role;
 select ok(not has_function_privilege('anon', 'public.get_ai_spending_context(text, integer, timestamptz)', 'execute'),
           'anon cannot request a spending context');
@@ -350,8 +350,8 @@ select throws_ok($$ select public.consume_ai_quota(10, 0) $$, '22023', 'invalid_
 select throws_ok($$ select public.consume_ai_quota(10, 500) $$, '22023', 'invalid_limit', 'the per-minute limit is capped');
 
 -- finish_ai_usage
-select is((public.finish_ai_usage((select id from tests.events where name = 'e3'), 'claude', 'claude-haiku-5-5', 'succeeded', 840, 1200, 300)).status,
-          'succeeded', 'the owner completes a reserved event');
+select is((public.finish_ai_usage((select id from tests.events where name = 'e3'), 'claude', 'claude-haiku-5-5', 'ok', 840, 1200, 300)).status,
+          'ok', 'the owner completes a reserved event');
 reset role;
 select is((select row(provider, model, latency_ms, input_tokens, output_tokens, finished_at is not null)::text
            from public.ai_usage_events where id = (select id from tests.events where name = 'e3')),
@@ -361,15 +361,43 @@ select throws_ok($$ select public.finish_ai_usage((select id from tests.events w
                  'P0001', 'usage_event_finished', 'a finished event cannot be changed');
 select throws_ok($$ select public.finish_ai_usage((select id from tests.events where name = 'e2'), 'claude', 'm', 'reserved') $$,
                  '22023', 'invalid_status', 'the outcome must be a final status');
-select throws_ok($$ select public.finish_ai_usage((select id from tests.events where name = 'e2'), 'claude', 'm', 'succeeded', -1) $$,
+select throws_ok($$ select public.finish_ai_usage((select id from tests.events where name = 'e2'), 'claude', 'm', 'ok', -1) $$,
                  '22023', 'invalid_metrics', 'negative metrics are rejected');
-select throws_ok($$ select public.finish_ai_usage((select id from tests.events where name = 'e2'), 'Bad Provider!', 'm', 'succeeded') $$,
+select throws_ok($$ select public.finish_ai_usage((select id from tests.events where name = 'e2'), 'Bad Provider!', 'm', 'ok') $$,
                  '22023', 'invalid_provider', 'provider names are short identifiers');
 select tests.authenticate_as('ben');
-select throws_ok($$ select public.finish_ai_usage((select id from tests.events where name = 'e2'), 'claude', 'm', 'succeeded') $$,
+select throws_ok($$ select public.finish_ai_usage((select id from tests.events where name = 'e2'), 'claude', 'm', 'ok') $$,
                  'P0002', 'usage_event_not_found', 'a user cannot complete another user''s event');
-select throws_ok($$ select public.finish_ai_usage(gen_random_uuid(), 'claude', 'm', 'succeeded') $$,
+select throws_ok($$ select public.finish_ai_usage(gen_random_uuid(), 'claude', 'm', 'ok') $$,
                  'P0002', 'usage_event_not_found', 'an unknown event is reported');
+
+-- Every outcome the ai-chat Edge Function reports is accepted (provider and model may be NULL
+-- when the request failed before any provider was called).
+reset role;
+insert into public.ai_usage_events (user_id) select tests.uid('dan') from generate_series(1, 7);
+select tests.authenticate_as('dan');
+select is((select array_agg((public.finish_ai_usage(e.id, case when s.st = 'error' then null else 'gemini' end,
+                                                    case when s.st = 'error' then null else 'gemini-3.8-flash' end,
+                                                    s.st, 12, null, null)).status order by s.n)
+           from (select id, row_number() over (order by id) as n from public.ai_usage_events
+                 where user_id = auth.uid() and status = 'reserved') as e
+           join unnest(array['ok', 'truncated', 'declined', 'interrupted', 'failed', 'aborted', 'error'])
+                with ordinality as s (st, n) using (n)),
+          array['ok', 'truncated', 'declined', 'interrupted', 'failed', 'aborted', 'error'],
+          'finish_ai_usage accepts every status the ai-chat function sends');
+reset role;
+-- PostgREST matches RPC arguments by name: these are the names the Edge Functions send.
+select is((select array_agg(p.proname || '(' || array_to_string(p.proargnames[1:p.pronargs], ',') || ')' order by p.proname)
+           from pg_proc as p
+           where p.pronamespace = 'public'::regnamespace
+             and p.proname in ('consume_ai_quota', 'finish_ai_usage', 'get_ai_spending_context')),
+          array['consume_ai_quota(p_daily_limit,p_per_minute)',
+                'finish_ai_usage(p_event_id,p_provider,p_model,p_status,p_latency_ms,p_input_tokens,p_output_tokens)',
+                'get_ai_spending_context(p_tz,p_days,p_as_of)'],
+          'the AI RPCs have the argument names the ai-chat function sends');
+select is((select prorettype::regtype::text from pg_proc where oid = 'public.consume_ai_quota(integer, integer)'::regprocedure),
+          'uuid', 'consume_ai_quota returns the reserved event id as a plain uuid');
+select tests.authenticate_as('ben');
 
 -- Table access
 select is((select count(*) from public.ai_usage_events), 1::bigint, 'a user reads only their own usage events');

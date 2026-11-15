@@ -14,8 +14,10 @@
 --   the foreign keys set the user columns to NULL and balances show them as 'Former member'.
 --   Every group the user belongs to or administers is locked first (the same group-row lock the
 --   membership RPCs take), so the admin hand-over cannot interleave with them.
---   Idempotent: a second call finds nothing left to change and returns zero counts.
---   Raises P0002 'user_not_found' when there is no auth user with that id (already deleted).
+--   Idempotent: a second call finds nothing left to change and returns zero counts. When there is no
+--   auth user with that id any more (already deleted, e.g. a delete-account retry after
+--   auth.admin.deleteUser succeeded), it changes nothing and returns the same shape with zero counts
+--   and already_deleted = true; otherwise already_deleted is false.
 --
 -- A BEFORE DELETE trigger on auth.users runs the same function, so deleting a user by any path
 -- (dashboard, admin API without the Edge Function) never takes other members' data with it.
@@ -86,7 +88,20 @@ BEGIN
         RAISE EXCEPTION 'invalid_target' USING ERRCODE = '22023';
     END IF;
     IF NOT EXISTS (SELECT 1 FROM auth.users AS u WHERE u.id = p_user_id) THEN
-        RAISE EXCEPTION 'user_not_found' USING ERRCODE = 'P0002';
+        -- Already deleted: the foreign keys removed or anonymised everything when the auth user went.
+        RETURN pg_catalog.jsonb_build_object(
+            'user_id', p_user_id,
+            'admin_transferred', '[]'::jsonb,
+            'groups_deleted', '[]'::jsonb,
+            'settlements_voided', 0,
+            'memberships_removed', 0,
+            'personal_expenses_deleted', 0,
+            'ai_usage_events_deleted', 0,
+            'ai_reports_deleted', 0,
+            'invitations_deleted', 0,
+            'profile_deleted', false,
+            'already_deleted', true
+        );
     END IF;
 
     -- One deletion at a time per user (Edge Function retry racing the auth trigger).
@@ -179,7 +194,8 @@ BEGIN
         'ai_usage_events_deleted', v_usage,
         'ai_reports_deleted', v_reports,
         'invitations_deleted', v_invitations,
-        'profile_deleted', v_profile > 0
+        'profile_deleted', v_profile > 0,
+        'already_deleted', false
     );
 END;
 $$;

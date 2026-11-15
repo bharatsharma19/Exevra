@@ -207,7 +207,7 @@ as $$ select s.id from tests.settlements as s where s.name = p_name $$;
 
 grant execute on all functions in schema tests to anon, authenticated;
 
-select plan(57);
+select plan(58);
 
 select tests.create_user('ann');
 select tests.create_user('ben');
@@ -333,7 +333,7 @@ reset role;
 select is((select doc - 'user_id' from tests.result where name = 'second'),
           '{"admin_transferred": [], "groups_deleted": [], "settlements_voided": 0, "memberships_removed": 0,
             "personal_expenses_deleted": 0, "ai_usage_events_deleted": 0, "ai_reports_deleted": 0,
-            "invitations_deleted": 0, "profile_deleted": false}'::jsonb,
+            "invitations_deleted": 0, "profile_deleted": false, "already_deleted": false}'::jsonb,
           'the second run finds nothing left to change');
 
 -- ===========================================================================
@@ -371,8 +371,14 @@ select is((select invited_by from public.group_members where group_id = tests.gi
           'a member the user invited stays, without the inviter reference');
 
 set local role service_role;
-select throws_ok(format($$ select public.prepare_account_deletion(%L) $$, tests.uid('ann')), 'P0002', 'user_not_found',
-                 'after the auth user is gone the function reports it');
+select is(public.prepare_account_deletion(tests.uid('ann')) - 'user_id',
+          '{"admin_transferred": [], "groups_deleted": [], "settlements_voided": 0, "memberships_removed": 0,
+            "personal_expenses_deleted": 0, "ai_usage_events_deleted": 0, "ai_reports_deleted": 0,
+            "invitations_deleted": 0, "profile_deleted": false, "already_deleted": true}'::jsonb,
+          'after the auth user is gone the function succeeds and reports already_deleted (delete-account retries are safe)');
+select is((select array_to_string(proargnames, ',') || ' -> ' || prorettype::regtype::text from pg_proc
+           where oid = 'public.prepare_account_deletion(uuid)'::regprocedure),
+          'p_user_id -> jsonb', 'prepare_account_deletion takes p_user_id, as the delete-account function sends it');
 select throws_ok($$ select public.prepare_account_deletion(null) $$, '22023', 'invalid_target', 'a NULL id is rejected');
 reset role;
 

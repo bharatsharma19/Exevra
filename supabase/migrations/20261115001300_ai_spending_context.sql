@@ -9,7 +9,9 @@
 --   p_tz    IANA zone (validated against pg_timezone_names); NULL = the caller's profile time zone.
 --   p_days  1..366 (default 90).
 --   p_as_of reference instant (default now()); used by tests to fix "today".
---   Requires profiles.ai_consent = true (42501 'ai_consent_required').
+--   Requires profiles.ai_consent = true, else P0001 'consent_required'. The ai-chat Edge Function checks
+--   consent itself before calling; this check is defence in depth, and the key is the function's own
+--   error code, so its generic P0001 mapping answers 403 consent_required.
 --   Amounts are integer minor units and are never added across currencies.
 --   Titles, categories and group names are returned as plain JSON strings; the caller (Edge Function)
 --   must treat them as data, never as instructions.
@@ -53,7 +55,7 @@ BEGIN
         RAISE EXCEPTION 'profile_not_found' USING ERRCODE = 'P0002';
     END IF;
     IF NOT COALESCE(v_profile.ai_consent, false) THEN
-        RAISE EXCEPTION 'ai_consent_required' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'consent_required' USING ERRCODE = 'P0001';
     END IF;
 
     v_tz := COALESCE(NULLIF(pg_catalog.btrim(p_tz), ''), v_profile.timezone, 'UTC');
