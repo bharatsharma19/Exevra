@@ -16,7 +16,10 @@ import {
 
 /** Time allowed from starting a provider call to its first text token. */
 export const FIRST_TOKEN_TIMEOUT_MS = 12_000;
-/** Time allowed between events once text is flowing. */
+/**
+ * Time allowed between upstream events once text is flowing. Any event counts, including
+ * thinking (`progress`) and usage, so a model thinking between text blocks is not cut off.
+ */
 export const STREAM_IDLE_TIMEOUT_MS = 30_000;
 
 /** Callbacks for streamed output. `onStart` fires exactly once, right before the first text. */
@@ -46,12 +49,17 @@ export interface FailedAttempt {
   model: string;
   failure: AttemptFailure;
   status?: number;
+  /** Tokens the attempt reported before failing (billed even though no text was used). */
+  usage: ProviderUsage;
 }
 
 interface Served {
   provider: ProviderName;
   model: string;
+  /** Time from this provider's start to its first text token. */
   ttftMs?: number;
+  /** Clock time of the first text token (for request-relative timings). */
+  firstTokenAt?: number;
   usage: ProviderUsage;
   /** Earlier providers that failed before any text. */
   attempts: FailedAttempt[];
@@ -156,11 +164,13 @@ export async function runWithFailover(
     const started = clock.now();
     const usage: ProviderUsage = {};
     let ttftMs: number | undefined;
+    let firstTokenAt: number | undefined;
     let iterator: AsyncIterator<ProviderEvent> | undefined;
     const served = (): Served => ({
       provider: provider.name,
       model: provider.model,
       ttftMs,
+      firstTokenAt,
       usage,
       attempts,
     });
@@ -170,6 +180,7 @@ export async function runWithFailover(
         model: provider.model,
         failure,
         status,
+        usage: { ...usage },
       });
     };
 
@@ -221,12 +232,16 @@ export async function runWithFailover(
           }
         } else {
           const event = result.value;
-          if (event.type === "usage") {
+          if (event.type === "progress") {
+            // Upstream is alive; the next wait restarts the idle timer (not the first-token one).
+            continue;
+          } else if (event.type === "usage") {
             mergeUsage(usage, event.usage);
           } else if (event.type === "text") {
             if (event.text === "") continue;
             if (ttftMs === undefined) {
-              ttftMs = clock.now() - started;
+              firstTokenAt = clock.now();
+              ttftMs = firstTokenAt - started;
               sink.onStart(provider.name, provider.model);
             }
             sink.onText(event.text);

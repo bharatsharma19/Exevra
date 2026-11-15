@@ -9,9 +9,26 @@ import { APPLE_REVOKE_URL, APPLE_TOKEN_URL } from "./apple.ts";
 import { createDeleteAccountHandler, type DeleteAccountDeps, hasAppleIdentity } from "./handler.ts";
 import { generateAppleTestKey } from "./test_keys.ts";
 
-const JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1MSJ9.c2ln";
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const NOW = Date.parse("2026-11-15T10:00:00Z");
+
+function base64url(text: string): string {
+  return btoa(text).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** A Supabase-shaped access token (the fake getUser decides validity; only claims matter). */
+function jwt(claims: Record<string, unknown>): string {
+  return `${base64url(JSON.stringify({ alg: "HS256", typ: "JWT" }))}.${
+    base64url(JSON.stringify({ sub: USER_ID, ...claims }))
+  }.c2ln`;
+}
+
+const nowSec = (offsetMs = 0): number => Math.floor((NOW + offsetMs) / 1000);
+/** Signed in one minute ago. */
+const JWT = jwt({
+  iat: nowSec(-60_000),
+  amr: [{ method: "password", timestamp: nowSec(-60_000) }],
+});
 
 const EMAIL_USER: AuthUser = {
   id: USER_ID,
@@ -312,4 +329,46 @@ Deno.test("hasAppleIdentity checks metadata and identities", () => {
   const withIdentities = { id: "u", identities: [{ provider: "google" }, { provider: "apple" }] };
   assertEquals(hasAppleIdentity(withIdentities as AuthUser), true);
   assertEquals(hasAppleIdentity({ id: "u" }), false);
+});
+
+// ---- Recent authentication -------------------------------------------------------------------
+
+Deno.test("a token without recent sign-in is 403 reauth_required and nothing is changed", async () => {
+  const stale = [
+    // Issued 55 minutes ago by a refresh; the sign-in itself was 30 days ago.
+    jwt({
+      iat: nowSec(-55 * 60_000),
+      amr: [{ method: "password", timestamp: nowSec(-30 * 86_400_000) }],
+    }),
+    // Signed in 11 minutes ago.
+    jwt({ iat: nowSec(-60_000), amr: [{ method: "oauth", timestamp: nowSec(-11 * 60_000) }] }),
+    // No amr claim at all, or a malformed one.
+    jwt({ iat: nowSec(-60_000) }),
+    jwt({ amr: "password" }),
+    jwt({ amr: [{ method: "password", timestamp: "recent" }] }),
+    // A sign-in time in the future is not trusted.
+    jwt({ amr: [{ method: "password", timestamp: nowSec(10 * 60_000) }] }),
+  ];
+  for (const token of stale) {
+    const { handler, rec, logs } = setup();
+    const response = await handler(request({}, `Bearer ${token}`));
+    assertEquals(response.status, 403, token);
+    assertEquals((await response.json()).error.code, "reauth_required");
+    assertEquals(rec.steps, ["getUser"], "nothing after authentication");
+    assertEquals(rec.adminsCreated, 0);
+    assertEquals(logs.lines.at(-1)?.entry.code, "reauth_required");
+  }
+});
+
+Deno.test("the newest amr entry counts (for example a fresh MFA step on an old session)", async () => {
+  const token = jwt({
+    amr: [
+      { method: "password", timestamp: nowSec(-30 * 86_400_000) },
+      { method: "totp", timestamp: nowSec(-2 * 60_000) },
+    ],
+  });
+  const { handler, rec } = setup();
+  const response = await handler(request({}, `Bearer ${token}`));
+  assertEquals(response.status, 200);
+  assertEquals(rec.steps, ["getUser", `prepare:${USER_ID}`, `deleteUser:${USER_ID}`]);
 });

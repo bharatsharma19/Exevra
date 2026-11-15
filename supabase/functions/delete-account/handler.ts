@@ -1,7 +1,8 @@
 /**
  * delete-account: permanently deletes the caller's account.
  *
- * Flow: verify JWT -> service-role `prepare_account_deletion(p_user_id)` (hands group admin on,
+ * Flow: verify JWT -> require a sign-in within the last {@link REAUTH_MAX_AGE_MS} (the newest
+ * `amr` timestamp of the verified token; 403 `reauth_required` otherwise) -> service-role `prepare_account_deletion(p_user_id)` (hands group admin on,
  * anonymises shared history as "Former member", deletes personal data) -> revoke Sign in with
  * Apple tokens when possible (never blocks deletion) -> `auth.admin.deleteUser`.
  *
@@ -38,6 +39,46 @@ export interface DeleteAccountDeps {
   clock?: Clock;
   logger?: Logger;
   requestId?: () => string;
+  /** How recent the caller's last sign-in must be. Defaults to {@link REAUTH_MAX_AGE_MS}. */
+  reauthMaxAgeMs?: number;
+}
+
+/**
+ * Deletion needs a sign-in (password, OTP, OAuth, Apple, MFA step) within this window, so a
+ * leaked or stolen access token alone cannot delete the account.
+ */
+export const REAUTH_MAX_AGE_MS = 10 * 60_000;
+/** Allowed clock skew for sign-in times slightly in the future. */
+const CLOCK_SKEW_MS = 60_000;
+export const REAUTH_MESSAGE =
+  "For your security, please sign in again, then delete your account within 10 minutes.";
+
+/**
+ * Time (ms since epoch) of the most recent authentication recorded in the token's `amr` claim,
+ * or `null` when there is none. Only call this after `auth.getUser` has accepted the token: the
+ * payload is decoded here, not verified.
+ */
+export function lastSignInMs(token: string): number | null {
+  const payload = token.split(".")[1];
+  if (payload === undefined) return null;
+  let claims: unknown;
+  try {
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    claims = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return null;
+  }
+  if (!isRecord(claims) || !Array.isArray(claims.amr)) return null;
+  let newest: number | null = null;
+  for (const entry of claims.amr) {
+    if (!isRecord(entry)) continue;
+    const timestamp = entry.timestamp;
+    if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) continue;
+    const ms = timestamp * 1000;
+    if (newest === null || ms > newest) newest = ms;
+  }
+  return newest;
 }
 
 /** Successful response body. */
@@ -161,8 +202,9 @@ export function createDeleteAccountHandler(
       assertMethod(req, "POST");
 
       let user: AuthUser;
+      let token: string;
       try {
-        ({ user } = await authenticate(req, deps.makeUserClient));
+        ({ user, token } = await authenticate(req, deps.makeUserClient));
       } catch (err) {
         // A validly signed token whose user no longer exists: a retry after a deletion whose
         // response was lost. Report success so the app can finish signing out.
@@ -175,6 +217,16 @@ export function createDeleteAccountHandler(
         }
         if (err instanceof HttpError && err.code === "unauthorized") throw err;
         throw new DeletionFailed("authenticate", { cause: err });
+      }
+
+      // Deletion is irreversible: require a recent sign-in, not just any unexpired token.
+      const signedInAt = lastSignInMs(token);
+      const now = clock.now();
+      const maxAge = deps.reauthMaxAgeMs ?? REAUTH_MAX_AGE_MS;
+      if (
+        signedInAt === null || now - signedInAt > maxAge || signedInAt - now > CLOCK_SKEW_MS
+      ) {
+        throw new HttpError("reauth_required", REAUTH_MESSAGE);
       }
 
       const body = await readOptionalJsonObject(req);

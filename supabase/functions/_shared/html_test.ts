@@ -34,6 +34,8 @@ Deno.test("toSingleLine strips line breaks and truncates by code point", () => {
   assertEquals(toSingleLine("  abcdef  ", 4), "abc…");
   assertEquals(toSingleLine("😀😀😀😀😀", 3), "😀😀…");
   assertEquals(toSingleLine("short", 10), "short");
+  // Format and bidi controls (RLO, zero-width, BOM, isolates) are removed, not replaced.
+  assertEquals(toSingleLine("a\u202Ebc\u202C d\u200Be\uFEFF\u2067f\u2069", 20), "abc def");
 });
 
 Deno.test("safeHttpsUrl accepts only plain https URLs", () => {

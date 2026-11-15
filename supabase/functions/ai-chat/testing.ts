@@ -316,3 +316,18 @@ export async function flush(times = 10): Promise<void> {
     await new Promise<void>((r) => setTimeout(r, 0));
   }
 }
+
+/**
+ * Runs `fn` with an empty `process.env`. The Anthropic SDK reads optional variables when a client
+ * is built, and tests run without env permission.
+ */
+export function withEmptyProcessEnv<T>(fn: () => T): T {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "process");
+  Object.defineProperty(globalThis, "process", { value: { env: {} }, configurable: true });
+  try {
+    return fn();
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "process", descriptor);
+    else delete (globalThis as { process?: unknown }).process;
+  }
+}

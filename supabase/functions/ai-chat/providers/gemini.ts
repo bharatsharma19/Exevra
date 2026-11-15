@@ -174,8 +174,12 @@ export function createGeminiProvider(
           if (!isRecord(chunk)) continue;
           if (isRecord(chunk.error)) throw streamError(chunk.error);
 
+          let yielded = false;
           const usage = geminiUsage(chunk.usageMetadata);
-          if (usage) yield { type: "usage", usage };
+          if (usage) {
+            yield { type: "usage", usage };
+            yielded = true;
+          }
 
           const feedback = chunk.promptFeedback;
           if (isRecord(feedback) && typeof feedback.blockReason === "string") {
@@ -186,16 +190,22 @@ export function createGeminiProvider(
           }
 
           const candidate = Array.isArray(chunk.candidates) ? chunk.candidates[0] : undefined;
-          if (!isRecord(candidate)) continue;
+          if (!isRecord(candidate)) {
+            if (!yielded) yield { type: "progress" };
+            continue;
+          }
           const content = candidate.content;
           if (isRecord(content) && Array.isArray(content.parts)) {
             for (const part of content.parts) {
               if (!isRecord(part) || part.thought === true) continue;
               if (typeof part.text === "string" && part.text !== "") {
                 yield { type: "text", text: part.text };
+                yielded = true;
               }
             }
           }
+          // A chunk with only thought parts still shows the stream is alive.
+          if (!yielded) yield { type: "progress" };
           const finish = mapGeminiFinishReason(candidate.finishReason);
           if (finish === "error") throw new ProviderError("unavailable");
           if (finish !== undefined) {

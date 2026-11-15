@@ -35,11 +35,13 @@ export interface ProviderUsage {
 /**
  * Events yielded by {@link ChatProvider.streamText}. `text` carries visible answer text only
  * (thinking is never yielded). `usage` may arrive at any point and carries cumulative counts.
- * `stop` is the last event of a completed stream.
+ * `progress` carries nothing: it says the upstream stream is alive (for example a thinking delta)
+ * and only restarts the idle timer. `stop` is the last event of a completed stream.
  */
 export type ProviderEvent =
   | { type: "text"; text: string }
   | { type: "usage"; usage: ProviderUsage }
+  | { type: "progress" }
   | { type: "stop"; reason: StopReason };
 
 /** Failure categories that decide the final error code when every provider fails. */

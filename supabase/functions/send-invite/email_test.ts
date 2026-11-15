@@ -1,5 +1,5 @@
 import { assertEquals, assertFalse, assertStringIncludes } from "jsr:@std/assert@1.0.19";
-import { renderInviteEmail } from "./email.ts";
+import { FALLBACK_GROUP, FALLBACK_INVITER, looksLikeUrl, renderInviteEmail } from "./email.ts";
 
 const BASE = {
   inviterName: "Asha",
@@ -58,15 +58,53 @@ Deno.test("every interpolated value is HTML-escaped", () => {
 Deno.test("names are flattened to one line and truncated", () => {
   const email = renderInviteEmail({
     ...BASE,
-    inviterName: "Evil\r\nBcc: victim@example.com",
+    inviterName: "Evil\r\nBcc: victim",
     groupName: "G".repeat(200),
   });
   assertFalse(email.subject.includes("\n"));
   assertFalse(email.subject.includes("\r"));
-  assertStringIncludes(
-    email.subject,
-    "Evil Bcc: victim@example.com invited you to ",
-  );
+  assertStringIncludes(email.subject, "Evil Bcc: victim invited you to ");
   assertStringIncludes(email.subject, `${"G".repeat(59)}…`);
   assertFalse(email.subject.includes("G".repeat(61)));
+});
+
+Deno.test("bidi and zero-width characters are removed from names", () => {
+  const email = renderInviteEmail({
+    ...BASE,
+    inviterName: "Support \u202Emaet\u202C \u200Bteam\u2066\uFEFF",
+    groupName: "Fl\u200Dat\u00ADmates\u{E0041}",
+  });
+  for (const value of [email.subject, email.html, email.text]) {
+    assertFalse(/[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u00AD]/u.test(value), value);
+    assertFalse(/\p{Cf}/u.test(value));
+  }
+  assertEquals(email.subject, "Support maet team invited you to Flatmates on Exevra");
+  // Reversed domains are caught once the override is gone.
+  assertEquals(
+    renderInviteEmail({ ...BASE, inviterName: "\u202Emoc.lapyap" }).subject,
+    `${FALLBACK_INVITER} invited you to Flatmates on Exevra`,
+  );
+});
+
+Deno.test("URL-, domain- and email-shaped names fall back to neutral copy", () => {
+  for (
+    const name of [
+      "Account locked: verify at evil.example/x",
+      "https://evil.example",
+      "Visit www.evil",
+      "paypal.com support",
+      "pay\u200Bpal.com",
+      "evil\uFF0Eexample", // fullwidth full stop
+      "help@evil.example",
+    ]
+  ) {
+    assertEquals(looksLikeUrl(name), true, name);
+    const email = renderInviteEmail({ ...BASE, inviterName: name, groupName: name });
+    assertEquals(email.subject, `${FALLBACK_INVITER} invited you to ${FALLBACK_GROUP} on Exevra`);
+    assertFalse(email.html.includes("evil"), name);
+    assertFalse(email.text.includes("evil"), name);
+  }
+  for (const name of ["Asha", "Trip 2.0", "Goa trip, Dec. 2026", "J. Doe", "Flat #4"]) {
+    assertEquals(looksLikeUrl(name), false, name);
+  }
 });

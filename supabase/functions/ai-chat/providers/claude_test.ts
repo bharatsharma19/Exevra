@@ -130,13 +130,22 @@ Deno.test("fake SDK stream: only text_delta is yielded; usage and stop are repor
   const events = await collect(
     provider.streamText(params, new AbortController().signal),
   );
+  // Ignored upstream events (thinking, block boundaries, empty text) become payload-free
+  // `progress` events, which only keep the idle timer from firing.
   assertEquals(events, [
     { type: "usage", usage: { inputTokens: 125 } },
+    { type: "progress" },
+    { type: "progress" },
+    { type: "progress" },
+    { type: "progress" },
     { type: "text", text: "Hello" },
+    { type: "progress" },
     { type: "text", text: " world" },
     { type: "usage", usage: { inputTokens: 125, outputTokens: 42 } },
+    { type: "progress" },
     { type: "stop", reason: "end" },
   ]);
+  assertFalse(JSON.stringify(events).includes("thinking"));
 });
 
 Deno.test("stop reasons map to end / max_tokens / refusal", () => {
@@ -414,4 +423,52 @@ Deno.test("real SDK: a network failure is unavailable", async () => {
   );
   assertInstanceOf(error, ProviderError);
   assertEquals(error.kind, "unavailable");
+});
+
+Deno.test("SDK logging and tracing ignore ANTHROPIC_LOG and content-mode tracing variables", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "process");
+  Object.defineProperty(globalThis, "process", {
+    value: {
+      env: {
+        ANTHROPIC_LOG: "debug",
+        ANTHROPIC_OPEN_TELEMETRY_TRACES_CONTENT_MODE: "content",
+      },
+    },
+    configurable: true,
+  });
+  let client: Anthropic;
+  try {
+    client = createAnthropicClient("test-anthropic-key");
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "process", descriptor);
+    else delete (globalThis as { process?: unknown }).process;
+  }
+  assertEquals(client.logLevel, "warn");
+});
+
+Deno.test("real SDK: the stream itself is never retried by the SDK (failover is the retry)", async () => {
+  using fetchMock = mockFetch(() =>
+    new Response(JSON.stringify({ type: "error", error: { type: "x", message: "x" } }), {
+      status: 529,
+      headers: { "content-type": "application/json", "retry-after": "0" },
+    })
+  );
+  // A client that would retry twice if the stream did not override it.
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "process");
+  Object.defineProperty(globalThis, "process", { value: { env: {} }, configurable: true });
+  let client: Anthropic;
+  try {
+    client = createAnthropicClient("test-anthropic-key", { maxRetries: 2 });
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "process", descriptor);
+    else delete (globalThis as { process?: unknown }).process;
+  }
+  for (const model of ["claude-haiku-5-5", CLAUDE_SONNET_MODEL]) {
+    const provider = createClaudeProvider({ model, open: sdkStreamOpener(client) });
+    const error = await assertRejects(() =>
+      collect(provider.streamText(params, new AbortController().signal))
+    );
+    assertInstanceOf(error, ProviderError);
+  }
+  assertEquals(fetchMock.calls.length, 2, "one request per model, no retries");
 });

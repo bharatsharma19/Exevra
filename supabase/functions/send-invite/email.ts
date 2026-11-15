@@ -41,9 +41,26 @@ const ROLE_COPY: Readonly<Record<InviteRole, string>> = {
   viewer: "As a viewer you can see the group's expenses and balances.",
 };
 
+/**
+ * Text that mail clients may turn into a link: a URL scheme, `www.`, an email address or a
+ * domain-like `word.tld`. Checked after NFKC normalisation so fullwidth dots and letters count.
+ */
+const URL_LIKE = /[a-z][a-z0-9+.-]*:\/\/|www\.|\S@\S|[\p{L}\p{N}_-]\.\p{L}{2,}/iu;
+
+/** True when a (cleaned) name could be shown as a link or read as an address by a mail client. */
+export function looksLikeUrl(text: string): boolean {
+  return URL_LIKE.test(toSingleLine(text, 1000).normalize("NFKC"));
+}
+
+/**
+ * Flattens a name to one short line. Names that look like URLs, domains or email addresses use
+ * the neutral fallback instead, so an invitation sent from Exevra's domain cannot carry a
+ * clickable phishing link or a fake "verify at ..." instruction in the inviter or group name.
+ */
 function cleanName(value: string | null, fallback: string): string {
   const clean = value === null ? "" : toSingleLine(value, MAX_NAME_CHARS);
-  return clean === "" ? fallback : clean;
+  if (clean === "" || looksLikeUrl(clean)) return fallback;
+  return clean;
 }
 
 function expiryPhrase(days: number): string {

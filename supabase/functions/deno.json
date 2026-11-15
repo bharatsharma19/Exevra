@@ -26,6 +26,6 @@
   },
   "tasks": {
     "test": "deno test --no-prompt",
-    "check": "deno fmt --check && deno lint && deno test --no-prompt"
+    "check": "deno fmt --check && deno lint && deno check ai-chat/index.ts send-invite/index.ts delete-account/index.ts && deno test --no-prompt"
   }
 }

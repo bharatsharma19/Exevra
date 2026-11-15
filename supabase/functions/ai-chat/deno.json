@@ -1,3 +1,9 @@
 {
+  "lock": false,
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true
+  },
   "imports": {}
 }

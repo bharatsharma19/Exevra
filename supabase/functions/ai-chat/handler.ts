@@ -20,13 +20,17 @@ import {
 } from "../_shared/http.ts";
 import { errorName, type Logger, newRequestId } from "../_shared/log.ts";
 import { createSseStream, DEFAULT_PING_INTERVAL_MS, sseResponse } from "../_shared/sse.ts";
-import { type FailoverOutcome, runWithFailover } from "./failover.ts";
+import { type FailedAttempt, type FailoverOutcome, runWithFailover } from "./failover.ts";
+import { createOutputFilter } from "./output_filter.ts";
 import { buildContextBlock, localDate, prepareHistory, SYSTEM_INSTRUCTIONS } from "./prompt.ts";
 import { MAX_BODY_BYTES, parseChatRequest } from "./request.ts";
 import type { ChatProvider, ProviderUsage, StreamParams } from "./types.ts";
 
 /** Output cap per answer. Thinking counts toward it, hence the margin over a typical answer. */
 export const MAX_OUTPUT_TOKENS = 4096;
+
+/** Longest wait for `finish_ai_usage`; usage booking must never hold a worker for long. */
+export const FINISH_USAGE_TIMEOUT_MS = 5_000;
 
 /** Result of a Supabase query or RPC. */
 export interface DbResult {
@@ -125,8 +129,25 @@ interface UsageRecord {
   provider: string | null;
   model: string | null;
   usage: ProviderUsage;
+  /** Time from the start of the request to the first text token. */
   ttftMs?: number;
+  /** Time from the serving provider's start to its first text token. */
+  providerTtftMs?: number;
   latencyMs: number;
+}
+
+/** Sums the tokens of attempts that failed before any text (logged as `failover_*_tokens`). */
+function attemptUsage(attempts: readonly FailedAttempt[]): ProviderUsage {
+  const total: ProviderUsage = {};
+  for (const { usage } of attempts) {
+    if (usage.inputTokens !== undefined) {
+      total.inputTokens = (total.inputTokens ?? 0) + usage.inputTokens;
+    }
+    if (usage.outputTokens !== undefined) {
+      total.outputTokens = (total.outputTokens ?? 0) + usage.outputTokens;
+    }
+  }
+  return total;
 }
 
 /** Handles one ai-chat request. */
@@ -143,16 +164,29 @@ export async function handleAiChat<C extends AiChatClient>(
 
   const finishUsage = async (record: UsageRecord): Promise<void> => {
     if (client === undefined || eventId === undefined) return;
+    let timer: ReturnType<Timers["setTimeout"]> | undefined;
     try {
-      const { error } = await client.rpc("finish_ai_usage", {
-        p_event_id: eventId,
-        p_provider: record.provider,
-        p_model: record.model,
-        p_status: record.status,
-        p_latency_ms: Math.max(0, Math.round(record.latencyMs)),
-        p_input_tokens: record.usage.inputTokens ?? null,
-        p_output_tokens: record.usage.outputTokens ?? null,
+      const call = Promise.resolve(
+        client.rpc("finish_ai_usage", {
+          p_event_id: eventId,
+          p_provider: record.provider,
+          p_model: record.model,
+          p_status: record.status,
+          p_latency_ms: Math.max(0, Math.round(record.latencyMs)),
+          p_input_tokens: record.usage.inputTokens ?? null,
+          p_output_tokens: record.usage.outputTokens ?? null,
+        }),
+      );
+      const timeout = new Promise<"timeout">((resolve) => {
+        timer = deps.timers.setTimeout(() => resolve("timeout"), FINISH_USAGE_TIMEOUT_MS);
       });
+      const result = await Promise.race([call, timeout]);
+      if (result === "timeout") {
+        call.catch(() => {});
+        logger.warn({ request_id: requestId, step: "finish_ai_usage", error: "timeout" });
+        return;
+      }
+      const { error } = result;
       if (error) {
         logger.warn({
           request_id: requestId,
@@ -166,6 +200,8 @@ export async function handleAiChat<C extends AiChatClient>(
         step: "finish_ai_usage",
         error: errorName(err),
       });
+    } finally {
+      if (timer !== undefined) deps.timers.clearTimeout(timer);
     }
   };
 
@@ -256,6 +292,20 @@ export async function handleAiChat<C extends AiChatClient>(
     onCancel: abort,
   });
 
+  // Model text passes through the image filter (see output_filter.ts). `meta` is sent with the
+  // first visible text, so it never appears without a following `delta`.
+  const filter = createOutputFilter();
+  let provider: string | undefined;
+  let metaSent = false;
+  const sendText = (text: string): void => {
+    if (text === "" || provider === undefined) return;
+    if (!metaSent) {
+      metaSent = true;
+      writer.event("meta", { provider, request_id: requestId });
+    }
+    writer.event("delta", { text });
+  };
+
   const task = (async (): Promise<void> => {
     let outcome: FailoverOutcome;
     try {
@@ -268,8 +318,10 @@ export async function handleAiChat<C extends AiChatClient>(
         firstTokenTimeoutMs: deps.firstTokenTimeoutMs,
         idleTimeoutMs: deps.idleTimeoutMs,
         sink: {
-          onStart: (provider) => writer.event("meta", { provider, request_id: requestId }),
-          onText: (text) => writer.event("delta", { text }),
+          onStart: (name) => {
+            provider = name;
+          },
+          onText: (text) => sendText(filter.push(text)),
         },
       });
     } catch (err) {
@@ -282,8 +334,17 @@ export async function handleAiChat<C extends AiChatClient>(
       outcome = { status: "failed", code: "unavailable", attempts: [] };
     }
 
+    // Release text held back by the filter before the terminal event (not after an abort).
+    if (outcome.status !== "aborted") sendText(filter.flush());
+
     let record: UsageRecord;
     const latencyMs = clock.now() - started;
+    const ttft = "firstTokenAt" in outcome && outcome.firstTokenAt !== undefined
+      ? {
+        ttftMs: outcome.firstTokenAt - started,
+        providerTtftMs: outcome.ttftMs,
+      }
+      : {};
     switch (outcome.status) {
       case "done":
         writer.event("done", { truncated: outcome.truncated });
@@ -292,7 +353,7 @@ export async function handleAiChat<C extends AiChatClient>(
           provider: outcome.provider,
           model: outcome.model,
           usage: outcome.usage,
-          ttftMs: outcome.ttftMs,
+          ...ttft,
           latencyMs,
         };
         break;
@@ -320,7 +381,7 @@ export async function handleAiChat<C extends AiChatClient>(
           provider: outcome.provider,
           model: outcome.model,
           usage: outcome.usage,
-          ttftMs: outcome.ttftMs,
+          ...ttft,
           latencyMs,
         };
         break;
@@ -334,7 +395,7 @@ export async function handleAiChat<C extends AiChatClient>(
           status: "failed",
           provider: last?.provider ?? null,
           model: last?.model ?? null,
-          usage: {},
+          usage: last?.usage ?? {},
           latencyMs,
         };
         break;
@@ -350,10 +411,17 @@ export async function handleAiChat<C extends AiChatClient>(
         break;
     }
 
-    // Book usage before closing so the worker is still alive for the RPC.
-    await finishUsage(record);
+    // End the response right after the terminal event; usage booking and the log line run
+    // afterwards inside this task, which waitUntil keeps alive.
+    writer.close();
     req.signal.removeEventListener("abort", abort);
+    await finishUsage(record);
 
+    const attempts = "attempts" in outcome ? outcome.attempts : [];
+    // When every provider failed, the last attempt's tokens are already in `record.usage`.
+    const failedTokens = attemptUsage(
+      outcome.status === "failed" ? attempts.slice(0, -1) : attempts,
+    );
     const line = {
       request_id: requestId,
       provider: record.provider,
@@ -361,12 +429,15 @@ export async function handleAiChat<C extends AiChatClient>(
       status: record.status,
       http_status: 200,
       ttft_ms: record.ttftMs,
+      provider_ttft_ms: record.providerTtftMs,
       latency_ms: record.latencyMs,
       input_tokens: record.usage.inputTokens,
       output_tokens: record.usage.outputTokens,
-      failover: "attempts" in outcome && outcome.attempts.length > 0
-        ? outcome.attempts.map((a) => `${a.provider}:${a.failure}`).join(",")
+      failover: attempts.length > 0
+        ? attempts.map((a) => `${a.provider}:${a.failure}`).join(",")
         : undefined,
+      failover_input_tokens: failedTokens.inputTokens,
+      failover_output_tokens: failedTokens.outputTokens,
     };
     if (
       record.status === "ok" || record.status === "truncated" ||
@@ -376,7 +447,6 @@ export async function handleAiChat<C extends AiChatClient>(
     } else {
       logger.warn(line);
     }
-    writer.close();
   })();
 
   deps.waitUntil?.(task);

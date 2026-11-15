@@ -142,6 +142,16 @@ Deno.test("multi-chunk stream with usage and STOP", async () => {
   assertEquals(events.at(-1), { type: "stop", reason: "end" });
 });
 
+Deno.test("a chunk with only thought parts yields a payload-free progress event", async () => {
+  const events = await run([
+    chunk({ candidates: [{ content: { parts: [{ text: "HIDDEN", thought: true }] } }] }),
+    textChunk(["Answer"], { finishReason: "STOP" }),
+  ]);
+  assertEquals(events[0], { type: "progress" });
+  assertEquals(texts(events), "Answer");
+  assertEquals(JSON.stringify(events).includes("HIDDEN"), false);
+});
+
 Deno.test("lines split across network chunks and CRLF endings are reassembled", async () => {
   const full = textChunk(["Split ", "text"], { finishReason: "STOP" }).replace(
     /\n/g,

@@ -61,7 +61,11 @@ export const ANTHROPIC_API_BASE = "https://api.anthropic.com";
 
 /**
  * Creates an SDK client with one retry and a 60 s request timeout. `maxRetries` can be lowered
- * in tests.
+ * in tests. Chat streams override it per request (see {@link sdkStreamOpener}).
+ *
+ * `logLevel` and `openTelemetry` are pinned like `baseURL`: otherwise `ANTHROPIC_LOG=debug|info`
+ * or `ANTHROPIC_OPEN_TELEMETRY_TRACES_CONTENT_MODE=content` set as a function secret would make
+ * the SDK log or trace full requests, including the spending data block and user messages.
  */
 export function createAnthropicClient(
   apiKey: string,
@@ -73,22 +77,29 @@ export function createAnthropicClient(
     webhookKey: null,
     maxRetries: options.maxRetries ?? 1,
     timeout: 60_000,
+    logLevel: "warn",
+    openTelemetry: false,
   });
 }
 
 /**
  * Real stream opener. For Claude Sonnet 5.5 it uses the beta endpoint with the server-side
  * refusal fallback; Claude Haiku has no server-side fallback, so it uses the plain endpoint.
+ *
+ * SDK retries are off for the stream (`maxRetries: 0`): failover to Gemini is the retry. With
+ * retries on, the SDK sleeps for the whole `retry-after` of a 429 (any length) before retrying,
+ * which runs past the first-token deadline and turns a rate limit into a timeout.
  */
 export function sdkStreamOpener(client: Anthropic): ClaudeStreamOpener {
   return (body, signal) => {
+    const options = { signal, maxRetries: 0 };
     if (body.model === CLAUDE_SONNET_MODEL) {
       return client.beta.messages.stream(
         { ...body, betas: [SERVER_SIDE_FALLBACK_BETA], fallbacks: "default" },
-        { signal },
+        options,
       );
     }
-    return client.messages.stream(body, { signal });
+    return client.messages.stream(body, options);
   };
 }
 
@@ -188,6 +199,7 @@ export function createClaudeProvider(
       let stop: StopReason | undefined;
       try {
         for await (const event of open(body, signal)) {
+          let yielded = false;
           switch (event.type) {
             case "message_start": {
               const usage = event.message?.usage;
@@ -196,6 +208,7 @@ export function createClaudeProvider(
                   count(usage.cache_creation_input_tokens) +
                   count(usage.cache_read_input_tokens);
                 yield { type: "usage", usage: { inputTokens } };
+                yielded = true;
               }
               break;
             }
@@ -207,6 +220,7 @@ export function createClaudeProvider(
                 typeof delta.text === "string" && delta.text
               ) {
                 yield { type: "text", text: delta.text };
+                yielded = true;
               }
               break;
             }
@@ -225,6 +239,7 @@ export function createClaudeProvider(
                     outputTokens: count(usage.output_tokens),
                   },
                 };
+                yielded = true;
               }
               const reason = event.delta?.stop_reason;
               if (typeof reason === "string") {
@@ -233,9 +248,11 @@ export function createClaudeProvider(
               break;
             }
             default:
-              // message_start/stop, content_block_start/stop (text, thinking, fallback ...).
+              // message_stop, content_block_start/stop (text, thinking, fallback ...).
               break;
           }
+          // Thinking and other ignored events still show the stream is alive.
+          if (!yielded) yield { type: "progress" };
         }
       } catch (err) {
         throw mapClaudeError(err);

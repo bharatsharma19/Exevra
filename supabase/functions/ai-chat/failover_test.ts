@@ -84,6 +84,7 @@ Deno.test("a provider whose streamText throws synchronously fails over", async (
     model: "m",
     failure: "auth",
     status: 401,
+    usage: {},
   }]);
 });
 

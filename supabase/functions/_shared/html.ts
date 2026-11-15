@@ -58,12 +58,17 @@ export function html(strings: TemplateStringsArray, ...values: unknown[]): SafeH
 
 /**
  * Normalises user text for single-line contexts such as email subjects and plain-text bodies:
- * removes control characters, collapses whitespace (including CR/LF, preventing header
+ * removes Unicode format characters (`\p{Cf}`: bidi overrides and isolates, zero-width
+ * characters, BOM, soft hyphen, tag characters), so reversed or hidden text cannot spoof a name;
+ * turns control characters into spaces, collapses whitespace (including CR/LF, preventing header
  * injection) and truncates to `maxLength` characters with an ellipsis.
  */
 export function toSingleLine(text: string, maxLength: number): string {
-  // deno-lint-ignore no-control-regex
-  const clean = text.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").replace(/\s+/g, " ")
+  const clean = text
+    .replace(/\p{Cf}+/gu, "")
+    // deno-lint-ignore no-control-regex
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
   const chars = Array.from(clean);
   if (chars.length <= maxLength) return clean;
