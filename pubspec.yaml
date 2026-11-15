@@ -72,6 +72,23 @@ flutter_launcher_icons:
   adaptive_icon_foreground: "assets/icons/app_icon_foreground.png"
   adaptive_icon_monochrome: "assets/branding/icon_monochrome.png"
 
+# Native launch screen: `dart run flutter_native_splash:create`.
+# Colours match AppColors.lightBackground and AppColors.darkBackground.
+flutter_native_splash:
+  color: "#F8FAFC"
+  color_dark: "#070B14"
+  image: assets/branding/splash_logo.png
+  image_dark: assets/branding/splash_logo.png
+  android_12:
+    color: "#F8FAFC"
+    color_dark: "#070B14"
+    image: assets/branding/splash_logo_android12.png
+    image_dark: assets/branding/splash_logo_android12.png
+  android: true
+  ios: true
+  web: false
+  fullscreen: false
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
