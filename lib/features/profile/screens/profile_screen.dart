@@ -17,6 +17,7 @@ import '../../../providers/groups_provider.dart';
 import '../../../providers/profile_provider.dart';
 import '../../../l10n/l10n.dart';
 import '../../groups/widgets/groups_section.dart';
+import '../../chat/screens/ai_consent_screen.dart';
 import '../../shared/failure_retry.dart';
 import '../account_deletion.dart';
 
@@ -167,6 +168,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         ),
       ),
     );
+  }
+
+  /// On: the consent disclosure saves consent only after Allow. Off: at
+  /// once (the chat history on this device is deleted with it).
+  Future<void> _setAiConsent(bool on) async {
+    AppHaptics.selection();
+    if (on) {
+      await AiConsentScreen.show(context);
+      return;
+    }
+    await ref.read(profileProvider.notifier).setAiConsent(false);
   }
 
   @override
@@ -467,36 +479,35 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   ),
                   const Divider(height: 1),
 
-                  // AI Consent Switch
+                  // AI assistant: turning it on shows the consent
+                  // disclosure first; turning it off is immediate.
                   SwitchListTile(
+                    key: const Key('profile-ai-consent'),
                     contentPadding: EdgeInsets.zero,
                     secondary: const Icon(
                       Icons.psychology_outlined,
                       color: AppColors.primaryRose,
                     ),
                     title: const Text(
-                      'AI Spending Records Analysis',
+                      'AI assistant',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    subtitle: const Text(
-                      'Permit assistant to inject aggregate totals into prompt context',
-                      style: TextStyle(fontSize: 11),
+                    subtitle: Text(
+                      (profile?.aiConsent ?? false)
+                          ? 'On. The assistant can use a summary of your '
+                                'spending to answer your questions.'
+                          : 'Off. Turn it on to ask questions about your '
+                                'spending.',
+                      style: const TextStyle(fontSize: 11),
                     ),
                     value: profile?.aiConsent ?? false,
                     activeThumbColor: AppColors.primaryRose,
                     onChanged: profile == null
                         ? null
-                        : (val) {
-                            AppHaptics.selection();
-                            unawaited(
-                              ref
-                                  .read(profileProvider.notifier)
-                                  .setAiConsent(val),
-                            );
-                          },
+                        : (on) => unawaited(_setAiConsent(on)),
                   ),
                 ],
               ),
