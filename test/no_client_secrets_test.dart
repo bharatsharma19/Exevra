@@ -51,8 +51,10 @@ void main() {
       'AIza',
       'deepseek',
       'openai',
-      'anthropic',
-      'gemini',
+      'api.anthropic.com',
+      'generativelanguage.googleapis.com',
+      'x-goog-api-key',
+      'x-api-key',
       'smtp',
     ]) {
       test('contains no "$marker" (case-insensitive)', () {
@@ -62,6 +64,23 @@ void main() {
         );
       });
     }
+
+    test('names AI providers only as display labels in the assistant', () {
+      // The consent text and the answer label name the providers; no other
+      // file may refer to them (provider calls live in the Edge Function).
+      for (final marker in ['anthropic', 'gemini', 'claude-']) {
+        expect(
+          filesContaining(RegExp(marker, caseSensitive: false)),
+          everyElement(
+            isIn([
+              'lib/data/ai/ai_chat_models.dart',
+              'lib/features/chat/widgets/consent_view.dart',
+            ]),
+          ),
+          reason: marker,
+        );
+      }
+    });
 
     test('has no private key material', () {
       expect(filesContaining('PRIVATE KEY'), isEmpty);

@@ -1,0 +1,314 @@
+import 'package:expense_manager/core/constants/app_constants.dart';
+import 'package:expense_manager/core/theme/app_theme.dart';
+import 'package:expense_manager/data/ai/ai_chat_models.dart';
+import 'package:expense_manager/data/repositories/ai_report_repository.dart';
+import 'package:expense_manager/features/chat/chat_copy.dart';
+import 'package:expense_manager/features/chat/screens/chat_screen.dart';
+import 'package:expense_manager/features/chat/widgets/consent_view.dart';
+import 'package:expense_manager/features/chat/widgets/safe_markdown.dart';
+import 'package:expense_manager/providers/chat_provider.dart';
+import 'package:expense_manager/providers/profile_provider.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import '../support/fakes.dart';
+import 'chat_test_support.dart';
+
+class _Env {
+  _Env(this.container, this.api, this.backend, this.reports, this.launched);
+
+  final ProviderContainer container;
+  final FakeAiChatApi api;
+  final TestBackend backend;
+  final FakeAiReportRepository reports;
+  final List<Uri> launched;
+}
+
+Future<_Env> _pump(
+  WidgetTester tester, {
+  required ThemeData theme,
+  bool consent = true,
+  Widget? child,
+}) async {
+  tester.view
+    ..physicalSize = const Size(1200, 2700)
+    ..devicePixelRatio = 3;
+  addTearDown(tester.view.reset);
+  final backend = TestBackend(signedInAs: 'u1');
+  backend.profiles.profiles['u1'] = profileOf(
+    'u1',
+  ).copyWith(aiConsent: consent);
+  final api = FakeAiChatApi();
+  final reports = FakeAiReportRepository();
+  final launched = <Uri>[];
+  final container = await tester.runAsync(
+    () => chatContainer(backend, api, reports: reports, launched: launched),
+  );
+  addTearDown(container!.dispose);
+  container.listen(profileProvider, (_, _) {});
+  await tester.runAsync(() => container.read(profileProvider.future));
+  await tester.pumpWidget(
+    UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp(theme: theme, home: child ?? const ChatScreen()),
+    ),
+  );
+  await tester.pump(const Duration(milliseconds: 10));
+  await tester.pump(const Duration(milliseconds: 10));
+  return _Env(container, api, backend, reports, launched);
+}
+
+void main() {
+  final themes = {'light': AppTheme.lightTheme, 'dark': AppTheme.darkTheme};
+
+  for (final MapEntry(key: name, value: theme) in themes.entries) {
+    group('$name theme', () {
+      testWidgets('empty state shows prompts and the disclaimer', (
+        tester,
+      ) async {
+        await _pump(tester, theme: theme);
+        expect(find.text(ChatCopy.emptyTitle), findsOneWidget);
+        expect(find.text(ChatCopy.disclaimer), findsNWidgets(2));
+        for (final prompt in AppConstants.aiQuickPrompts) {
+          expect(find.text(prompt), findsOneWidget);
+        }
+        final send = tester.widget<IconButton>(
+          find.widgetWithIcon(IconButton, Icons.send_rounded),
+        );
+        expect(send.onPressed, isNull, reason: 'disabled while empty');
+        expect(find.byTooltip('Send message'), findsOneWidget);
+      });
+
+      testWidgets('streams a message and offers Stop', (tester) async {
+        final env = await _pump(tester, theme: theme);
+        await tester.tap(find.text(AppConstants.aiQuickPrompts.first));
+        await tester.pump();
+        expect(env.api.calls, hasLength(1));
+        expect(find.byTooltip('Stop response'), findsOneWidget);
+        expect(find.text('Thinking…'), findsOneWidget);
+        expect(find.bySemanticsLabel(ChatCopy.responding), findsOneWidget);
+
+        env.api.last
+          ..emit(const AiMeta(AiProvider.claude))
+          ..emit(const AiDelta('You spent **₹1,200** on food.'));
+        await tester.pump();
+        await tester.pump();
+        expect(find.textContaining('₹1,200', findRichText: true), findsWidgets);
+        expect(find.text('Answers by Claude'), findsOneWidget);
+        expect(find.text('Exevra Assistant · Claude'), findsOneWidget);
+
+        await tester.tap(find.byTooltip('Stop response'));
+        await tester.pump();
+        expect(env.api.last.aborted, isTrue);
+        expect(find.text(ChatCopy.stopped), findsOneWidget);
+        expect(find.byTooltip('Send message'), findsOneWidget);
+        expect(find.byTooltip('Copy message'), findsOneWidget);
+        expect(find.byTooltip('Report response'), findsOneWidget);
+        expect(find.bySemanticsLabel(ChatCopy.complete), findsOneWidget);
+      });
+
+      testWidgets('error card with Retry', (tester) async {
+        final env = await _pump(tester, theme: theme);
+        await tester.enterText(find.byType(TextField), 'Hello');
+        await tester.pump();
+        await tester.tap(find.byTooltip('Send message'));
+        await tester.pump();
+        await env.api.last.fail(AiErrorCode.rateLimited);
+        await tester.pump();
+        await tester.pump();
+
+        expect(
+          find.text("You're sending messages quickly. Try again in a minute."),
+          findsOneWidget,
+        );
+        await tester.tap(find.widgetWithText(TextButton, 'Retry'));
+        await tester.pump();
+        expect(env.api.calls, hasLength(2));
+        expect(env.api.last.turns.last, const AiTurn.user('Hello'));
+      });
+
+      testWidgets('consent screen explains and saves consent', (tester) async {
+        final env = await _pump(tester, theme: theme, consent: false);
+        expect(find.byType(ChatConsentView), findsOneWidget);
+        expect(find.textContaining("Anthropic's Claude"), findsOneWidget);
+        expect(find.textContaining("Google's Gemini"), findsOneWidget);
+        expect(
+          find.textContaining('amounts, categories, dates'),
+          findsOneWidget,
+        );
+        expect(find.text('Not now'), findsOneWidget);
+
+        await tester.tap(find.text('Read the privacy policy'));
+        await tester.pump();
+        expect(env.launched.single, ChatConsentView.privacyPolicy);
+        expect(env.launched.single.path, '/privacy');
+
+        await tester.ensureVisible(find.text('Allow and continue'));
+        await tester.tap(find.text('Allow and continue'));
+        await tester.pump();
+        await tester.pump();
+        expect(
+          env.backend.profiles.updates.last.$2.fields['ai_consent'],
+          isTrue,
+        );
+        expect(find.byType(ChatConsentView), findsNothing);
+        expect(find.text(ChatCopy.emptyTitle), findsOneWidget);
+      });
+
+      testWidgets('Not now leaves the assistant off', (tester) async {
+        await _pump(tester, theme: theme, consent: false);
+        await tester.ensureVisible(find.text('Not now'));
+        await tester.tap(find.text('Not now'));
+        await tester.pump();
+        expect(find.text('The assistant is off'), findsOneWidget);
+        await tester.tap(find.text('Turn on the assistant'));
+        await tester.pump();
+        expect(find.byType(ChatConsentView), findsOneWidget);
+      });
+    });
+  }
+
+  testWidgets('server consent_required shows the consent screen', (
+    tester,
+  ) async {
+    final env = await _pump(tester, theme: AppTheme.lightTheme);
+    await tester.tap(find.text(AppConstants.aiQuickPrompts.last));
+    await tester.pump();
+    await env.api.last.fail(AiErrorCode.consentRequired);
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(ChatConsentView), findsOneWidget);
+  });
+
+  testWidgets('Clear asks first and cancels the request in flight', (
+    tester,
+  ) async {
+    final env = await _pump(tester, theme: AppTheme.darkTheme);
+    await tester.tap(find.text(AppConstants.aiQuickPrompts.first));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Clear conversation'));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Clear conversation?'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Clear'));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(env.api.last.aborted, isTrue);
+    expect(env.container.read(chatProvider).messages, isEmpty);
+  });
+
+  testWidgets('report a response with a reason', (tester) async {
+    final env = await _pump(tester, theme: AppTheme.lightTheme);
+    await tester.tap(find.text(AppConstants.aiQuickPrompts.first));
+    await tester.pump();
+    await env.api.last.finish([
+      const AiMeta(AiProvider.gemini),
+      const AiDelta('A wrong answer'),
+      const AiDone(),
+    ]);
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Report response'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(AiReportReason.inaccurate.label));
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Add a note (optional)'),
+      ' wrong total ',
+    );
+    await tester.tap(find.text('Send report'));
+    await tester.pumpAndSettle();
+
+    final report = env.reports.reports.single;
+    expect(report.userId, 'u1');
+    expect(report.reason, AiReportReason.inaccurate);
+    expect(report.provider, 'gemini');
+    expect(report.messageExcerpt, 'A wrong answer');
+    expect(report.note, 'wrong total');
+    expect(find.text('Thanks. Your report was sent.'), findsOneWidget);
+  });
+
+  test('report excerpts are capped at 2000 characters', () {
+    final report = AiReport(
+      userId: 'u1',
+      reason: AiReportReason.other,
+      messageExcerpt: 'x' * 5000,
+      note: '   ',
+    );
+    expect(report.messageExcerpt.length, 2000);
+    expect(report.note, isNull);
+    expect(report.toRow().containsKey('note'), isFalse);
+  });
+
+  group('SafeMarkdown', () {
+    Future<_Env> pumpMd(WidgetTester tester, String data) => _pump(
+      tester,
+      theme: AppTheme.lightTheme,
+      child: Scaffold(body: SafeMarkdown(data: data)),
+    );
+
+    testWidgets('never renders images, only their alt text', (tester) async {
+      await pumpMd(
+        tester,
+        'Look ![tracking pixel](https://attacker.example/p.png) here',
+      );
+      expect(find.byType(Image), findsNothing);
+      expect(find.text('tracking pixel'), findsOneWidget);
+    });
+
+    testWidgets('raw HTML stays text', (tester) async {
+      await pumpMd(tester, 'a <img src="https://attacker.example/x"> b');
+      expect(find.byType(Image), findsNothing);
+      expect(find.textContaining('<img', findRichText: true), findsOneWidget);
+    });
+
+    testWidgets('links open only after a confirm dialog showing the URL', (
+      tester,
+    ) async {
+      final env = await pumpMd(tester, 'See [this](https://example.com/a?b=1)');
+      TapGestureRecognizer? recognizer;
+      for (final text in tester.widgetList<Text>(find.byType(Text))) {
+        text.textSpan?.visitChildren((span) {
+          if (span is TextSpan && span.recognizer is TapGestureRecognizer) {
+            recognizer = span.recognizer! as TapGestureRecognizer;
+          }
+          return recognizer == null;
+        });
+      }
+      for (final text in tester.widgetList<SelectableText>(
+        find.byType(SelectableText),
+      )) {
+        text.textSpan?.visitChildren((span) {
+          if (span is TextSpan && span.recognizer is TapGestureRecognizer) {
+            recognizer = span.recognizer! as TapGestureRecognizer;
+          }
+          return recognizer == null;
+        });
+      }
+      expect(recognizer, isNotNull);
+      recognizer!.onTap!();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Open this link?'), findsOneWidget);
+      expect(find.text('https://example.com/a?b=1'), findsOneWidget);
+      expect(env.launched, isEmpty);
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      expect(env.launched.single.toString(), 'https://example.com/a?b=1');
+    });
+
+    testWidgets('non-https links cannot be opened', (tester) async {
+      final env = await pumpMd(tester, 'x');
+      final context = tester.element(find.byType(SafeMarkdown));
+      final launch = env.container.read(externalLinkLauncherProvider);
+      final done = confirmAndOpenLink(context, 'http://example.com', launch);
+      await tester.pumpAndSettle();
+      expect(find.text("This link can't be opened"), findsOneWidget);
+      expect(find.text('Open'), findsNothing);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      await done;
+      expect(env.launched, isEmpty);
+    });
+  });
+}
