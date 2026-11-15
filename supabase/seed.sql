@@ -1,0 +1,2 @@
+-- Local development seed. Applied by `supabase db reset` on the local stack only.
+-- Intentionally empty: tests in supabase/tests/ create their own fixtures inside a transaction.
