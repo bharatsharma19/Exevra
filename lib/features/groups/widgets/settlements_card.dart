@@ -203,7 +203,7 @@ class SettlementsCard extends ConsumerWidget {
                 onRetry: () => ref.invalidate(settlementsProvider(group.id)),
               ),
             ],
-            data: (rows) => rows.isEmpty
+            data: (history) => history.items.isEmpty
                 ? [
                     Text(
                       'No payments recorded yet.',
@@ -214,12 +214,34 @@ class SettlementsCard extends ConsumerWidget {
                     ),
                   ]
                 : [
-                    for (final s in rows)
+                    for (final s in history.items)
                       _SettlementTile(
                         group: group,
                         settlement: s,
                         currentUserId: userId,
                         nameOf: nameOf,
+                      ),
+                    if (history.loadMoreFailure case final failure?)
+                      FailureRetry(
+                        error: failure,
+                        compact: true,
+                        onRetry: () => unawaited(
+                          ref
+                              .read(settlementsProvider(group.id).notifier)
+                              .loadMore(),
+                        ),
+                      )
+                    else if (history.isLoadingMore)
+                      const LinearProgressIndicator()
+                    else if (history.hasMore)
+                      TextButton(
+                        key: const Key('settlements-load-more'),
+                        onPressed: () => unawaited(
+                          ref
+                              .read(settlementsProvider(group.id).notifier)
+                              .loadMore(),
+                        ),
+                        child: const Text('Show older payments'),
                       ),
                   ],
           ),
@@ -508,7 +530,10 @@ Future<void> showRecordPaymentDialog(
     builder: (ctx) => Consumer(
       builder: (ctx, ref, _) {
         final balances = ref.watch(groupBalancesProvider(group.id)).value;
-        final settlements = ref.watch(settlementsProvider(group.id)).value;
+        // All pending payments count, not only the loaded history.
+        final settlements = ref
+            .watch(pendingSettlementsProvider(group.id))
+            .value;
         return StatefulBuilder(
           builder: (ctx, setState) {
             final payeeName = others.firstWhere((m) => m.userId == payee).label;

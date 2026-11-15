@@ -10,8 +10,10 @@ import '../../../models/currency_info.dart';
 import '../../../models/profile.dart';
 import '../../../providers/app_lock_provider.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../providers/groups_provider.dart';
 import '../../../providers/profile_provider.dart';
 import '../../groups/widgets/groups_section.dart';
+import '../../shared/failure_retry.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -257,6 +259,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final profile = ref.watch(userProfileProvider);
+    final profileLoad = ref.watch(profileProvider);
     final themeMode = ref.watch(themePreferenceProvider);
     final resolvedDisplayName =
         (profile != null && profile.displayName.trim().isNotEmpty)
@@ -271,6 +274,21 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (profileLoad.hasError && !profileLoad.isLoading) ...[
+              FailureRetry(
+                key: const Key('profile-load-failed'),
+                error: profileLoad.error!,
+                compact: true,
+                onRetry: () {
+                  ref.invalidate(profileProvider);
+                  // The groups need the profile, so they failed with it.
+                  if (ref.read(groupsProvider).hasError) {
+                    ref.invalidate(groupsProvider);
+                  }
+                },
+              ),
+              const SizedBox(height: 12),
+            ],
             // User Profile Card
             GlassCard(
               borderRadius: 24,

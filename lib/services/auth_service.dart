@@ -104,6 +104,12 @@ abstract interface class AuthService {
   /// Stores [fullName] in the auth user's metadata.
   Future<void> updateFullName(String fullName);
 
+  /// A fresh Sign in with Apple authorization code, so the server can
+  /// revoke the user's Apple token when the account is deleted. Null when
+  /// the user has no Apple identity or this device cannot ask Apple.
+  /// Throws `apple_reauth_cancelled` when the user cancels.
+  Future<String?> appleAuthorizationCode();
+
   /// Ends the local session (and the Google account selection). Never
   /// throws: the local session is always removed.
   Future<void> signOut();
@@ -121,6 +127,11 @@ class SupabaseAuthService implements AuthService {
 
   static const List<String> _googleScopes = ['email', 'profile'];
   Future<void>? _googleInit;
+
+  /// Raw nonce whose SHA-256 was given to Google at initialization (which
+  /// happens once per process), so every ID token Google issues carries it
+  /// and Supabase can check the token was issued for this app instance.
+  String? _googleRawNonce;
 
   @override
   User? get currentUser => _auth.currentUser;
@@ -221,16 +232,22 @@ class SupabaseAuthService implements AuthService {
   // ---------------------------------------------------------------------------
 
   Future<void> _ensureGoogleInitialized() {
-    return _googleInit ??= GoogleSignIn.instance
+    final existing = _googleInit;
+    if (existing != null) return existing;
+    final rawNonce = Nonce.generate();
+    _googleRawNonce = rawNonce;
+    return _googleInit = GoogleSignIn.instance
         .initialize(
           serverClientId: _config.googleWebClientId,
           clientId: _config.googleIosClientId.isEmpty
               ? null
               : _config.googleIosClientId,
+          nonce: Nonce.sha256Hex(rawNonce),
         )
         .catchError((Object error, StackTrace stackTrace) {
           // Not cached, so the next attempt retries.
           _googleInit = null;
+          _googleRawNonce = null;
           Error.throwWithStackTrace(error, stackTrace);
         });
   }
@@ -257,6 +274,7 @@ class SupabaseAuthService implements AuthService {
           provider: OAuthProvider.google,
           idToken: idToken,
           accessToken: authorization.accessToken,
+          nonce: _googleRawNonce,
         ),
       );
       return true;
@@ -305,6 +323,40 @@ class SupabaseAuthService implements AuthService {
     } on SignInWithAppleNotSupportedException {
       throw const AppFailure.business('apple_failed');
     }
+  }
+
+  @override
+  Future<String?> appleAuthorizationCode() async {
+    final user = _auth.currentUser;
+    if (user == null || !_hasAppleIdentity(user)) return null;
+    final native =
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.macOS);
+    if (!native) return null;
+    try {
+      if (!await SignInWithApple.isAvailable()) return null;
+      final credential = await SignInWithApple.getAppleIDCredential(
+        scopes: const [],
+      );
+      return credential.authorizationCode;
+    } on SignInWithAppleAuthorizationException catch (e) {
+      if (e.code == AuthorizationErrorCode.canceled) {
+        throw const AppFailure.business('apple_reauth_cancelled');
+      }
+      AppLogger.warn('Apple re-authorization failed', e.code);
+      throw const AppFailure.business('apple_failed');
+    } on SignInWithAppleNotSupportedException {
+      return null;
+    }
+  }
+
+  static bool _hasAppleIdentity(User user) {
+    if (user.identities?.any((i) => i.provider == 'apple') ?? false) {
+      return true;
+    }
+    final providers = user.appMetadata['providers'];
+    return providers is List && providers.contains('apple');
   }
 
   @override

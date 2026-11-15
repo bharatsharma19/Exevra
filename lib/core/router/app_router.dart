@@ -67,11 +67,13 @@ final routerProvider = Provider<GoRouter>((ref) {
   final router = GoRouter(
     initialLocation: AppRoutes.splash,
     refreshListenable: refresh,
-    redirect: (context, state) => authRedirect(
-      phase: ref.read(authControllerProvider).phase,
-      location: state.uri,
-      pendingInviteToken: ref.read(pendingInviteProvider),
-    ),
+    redirect: (context, state) =>
+        platformLinkRedirect(state.uri) ??
+        authRedirect(
+          phase: ref.read(authControllerProvider).phase,
+          location: state.uri,
+          pendingInviteToken: ref.read(pendingInviteProvider),
+        ),
     errorBuilder: (context, state) => const NotFoundScreen(),
     routes: [
       GoRoute(path: AppRoutes.root, redirect: (_, _) => AppRoutes.dashboard),

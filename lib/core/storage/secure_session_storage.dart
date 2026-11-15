@@ -25,6 +25,31 @@ class SecureSessionStorage extends LocalStorage {
   final String persistSessionKey;
   final FlutterSecureStorage _storage;
 
+  /// SharedPreferences flag set on the first run of this installation.
+  static const String installMarkerKey = 'install_marker';
+
+  /// On the first run of an installation, removes anything a previous
+  /// installation left in the keystore. The iOS Keychain survives an
+  /// uninstall while SharedPreferences (with the per-user App Lock flag)
+  /// does not, so without this a reinstall would sign the previous user
+  /// back in with App Lock off. Runs before Supabase reads the session.
+  static Future<void> clearAfterReinstall(
+    SharedPreferences prefs, {
+    FlutterSecureStorage? storage,
+  }) async {
+    if (prefs.getBool(installMarkerKey) ?? false) return;
+    try {
+      await (storage ?? secureStorage).deleteAll();
+    } on Object catch (e) {
+      AppLogger.warn('Could not clear the keystore', e.runtimeType);
+    }
+    try {
+      await prefs.setBool(installMarkerKey, true);
+    } on Object catch (e) {
+      AppLogger.warn('Could not mark the installation', e.runtimeType);
+    }
+  }
+
   /// The key supabase_flutter uses for a project URL.
   static String keyFor(String supabaseUrl) =>
       'sb-${Uri.parse(supabaseUrl).host.split('.').first}-auth-token';

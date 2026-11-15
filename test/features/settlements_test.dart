@@ -4,6 +4,7 @@ import 'package:expense_manager/models/balance.dart';
 import 'package:expense_manager/models/group.dart';
 import 'package:expense_manager/models/money.dart';
 import 'package:expense_manager/models/settlement.dart';
+import 'package:expense_manager/providers/group_detail_providers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,6 +18,7 @@ Settlement _settlement(
   required String to,
   int amountMinor = 500,
   SettlementStatus status = SettlementStatus.pending,
+  DateTime? createdAt,
 }) => Settlement(
   id: id,
   groupId: 'g1',
@@ -24,7 +26,7 @@ Settlement _settlement(
   toUser: to,
   amount: Money(amountMinor, 'INR'),
   status: status,
-  createdAt: DateTime.utc(2026, 11, 9),
+  createdAt: createdAt ?? DateTime.utc(2026, 11, 9),
 );
 
 Future<TestBackend> _pump(
@@ -97,6 +99,70 @@ Future<TestBackend> _pump(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  group('history beyond one page', () {
+    late TestBackend backend;
+    late ProviderContainer container;
+
+    setUp(() async {
+      backend = TestBackend(signedInAs: 'u1');
+      backend.profiles.profiles['u1'] = profileOf('u1', activeGroupId: 'g1');
+      backend.groups.groupsByUser['u1'] = [groupOf('g1', adminId: 'u9')];
+      // An old pending payment behind 60 newer confirmed ones.
+      backend.settlements.rows.add(
+        _settlement('old-pending', from: 'u1', to: 'u2', amountMinor: 300),
+      );
+      for (var i = 0; i < 60; i++) {
+        backend.settlements.rows.add(
+          _settlement(
+            'c${i.toString().padLeft(2, '0')}',
+            from: 'u1',
+            to: 'u2',
+            status: SettlementStatus.confirmed,
+            createdAt: DateTime.utc(2026, 11, 10).add(Duration(minutes: i)),
+          ),
+        );
+      }
+      container = await backend.container();
+      addTearDown(container.dispose);
+    });
+
+    test('the cap counts pending payments outside the loaded page', () async {
+      container.listen(settlementsProvider('g1'), (_, _) {});
+      final history = await container.read(settlementsProvider('g1').future);
+      expect(history.items, hasLength(SettlementsNotifier.pageSize));
+      expect(history.items.any((s) => s.id == 'old-pending'), isFalse);
+
+      container.listen(pendingSettlementsProvider('g1'), (_, _) {});
+      final pending = await container.read(
+        pendingSettlementsProvider('g1').future,
+      );
+      expect(pending.map((s) => s.id), ['old-pending']);
+      expect(
+        settlementLimit(
+          payer: 'u1',
+          payee: 'u2',
+          balances: [balanceOf('u1', -1000), balanceOf('u2', 1000)],
+          settlements: pending,
+        ),
+        700,
+      );
+    });
+
+    test('older payments load page by page without gaps', () async {
+      container.listen(settlementsProvider('g1'), (_, _) {});
+      await container.read(settlementsProvider('g1').future);
+      expect(container.read(settlementsProvider('g1')).value!.hasMore, isTrue);
+
+      await container.read(settlementsProvider('g1').notifier).loadMore();
+
+      final history = container.read(settlementsProvider('g1')).value!;
+      expect(history.items, hasLength(61));
+      expect(history.items.map((s) => s.id).toSet(), hasLength(61));
+      expect(history.items.last.id, 'old-pending');
+      expect(history.hasMore, isFalse);
+    });
+  });
 
   group('settlementLimit', () {
     test('is what the payer owes, less pending payments', () {

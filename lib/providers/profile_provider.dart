@@ -73,18 +73,32 @@ class ProfileNotifier extends AsyncNotifier<UserProfile?> {
   }
 
   Future<void> _afterLoad(String userId, UserProfile profile) async {
-    if (!ref.mounted) return;
+    if (!_isFor(userId)) return;
     await _applyLocally(userId, profile);
     await _syncDeviceSettings(userId, profile);
   }
 
+  /// Whether a result for [userId] may still be applied. The notifier is
+  /// reused across sign-ins, so after an await the signed-in user (and the
+  /// loaded profile) may be someone else's.
+  bool _isFor(String userId) {
+    if (!ref.mounted || ref.read(currentUserIdProvider) != userId) {
+      return false;
+    }
+    final owner = state.value?.id;
+    return owner == null || owner == userId;
+  }
+
   /// Mirrors server preferences on the device (server wins).
   Future<void> _applyLocally(String userId, UserProfile profile) async {
+    if (!_isFor(userId)) return;
     AppHaptics.isEnabled = profile.hapticsEnabled;
     final themes = ref.read(themePreferenceProvider.notifier);
     if (ref.read(themePreferenceProvider) != profile.themeMode) {
       await themes.setLocal(profile.themeMode);
     }
+    // Signing out meanwhile clears this user's keys; do not write them back.
+    if (!_isFor(userId)) return;
     try {
       await ref
           .read(sharedPreferencesProvider)
@@ -115,11 +129,9 @@ class ProfileNotifier extends AsyncNotifier<UserProfile?> {
             ? deviceCurrency
             : null,
       );
-      if (update.isEmpty || !ref.mounted) return;
+      if (update.isEmpty || !_isFor(userId)) return;
       final saved = await _repo.update(userId, update);
-      if (ref.mounted && ref.read(currentUserIdProvider) == userId) {
-        state = AsyncData(saved);
-      }
+      if (_isFor(userId)) state = AsyncData(saved);
     } on AppFailure catch (failure) {
       AppLogger.warn('Device settings were not synced', failure);
     }
@@ -129,20 +141,26 @@ class ProfileNotifier extends AsyncNotifier<UserProfile?> {
   /// rolling back on failure. Returns the failure, or null on success.
   Future<AppFailure?> updateProfile(ProfileUpdate update) async {
     final userId = ref.read(currentUserIdProvider);
+    if (userId == null) return const AppFailure.sessionExpired();
     final before = state.value;
-    if (userId == null || before == null) {
-      return const AppFailure.sessionExpired();
+    if (before == null || before.id != userId) {
+      // The profile has not loaded (or failed to): nothing to change yet.
+      const failure = AppFailure.notFound(key: 'profile_not_found');
+      if (ref.mounted) {
+        ref.read(failureReporterProvider.notifier).report(failure);
+      }
+      return failure;
     }
     state = AsyncData(before.apply(update));
     try {
       final saved = await _repo.update(userId, update);
-      if (ref.mounted) {
+      if (_isFor(userId)) {
         state = AsyncData(saved);
         await _applyLocally(userId, saved);
       }
       return null;
     } on AppFailure catch (failure) {
-      if (ref.mounted) {
+      if (_isFor(userId)) {
         state = AsyncData(before);
         ref.read(failureReporterProvider.notifier).report(failure);
       }

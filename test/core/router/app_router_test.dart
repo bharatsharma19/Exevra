@@ -6,7 +6,9 @@ import 'package:expense_manager/features/profile/screens/invite_screen.dart';
 import 'package:expense_manager/main.dart';
 import 'package:expense_manager/models/group.dart';
 import 'package:expense_manager/models/invitation.dart';
+import 'package:expense_manager/providers/chat_provider.dart';
 import 'package:expense_manager/providers/pending_invite_provider.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -110,6 +112,41 @@ void main() {
     expect(find.text('Flatmates'), findsOneWidget);
     // Seen by the signed-in user: no longer pending.
     expect(c.read(pendingInviteProvider), isNull);
+  });
+
+  testWidgets('a custom-scheme link pushed as a route opens the invite', (
+    tester,
+  ) async {
+    final c = await pumpApp(tester, signedInAs: 'A');
+    final router = c.read(routerProvider);
+    // Android pushes only the path of exevra://invite/<token>.
+    await router.routeInformationProvider.didPushRouteInformation(
+      RouteInformation(uri: Uri.parse('/$_token')),
+    );
+    await _settle(tester);
+    expect(location(c), '/invite/$_token');
+
+    router.go('/dashboard');
+    await _settle(tester);
+    // iOS pushes the whole URL.
+    await router.routeInformationProvider.didPushRouteInformation(
+      RouteInformation(uri: Uri.parse('exevra://invite/$_token')),
+    );
+    await _settle(tester);
+    expect(location(c), '/invite/$_token');
+  });
+
+  testWidgets('a failed assistant reply is shown once, in the chat', (
+    tester,
+  ) async {
+    final c = await pumpApp(tester, signedInAs: 'A');
+    expect(location(c), '/dashboard');
+
+    await c.read(chatProvider.notifier).sendMessage('hello');
+    await _settle(tester);
+
+    expect(c.read(chatProvider).messages.last.text, isNotEmpty);
+    expect(find.byType(SnackBar), findsNothing);
   });
 
   testWidgets('a legacy ?token= invite location is rewritten', (tester) async {

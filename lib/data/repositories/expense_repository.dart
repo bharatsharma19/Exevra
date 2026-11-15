@@ -101,6 +101,21 @@ class ExpensePage {
 /// Kinds of change pushed by realtime for a group.
 enum GroupChangeKind { expenses, members, settlements }
 
+/// One realtime change: a [kind] of the group's data changed, or (with
+/// [deletedExpenseId]) an expense was deleted somewhere.
+class GroupChange {
+  const GroupChange(this.kind) : deletedExpenseId = null;
+
+  /// An expense deletion. Realtime cannot filter deletions by group, so
+  /// these arrive for any expense the server deletes, with only its id.
+  const GroupChange.expenseDeleted(String id)
+    : kind = GroupChangeKind.expenses,
+      deletedExpenseId = id;
+
+  final GroupChangeKind kind;
+  final String? deletedExpenseId;
+}
+
 abstract interface class ExpenseRepository {
   /// One page, newest first. Throws [AppFailure].
   Future<ExpensePage> fetchPage({
@@ -121,8 +136,9 @@ abstract interface class ExpenseRepository {
   Future<void> delete(String expenseId);
 
   /// Changes to a group's expenses, members and settlements, pushed by
-  /// realtime. Listening opens the channel; cancelling closes it.
-  Stream<GroupChangeKind> watchGroup(String groupId);
+  /// realtime, plus expense deletions (see [GroupChange.expenseDeleted]).
+  /// Listening opens the channel; cancelling closes it.
+  Stream<GroupChange> watchGroup(String groupId);
 }
 
 final expenseRepositoryProvider = Provider<ExpenseRepository>(
@@ -133,6 +149,10 @@ class SupabaseExpenseRepository implements ExpenseRepository {
   SupabaseExpenseRepository(this._client);
 
   final SupabaseClient _client;
+
+  /// Upper bound for one write, so a stalled request ends as a timeout
+  /// instead of leaving the form waiting.
+  static const Duration writeTimeout = Duration(seconds: 20);
 
   @override
   Future<ExpensePage> fetchPage({
@@ -194,7 +214,8 @@ class SupabaseExpenseRepository implements ExpenseRepository {
           .from('expenses')
           .insert(draft.toInsertJson(userId))
           .select(Expense.columns)
-          .single();
+          .single()
+          .timeout(writeTimeout);
       return Expense.fromJson(row);
     });
   }
@@ -206,7 +227,8 @@ class SupabaseExpenseRepository implements ExpenseRepository {
           .from('expenses')
           .update(expense.toUpdateJson())
           .eq('id', expense.id)
-          .select(Expense.columns);
+          .select(Expense.columns)
+          .timeout(writeTimeout);
       return Expense.fromJson(requireRows(rows).first);
     });
   }
@@ -218,20 +240,21 @@ class SupabaseExpenseRepository implements ExpenseRepository {
           .from('expenses')
           .delete()
           .eq('id', expenseId)
-          .select('id');
+          .select('id')
+          .timeout(writeTimeout);
       requireRows(rows);
     });
   }
 
   @override
-  Stream<GroupChangeKind> watchGroup(String groupId) {
+  Stream<GroupChange> watchGroup(String groupId) {
     late final RealtimeChannel channel;
     final filter = PostgresChangeFilter(
       type: PostgresChangeFilterType.eq,
       column: 'group_id',
       value: groupId,
     );
-    final controller = StreamController<GroupChangeKind>();
+    final controller = StreamController<GroupChange>();
     controller
       ..onListen = () {
         channel = _client.channel('group-changes:$groupId');
@@ -246,10 +269,24 @@ class SupabaseExpenseRepository implements ExpenseRepository {
             table: table,
             filter: filter,
             callback: (_) {
-              if (!controller.isClosed) controller.add(kind);
+              if (!controller.isClosed) controller.add(GroupChange(kind));
             },
           );
         }
+        // Postgres Changes never apply a filter to DELETE events (the old
+        // record carries only the primary key), so deletions are watched
+        // unfiltered and matched against the lists on screen by id.
+        channel.onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: 'expenses',
+          callback: (payload) {
+            final id = payload.oldRecord['id'];
+            if (id is String && !controller.isClosed) {
+              controller.add(GroupChange.expenseDeleted(id));
+            }
+          },
+        );
         channel.subscribe();
       }
       ..onCancel = () async {

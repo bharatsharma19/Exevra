@@ -306,10 +306,102 @@ void main() {
       final notifier = await load();
       backend.expenses.failWrites = const AppFailure.network();
       final failure = await notifier.add(draft(), report: false);
-      expect(failure, const AppFailure.network());
+      expect(failure, const AppFailure.network(key: 'expense_unconfirmed'));
       expect(container.read(failureReporterProvider), isNull);
       expect(ids(), ['e2', 'e1']);
     });
+  });
+
+  group('writes racing a reload', () {
+    test('a delete confirmed during a reload stays deleted', () async {
+      final notifier = await load();
+      final held = Completer<ExpensePage>();
+      backend.expenses.heldFetches.add(held);
+      final e2 = backend.expenses.rows.firstWhere((e) => e.id == 'e2');
+      final e1 = backend.expenses.rows.firstWhere((e) => e.id == 'e1');
+
+      final reloading = notifier.reload();
+      expect(await notifier.remove(e2), isNull);
+      // The page was read before the delete reached the server.
+      held.complete(ExpensePage([e2, e1], null));
+      await reloading;
+
+      expect(ids(), ['e1']);
+    });
+
+    test('an edit confirmed during a reload is kept', () async {
+      final notifier = await load();
+      final held = Completer<ExpensePage>();
+      backend.expenses.heldFetches.add(held);
+      final e2 = backend.expenses.rows.firstWhere((e) => e.id == 'e2');
+      final e1 = backend.expenses.rows.firstWhere((e) => e.id == 'e1');
+
+      final reloading = notifier.reload();
+      expect(await notifier.edit(e1.copyWith(title: 'Changed')), isNull);
+      held.complete(ExpensePage([e2, e1], null));
+      await reloading;
+
+      final items = container.read(expenseListProvider(personal)).value!.items;
+      expect(items.map((e) => e.id), ['e2', 'e1']);
+      expect(items.last.title, 'Changed');
+    });
+
+    test('a page that already has the new row does not duplicate it', () async {
+      final notifier = await load();
+      final release = Completer<void>();
+      backend.expenses.holdWrites = release;
+      final held = Completer<ExpensePage>();
+      backend.expenses.heldFetches.add(held);
+      final e2 = backend.expenses.rows.firstWhere((e) => e.id == 'e2');
+      final e1 = backend.expenses.rows.firstWhere((e) => e.id == 'e1');
+
+      final adding = notifier.add(draft());
+      final reloading = notifier.reload();
+      // The insert reached the server before its response came back.
+      final early = expenseOf(
+        'srv-1',
+        userId: 'u1',
+        spentAt: DateTime.utc(2026, 11, 3),
+      );
+      held.complete(ExpensePage([early, e2, e1], null));
+      await reloading;
+      release.complete();
+      expect(await adding, isNull);
+
+      expect(ids(), ['srv-1', 'e2', 'e1']);
+    });
+
+    test('a pending edit replaces the server copy of the same row', () async {
+      final notifier = await load();
+      final release = Completer<void>();
+      backend.expenses.holdWrites = release;
+      final e1 = backend.expenses.rows.firstWhere((e) => e.id == 'e1');
+
+      final editing = notifier.edit(e1.copyWith(title: 'Changed'));
+      await notifier.reload();
+
+      final during = container.read(expenseListProvider(personal)).value!;
+      expect(during.items.map((e) => e.id), ['e2', 'e1']);
+      expect(during.items.last.title, 'Changed');
+      release.complete();
+      expect(await editing, isNull);
+      expect(ids(), ['e2', 'e1']);
+    });
+
+    test(
+      'an add that fails in transit reloads instead of inviting a retry',
+      () async {
+        final notifier = await load();
+        final before = backend.expenses.fetchCalls;
+        backend.expenses.failWrites = const AppFailure.timeout();
+
+        final failure = await notifier.add(draft(), report: false);
+        await settle();
+
+        expect(failure, const AppFailure.network(key: 'expense_unconfirmed'));
+        expect(backend.expenses.fetchCalls, greaterThan(before));
+      },
+    );
   });
 
   group('paging', () {

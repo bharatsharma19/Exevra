@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:expense_manager/core/constants/app_constants.dart';
 import 'package:expense_manager/core/errors/app_failure.dart';
 import 'package:expense_manager/core/storage/preferences.dart';
@@ -125,6 +127,133 @@ void main() {
       expect(items.any((e) => e.userId == 'A'), isFalse);
       expect(container.read(scopeExpenseKeyProvider)!.userId, 'B');
     });
+
+    Future<void> switchToB() async {
+      await container.read(authControllerProvider.notifier).signOut();
+      await settle();
+      backend.auth.signInAs('B');
+      await settle();
+      await container.read(groupsProvider.future);
+      await settle();
+    }
+
+    test('A\'s groups refresh that ends after B signs in is dropped', () async {
+      watchAll();
+      await container.read(groupsProvider.future);
+      await settle();
+
+      final held = Completer<List<Group>>();
+      backend.groups.heldFetches.add(held);
+      final refreshing = container.read(groupsProvider.notifier).refresh();
+      await switchToB();
+      expect(container.read(groupsProvider).value!.groups.map((g) => g.id), [
+        'gB',
+      ]);
+
+      held.complete([groupOf('gA', adminId: 'A')]);
+      expect(await refreshing, isNull);
+      await settle();
+
+      final state = container.read(groupsProvider).value!;
+      expect(state.userId, 'B');
+      expect(state.groups.map((g) => g.id), ['gB']);
+    });
+
+    test('A\'s profile update that ends after B signs in is dropped', () async {
+      watchAll();
+      await container.read(groupsProvider.future);
+      await settle();
+
+      final release = Completer<void>();
+      backend.profiles.holdUpdates = release;
+      final updating = container
+          .read(profileProvider.notifier)
+          .setHapticsEnabled(true);
+      await switchToB();
+      backend.profiles.holdUpdates = null;
+      expect(container.read(userProfileProvider)?.id, 'B');
+
+      release.complete();
+      await updating;
+      await settle();
+
+      expect(container.read(profileProvider).value?.id, 'B');
+      expect(container.read(userProfileProvider)?.id, 'B');
+      final prefs = container.read(sharedPreferencesProvider);
+      expect(prefs.getKeys().where((k) => k.startsWith('u.A.')), isEmpty);
+    });
+  });
+
+  group('overlapping scope switches', () {
+    late TestBackend backend;
+    late ProviderContainer container;
+
+    setUp(() async {
+      backend = TestBackend(signedInAs: 'A');
+      backend.profiles.profiles['A'] = profileOf('A');
+      backend.groups.groupsByUser['A'] = [
+        groupOf('g1', adminId: 'A'),
+        groupOf('g2', adminId: 'A'),
+      ];
+      container = await backend.container();
+      addTearDown(container.dispose);
+      container.listen(groupsProvider, (_, _) {});
+      await container.read(groupsProvider.future);
+      await settle();
+    });
+
+    test('a late failure of an earlier switch keeps the latest', () async {
+      final first = Completer<void>();
+      backend.groups.heldSetActive.add(first);
+      backend.groups.failSetActiveFor.add('g1');
+      final notifier = container.read(groupsProvider.notifier);
+
+      final a = notifier.switchScope('g1');
+      final b = notifier.switchScope('g2');
+      first.complete();
+      expect(await a, isA<NetworkFailure>());
+      expect(await b, isNull);
+
+      expect(container.read(activeGroupProvider)?.id, 'g2');
+      expect(backend.groups.serverActiveGroup, 'g2');
+      expect(container.read(userProfileProvider)?.activeGroupId, 'g2');
+      expect(container.read(failureReporterProvider), isNull);
+    });
+
+    test('writes reach the server in the order of the taps', () async {
+      final first = Completer<void>();
+      backend.groups.heldSetActive.add(first);
+      final notifier = container.read(groupsProvider.notifier);
+
+      final a = notifier.switchScope('g1');
+      final b = notifier.switchScope('g2');
+      await settle();
+      // The second write waits for the first.
+      expect(backend.groups.activeGroupWrites, isEmpty);
+      first.complete();
+      await Future.wait([a, b]);
+
+      expect(backend.groups.activeGroupWrites, ['g1', 'g2']);
+      expect(backend.groups.serverActiveGroup, 'g2');
+      expect(container.read(activeGroupProvider)?.id, 'g2');
+    });
+
+    test('when the latest switch fails the server\'s scope returns', () async {
+      final first = Completer<void>();
+      backend.groups.heldSetActive.add(first);
+      backend.groups.failSetActiveFor.add('g2');
+      final notifier = container.read(groupsProvider.notifier);
+
+      final a = notifier.switchScope('g1');
+      final b = notifier.switchScope('g2');
+      first.complete();
+      expect(await a, isNull);
+      expect(await b, isA<NetworkFailure>());
+
+      expect(backend.groups.serverActiveGroup, 'g1');
+      expect(container.read(activeGroupProvider)?.id, 'g1');
+      expect(container.read(userProfileProvider)?.activeGroupId, 'g1');
+    });
   });
 
   group('active scope', () {
@@ -194,6 +323,34 @@ void main() {
   });
 
   group('profile', () {
+    test('a failed profile load is retried with the groups', () async {
+      final backend = TestBackend(signedInAs: 'A');
+      backend.profiles.profiles['A'] = profileOf('A', activeGroupId: 'g1');
+      backend.groups.groupsByUser['A'] = [groupOf('g1', adminId: 'A')];
+      backend.profiles.failFetch = const AppFailure.network();
+      final container = await backend.container();
+      addTearDown(container.dispose);
+      container
+        ..listen(profileProvider, (_, _) {})
+        ..listen(groupsProvider, (_, _) {});
+      await settle();
+      expect(container.read(groupsProvider).hasError, isTrue);
+
+      // Without a profile a settings change says so (not "session expired").
+      final failure = await container
+          .read(profileProvider.notifier)
+          .setCurrency('USD');
+      expect(failure, const AppFailure.notFound(key: 'profile_not_found'));
+
+      backend.profiles.failFetch = null;
+      container.read(groupsProvider.notifier).retry();
+      await container.read(groupsProvider.future);
+      await settle();
+
+      expect(container.read(userProfileProvider)?.id, 'A');
+      expect(container.read(activeGroupProvider)?.id, 'g1');
+    });
+
     test('a failed preference update rolls back', () async {
       final backend = TestBackend(signedInAs: 'A');
       backend.profiles.profiles['A'] = profileOf('A');

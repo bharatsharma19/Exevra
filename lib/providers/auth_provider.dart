@@ -496,10 +496,16 @@ class AuthController extends Notifier<AppAuthState> {
 
   /// Deletes the account on the server, then signs out. On failure the
   /// session and all local data are kept and the failure is returned.
+  ///
+  /// Users who signed in with Apple confirm with Apple first, so the
+  /// server can revoke the app's Apple token along with the account.
   Future<AppFailure?> deleteAccount() async {
     state = state._copy(isLoading: true);
     try {
-      await ref.read(accountRepositoryProvider).deleteAccount();
+      final appleCode = await _service.appleAuthorizationCode();
+      await ref
+          .read(accountRepositoryProvider)
+          .deleteAccount(appleAuthorizationCode: appleCode);
     } on AppFailure catch (failure) {
       return failure;
     } finally {

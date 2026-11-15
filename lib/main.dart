@@ -49,12 +49,13 @@ Future<void> main() async {
   }
 
   // Number and date formatting follow the device locale (en_IN fallback).
-  AppLocale.initFromDevice();
+  await AppLocale.initFromDevice();
 
   // 4. Initialize the Supabase client (PKCE auth flow) and preferences.
   final SharedPreferences prefs;
   try {
     prefs = await SharedPreferences.getInstance();
+    await SecureSessionStorage.clearAfterReinstall(prefs);
     await Supabase.initialize(
       url: config.supabaseUrl,
       publishableKey: config.supabaseAnonKey,

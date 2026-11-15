@@ -2,6 +2,8 @@
 library;
 
 import '../../providers/auth_provider.dart';
+import '../config/app_config.dart';
+import 'deep_links.dart';
 
 abstract final class AppRoutes {
   static const String root = '/';
@@ -73,6 +75,44 @@ String? safeReturnTo(String? raw) {
 /// * recoveringPassword: only the set-new-password screen.
 /// * signedIn: auth screens lead to a pending invitation, the remembered
 ///   location or the dashboard.
+/// Where a link the platform handed to the router belongs, or null when
+/// [location] is an ordinary route.
+///
+/// With Flutter's deep linking enabled the platform also pushes custom
+/// scheme links as routes: Android sends only the path (`/<token>` for
+/// `exevra://invite/<token>`), iOS the whole URL. The app's own link
+/// handler opens these too, so both must lead to the same place.
+String? platformLinkRedirect(Uri location) {
+  final scheme = location.scheme.toLowerCase();
+  final host = location.host.toLowerCase();
+  final segments = location.pathSegments.where((s) => s.isNotEmpty).toList();
+  String? inviteFor(String? token) =>
+      DeepLinks.isValidToken(token) ? AppRoutes.inviteFor(token!) : null;
+
+  if (scheme == AppConfig.inviteScheme) {
+    if (host != 'invite') return AppRoutes.root;
+    final token = switch (segments) {
+      [final token] => token,
+      [] => location.queryParameters['token'],
+      _ => null,
+    };
+    return inviteFor(token) ?? AppRoutes.root;
+  }
+  if ('$scheme://$host' == AppConfig.authCallbackUrl) {
+    // supabase_flutter exchanges the code; the auth phase routes on.
+    return AppRoutes.root;
+  }
+  if (scheme.isEmpty && segments.length == 1) {
+    final path = '/${segments.single}';
+    final known =
+        AppRoutes.authRoutes.contains(path) ||
+        AppRoutes.tabs.contains(path) ||
+        path == AppRoutes.invite;
+    if (!known) return inviteFor(segments.single);
+  }
+  return null;
+}
+
 String? authRedirect({
   required AuthPhase phase,
   required Uri location,

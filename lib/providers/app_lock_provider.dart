@@ -86,6 +86,9 @@ class AppLockController extends Notifier<AppLockState> {
   static const String unlockReason = 'Unlock Exevra';
 
   DateTime? _backgroundedAt;
+
+  /// The last life-cycle state reported (null before the first).
+  AppLifecycleState? _lifecycle;
   String? _userId;
 
   LocalAuthentication get _auth => ref.read(localAuthProvider);
@@ -177,6 +180,7 @@ class AppLockController extends Notifier<AppLockState> {
     final userId = _userId;
     final key = await _authenticate(unlockReason);
     if (!ref.mounted || _userId != userId) return false;
+    _afterPrompt(authenticated: key == null);
     if (key == null) {
       AppHaptics.success();
       state = state.copyWith(
@@ -212,6 +216,7 @@ class AppLockController extends Notifier<AppLockState> {
     );
     if (!ref.mounted || _userId != userId) return 'lock_signed_out';
     state = state.copyWith(isAuthenticating: false);
+    _afterPrompt(authenticated: key == null);
     if (key != null) return key;
     try {
       await ref
@@ -231,10 +236,19 @@ class AppLockController extends Notifier<AppLockState> {
   /// Follows the app life cycle: covers the content when inactive, notes
   /// when the app went to the background and locks again on return.
   void onLifecycleChanged(AppLifecycleState lifecycle) {
+    _lifecycle = lifecycle;
     if (_userId == null || !state.enabled) return;
-    // The system prompt itself makes the app inactive; ignore that.
-    if (state.isAuthenticating) return;
     final now = ref.read(appLockClockProvider)();
+    if (state.isAuthenticating) {
+      // The system prompt itself makes the app inactive; that is not
+      // leaving the app. Time in the background still counts, and is
+      // judged when the prompt ends (see [_afterPrompt]).
+      if (lifecycle == AppLifecycleState.hidden ||
+          lifecycle == AppLifecycleState.paused) {
+        _backgroundedAt ??= now;
+      }
+      return;
+    }
     switch (lifecycle) {
       case AppLifecycleState.inactive:
         state = state.copyWith(coverVisible: true);
@@ -252,6 +266,26 @@ class AppLockController extends Notifier<AppLockState> {
         );
       case AppLifecycleState.detached:
         break;
+    }
+  }
+
+  /// Applies the relock rule to time spent in the background while a
+  /// prompt was open. A successful authentication is fresh proof of
+  /// presence; after a cancel the app locks if it was away long enough.
+  /// While still in the background, the next resume decides instead.
+  void _afterPrompt({required bool authenticated}) {
+    if (authenticated) {
+      _backgroundedAt = null;
+      return;
+    }
+    final lifecycle = _lifecycle;
+    if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
+    final since = _backgroundedAt;
+    _backgroundedAt = null;
+    if (since == null || !state.enabled) return;
+    final now = ref.read(appLockClockProvider)();
+    if (now.difference(since) >= relockAfter) {
+      state = state.copyWith(locked: true, coverVisible: false);
     }
   }
 }

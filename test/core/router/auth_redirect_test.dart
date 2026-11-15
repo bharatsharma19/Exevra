@@ -12,6 +12,38 @@ void main() {
 
   const token = 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG';
 
+  group('links pushed by the platform', () {
+    String? map(String location) => platformLinkRedirect(Uri.parse(location));
+
+    test('a bare token path (Android) opens the invitation', () {
+      expect(map('/$token'), '/invite/$token');
+    });
+
+    test('a whole custom-scheme URL (iOS) opens the invitation', () {
+      expect(map('exevra://invite/$token'), '/invite/$token');
+      expect(map('exevra://invite?token=$token'), '/invite/$token');
+      expect(map('exevra://invite/bad'), '/');
+      expect(map('exevra://other/$token'), '/');
+    });
+
+    test('the auth callback goes home for the auth phase to route', () {
+      expect(map('com.exevra.app://auth-callback?code=abc'), '/');
+    });
+
+    test('ordinary routes are left alone', () {
+      for (final path in [
+        '/',
+        '/login',
+        '/dashboard',
+        '/invite',
+        '/invite/$token',
+        '/no-such-page',
+      ]) {
+        expect(map(path), isNull, reason: path);
+      }
+    });
+  });
+
   group('initializing', () {
     test('only the splash screen, keeping the target', () {
       expect(go(AuthPhase.initializing, '/splash'), isNull);

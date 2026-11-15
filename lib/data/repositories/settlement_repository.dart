@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/errors/app_failure.dart';
+import '../../core/utils/date_helpers.dart';
 import '../../models/balance.dart';
 import '../../models/json_reader.dart';
 import '../../models/money.dart';
@@ -11,8 +12,17 @@ import '../supabase_client_provider.dart';
 /// Settlements between members. Writes only through RPCs; the payer
 /// records (pending), the payee confirms, either party or the admin voids.
 abstract interface class SettlementRepository {
-  /// Newest first.
-  Future<List<Settlement>> list(String groupId, {int limit = 50});
+  /// Up to [limit] settlements, newest first (`created_at DESC, id DESC`),
+  /// strictly after [after] when given (keyset paging).
+  Future<List<Settlement>> list(
+    String groupId, {
+    Settlement? after,
+    int limit = 50,
+  });
+
+  /// Every pending settlement of the group (no limit), for the amount
+  /// a payer may still record.
+  Future<List<Settlement>> pending(String groupId);
 
   /// Audit trail of one settlement, oldest first.
   Future<List<SettlementEvent>> events(String settlementId);
@@ -50,17 +60,45 @@ class SupabaseSettlementRepository implements SettlementRepository {
   final SupabaseClient _client;
 
   @override
-  Future<List<Settlement>> list(String groupId, {int limit = 50}) {
+  Future<List<Settlement>> list(
+    String groupId, {
+    Settlement? after,
+    int limit = 50,
+  }) {
+    return ErrorMapper.guard(() async {
+      var request = _client
+          .from('settlements')
+          .select(Settlement.columns)
+          .eq('group_id', groupId);
+      if (after != null) {
+        final at = _quote(DateHelpers.toUtcIso(after.createdAt));
+        request = request.or(
+          'created_at.lt.$at,and(created_at.eq.$at,id.lt.${_quote(after.id)})',
+        );
+      }
+      final rows = await request
+          .order('created_at', ascending: false)
+          .order('id', ascending: false)
+          .limit(limit);
+      return parseList(rows, Settlement.fromJson, 'Settlement');
+    });
+  }
+
+  @override
+  Future<List<Settlement>> pending(String groupId) {
     return ErrorMapper.guard(() async {
       final rows = await _client
           .from('settlements')
           .select(Settlement.columns)
           .eq('group_id', groupId)
-          .order('created_at', ascending: false)
-          .limit(limit);
+          .eq('status', SettlementStatus.pending.name);
       return parseList(rows, Settlement.fromJson, 'Settlement');
     });
   }
+
+  /// Double-quotes a value for a PostgREST logic tree.
+  static String _quote(String value) =>
+      '"${value.replaceAll(r'\', r'\\').replaceAll('"', r'\"')}"';
 
   @override
   Future<List<SettlementEvent>> events(String settlementId) {

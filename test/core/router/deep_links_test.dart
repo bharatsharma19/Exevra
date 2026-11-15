@@ -84,6 +84,29 @@ void main() {
     expect(seen, [const InviteLink(token)]);
     await source.close();
   });
+
+  test('the same link opened again later is handled again', () async {
+    final source = _Source(null);
+    var now = DateTime.utc(2026, 11, 15, 12);
+    final seen = <DeepLink>[];
+    final listener = DeepLinkListener(
+      source: source,
+      onLink: seen.add,
+      appLinkHost: host,
+      clock: () => now,
+    );
+    addTearDown(listener.dispose);
+    final link = Uri.parse('exevra://invite/$token');
+
+    source.controller.add(link);
+    await Future<void>.delayed(Duration.zero);
+    now = now.add(const Duration(minutes: 1));
+    source.controller.add(link);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(seen, [const InviteLink(token), const InviteLink(token)]);
+    await source.close();
+  });
 }
 
 class _Source implements LinkSource {

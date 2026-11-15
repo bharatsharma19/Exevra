@@ -7,7 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/errors/app_failure.dart';
 import '../../../core/errors/failure_messages.dart';
 import '../../../core/platform/connectivity.dart';
-import '../../../providers/chat_provider.dart';
 import '../../../providers/failure_reporter.dart';
 import '../../../providers/group_detail_providers.dart';
 
@@ -58,12 +57,7 @@ class MainNavigationShell extends ConsumerWidget {
     });
     final offline = ref.watch(isOfflineProvider);
 
-    ref.listen<ChatState>(chatProvider, (prev, next) {
-      if (next.errorMessage != null &&
-          (prev?.errorMessage != next.errorMessage)) {
-        _showError(context, next.errorMessage!);
-      }
-    });
+    // Assistant failures are shown in the reply bubble only.
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
 

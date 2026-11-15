@@ -186,10 +186,25 @@ class ExpenseListState {
   }
 }
 
+/// The expense lists that are alive, so a realtime deletion (which
+/// carries only the row's id) can be matched against what is on screen.
+class ExpenseListRegistry {
+  final Set<ExpenseListNotifier> _lists = {};
+
+  /// Whether any live list shows the expense [id].
+  bool shows(String id) => _lists.any((list) => list.contains(id));
+}
+
+final expenseListRegistryProvider = Provider<ExpenseListRegistry>(
+  (ref) => ExpenseListRegistry(),
+);
+
 /// One expense list (keyset-paged) with optimistic writes.
 ///
 /// * Every load carries a generation number; a result that arrives after
 ///   a newer load started is dropped, so only the latest load wins.
+/// * A page requested before one of this list's writes was confirmed may
+///   predate it, so it is fetched again instead of being shown.
 /// * Writes show immediately, are replaced by the server's row on success
 ///   and rolled back on failure; the failure is returned and reported once.
 /// * Other lists, balances and insights reload through [dataRevisionProvider].
@@ -202,6 +217,13 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
 
   int _generation = 0;
   int _localIds = 0;
+
+  /// Moves whenever the server confirms a write made through this list.
+  int _confirmed = 0;
+
+  /// Ids deleted through this list (pending or confirmed). Ids are never
+  /// reused, so pages are filtered against this for the list's lifetime.
+  final Set<String> _deleted = {};
 
   /// Revision this list caused itself (already applied, no reload).
   int? _ownRevision;
@@ -219,24 +241,44 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
     ref.listen(dataRevisionProvider.select((r) => r.expenses), (_, next) {
       if (next != _ownRevision) unawaited(reload());
     });
+    final registry = ref.read(expenseListRegistryProvider);
+    registry._lists.add(this);
+    ref.onDispose(() => registry._lists.remove(this));
 
-    final page = await repo.fetchPage(
-      userId: key.userId,
-      query: key.query,
-      limit: pageSize,
-    );
+    ExpensePage page;
+    int confirmed;
+    do {
+      confirmed = _confirmed;
+      page = await repo.fetchPage(
+        userId: key.userId,
+        query: key.query,
+        limit: pageSize,
+      );
+    } while (confirmed != _confirmed && ref.mounted);
     final latest = state.value;
     if (generation != _generation && latest != null) {
       // A newer reload finished first; keep its result.
       return latest;
     }
-    return ExpenseListState(items: page.items, next: page.next);
+    return ExpenseListState(
+      items: _merge(page.items, _pending(latest)),
+      next: page.next,
+    );
   }
+
+  /// Whether this list currently shows the expense [id].
+  bool contains(String id) =>
+      state.value?.items.any((e) => e.id == id) ?? false;
+
+  /// Rows still waiting for the server (optimistic adds and edits).
+  static Iterable<Expense> _pending(ExpenseListState? state) =>
+      state?.items.where((e) => e.isSyncing) ?? const <Expense>[];
 
   /// Re-reads the list in place (as many rows as are loaded now), keeping
   /// the current rows visible. Returns the failure, or null.
   Future<AppFailure?> reload() async {
     final generation = ++_generation;
+    final confirmed = _confirmed;
     final loaded = state.value?.items.where((e) => !e.isSyncing).length ?? 0;
     final limit = loaded < pageSize ? pageSize : loaded;
     try {
@@ -246,9 +288,14 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
         limit: limit,
       );
       if (!ref.mounted || generation != _generation) return null;
-      final pending = state.value?.items.where((e) => e.isSyncing) ?? const [];
+      // A write was confirmed while this page was on its way, so the page
+      // may not include it: read again.
+      if (confirmed != _confirmed) return reload();
       state = AsyncData(
-        ExpenseListState(items: _merge(page.items, pending), next: page.next),
+        ExpenseListState(
+          items: _merge(page.items, _pending(state.value)),
+          next: page.next,
+        ),
       );
       return null;
     } on AppFailure catch (failure) {
@@ -267,6 +314,7 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
     final cursor = current?.next;
     if (current == null || cursor == null || current.isLoadingMore) return;
     final generation = _generation;
+    final confirmed = _confirmed;
     state = AsyncData(
       current.copyWith(isLoadingMore: true, loadMoreFailure: null),
     );
@@ -279,7 +327,7 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
       );
       if (!ref.mounted || generation != _generation) return;
       final now = state.value ?? current;
-      final known = {for (final e in now.items) e.id};
+      final known = {for (final e in now.items) e.id, ..._deleted};
       state = AsyncData(
         now.copyWith(
           items: [
@@ -290,6 +338,8 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
           isLoadingMore: false,
         ),
       );
+      // The page may predate a write confirmed meanwhile.
+      if (confirmed != _confirmed) unawaited(reload());
     } on AppFailure catch (failure) {
       if (!ref.mounted || generation != _generation) return;
       state = AsyncData(
@@ -313,18 +363,39 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
     _update((items) => _insertSorted(items, optimistic));
     try {
       final saved = await _repo.create(key.userId, draft);
+      _confirmed++;
       _update(
-        (items) =>
-            _insertSorted(items.where((e) => e.id != localId).toList(), saved),
+        (items) => _insertSorted(
+          items.where((e) => e.id != localId && e.id != saved.id).toList(),
+          saved,
+        ),
       );
       _changed();
       AppHaptics.success();
       return null;
     } on AppFailure catch (failure) {
       _update((items) => items.where((e) => e.id != localId).toList());
-      return _fail(failure, report: report);
+      // A create that failed in transit may still have been saved, and the
+      // server assigns ids, so a blind retry could add the expense twice.
+      return _fail(
+        _inTransit(failure) ? _unconfirmed() : failure,
+        report: report,
+      );
     }
   }
+
+  /// Every list reloads to show what the server has, and the failure says
+  /// so instead of inviting a retry.
+  AppFailure _unconfirmed() {
+    _reloadAll();
+    return const AppFailure.network(key: 'expense_unconfirmed');
+  }
+
+  /// Whether [failure] leaves open if the request reached the server.
+  static bool _inTransit(AppFailure failure) =>
+      failure is NetworkFailure ||
+      failure is TimeoutFailure ||
+      failure is OfflineFailure;
 
   /// Saves [edited] (same id as a listed expense). Returns the failure, or
   /// null when the server saved it.
@@ -341,6 +412,7 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
     );
     try {
       final saved = await _repo.update(edited);
+      _confirmed++;
       _update(
         (items) =>
             _insertSorted(items.where((e) => e.id != saved.id).toList(), saved),
@@ -353,6 +425,7 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
         final rest = items.where((e) => e.id != edited.id).toList();
         return before == null ? rest : _insertSorted(rest, before);
       });
+      _reloadIfInTransit(failure);
       return _fail(failure, report: report);
     }
   }
@@ -364,13 +437,17 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
       return const AppFailure.business('expense_not_saved_yet');
     }
     final before = _find(expense.id) ?? expense;
+    _deleted.add(expense.id);
     _update((items) => items.where((e) => e.id != expense.id).toList());
     try {
       await _repo.delete(expense.id);
+      _confirmed++;
       _changed();
       AppHaptics.medium();
       return null;
     } on AppFailure catch (failure) {
+      _deleted.remove(expense.id);
+      _reloadIfInTransit(failure);
       _update(
         (items) => _insertSorted(
           items.where((e) => e.id != expense.id).toList(),
@@ -425,24 +502,39 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
     Expense? created;
     try {
       created = await _repo.create(key.userId, target);
+      _confirmed++;
       await _repo.delete(original.id);
+      _deleted.add(original.id);
       final saved = created;
       _update(
-        (items) =>
-            _insertSorted(items.where((e) => e.id != localId).toList(), saved),
+        (items) => _insertSorted(
+          items
+              .where(
+                (e) =>
+                    e.id != localId && e.id != saved.id && e.id != original.id,
+              )
+              .toList(),
+          saved,
+        ),
       );
       _changed();
       AppHaptics.success();
       return null;
     } on AppFailure catch (failure) {
       final copy = created;
-      if (copy != null) {
+      final unsure = _inTransit(failure);
+      // After a failure in transit the original may already be gone, so
+      // the copy is kept (a reload shows what exists) rather than risking
+      // losing the expense.
+      if (copy != null && !unsure) {
         try {
           await _repo.delete(copy.id);
+          _deleted.add(copy.id);
+          _confirmed++;
         } on AppFailure catch (undoFailure) {
           // Both rows exist now; a reload shows them so nothing is hidden.
           AppLogger.warn('Could not remove the converted copy', undoFailure);
-          _changed();
+          _reloadAll();
         }
       }
       _update((items) {
@@ -451,7 +543,7 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
             .toList();
         return _insertSorted(rest, before);
       });
-      return _fail(failure, report: report);
+      return _fail(unsure ? _unconfirmed() : failure, report: report);
     }
   }
 
@@ -460,6 +552,18 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
       if (e.id == id) return e;
     }
     return null;
+  }
+
+  /// After a failure in transit the write may still have happened, so
+  /// every list reloads to show the server's state.
+  void _reloadIfInTransit(AppFailure failure) {
+    if (_inTransit(failure)) _reloadAll();
+  }
+
+  /// Makes every list (this one included), balances and insights reload.
+  void _reloadAll() {
+    if (!ref.mounted) return;
+    ref.read(dataRevisionProvider.notifier).bump(DataKind.expenses);
   }
 
   AppFailure _fail(AppFailure failure, {bool report = true}) {
@@ -506,9 +610,15 @@ class ExpenseListNotifier extends AsyncNotifier<ExpenseListState> {
     return a.id.compareTo(b.id) > 0;
   }
 
-  static List<Expense> _merge(List<Expense> server, Iterable<Expense> pending) {
-    if (pending.isEmpty) return server;
-    final list = [...server];
+  /// [server] rows plus the rows still waiting for the server. A pending
+  /// edit wins over the server's copy of the same id, and rows deleted
+  /// through this list stay hidden.
+  List<Expense> _merge(List<Expense> server, Iterable<Expense> pending) {
+    final hidden = {..._deleted, for (final p in pending) p.id};
+    final list = [
+      for (final e in server)
+        if (!hidden.contains(e.id)) e,
+    ];
     for (final p in pending) {
       final index = list.indexWhere((e) => _before(p, e));
       list.insert(index < 0 ? list.length : index, p);

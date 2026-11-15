@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:expense_manager/core/platform/secure_window.dart';
 import 'package:expense_manager/core/storage/preferences.dart';
 import 'package:expense_manager/features/auth/screens/app_lock_screen.dart';
@@ -15,7 +17,8 @@ import '../support/fakes.dart';
 class FakeLocalAuth implements LocalAuthentication {
   bool supported = true;
 
-  /// Next results: true/false, or a [LocalAuthException] to throw.
+  /// Next results: true/false, a [LocalAuthException] to throw, or a
+  /// [Completer] whose result is the answer (a prompt left open).
   final List<Object> answers = [];
   final List<String> reasons = [];
 
@@ -33,6 +36,7 @@ class FakeLocalAuth implements LocalAuthentication {
     reasons.add(localizedReason);
     expect(biometricOnly, isFalse, reason: 'device PIN must be allowed');
     final answer = answers.isEmpty ? true : answers.removeAt(0);
+    if (answer is Completer<bool>) return answer.future;
     if (answer is LocalAuthException) throw answer;
     return answer as bool;
   }
@@ -113,6 +117,69 @@ void main() {
       expect(c.read(appLockProvider).showLockScreen, isFalse);
     },
   );
+
+  group('time in the background while a prompt is open', () {
+    Future<(ProviderContainer, Completer<bool>, Future<String?>)> leaveDuring(
+      Duration away,
+    ) async {
+      final c = await start(signedInAs: 'A', lockOn: true);
+      expect(await lockOf(c).unlock(), isTrue);
+      final prompt = Completer<bool>();
+      localAuth.answers.add(prompt);
+      final turningOff = lockOf(c).setEnabled(false);
+      await settle();
+      expect(c.read(appLockProvider).isAuthenticating, isTrue);
+
+      // The user leaves the app with the prompt open, then comes back.
+      for (final s in [
+        AppLifecycleState.inactive,
+        AppLifecycleState.hidden,
+        AppLifecycleState.paused,
+      ]) {
+        lockOf(c).onLifecycleChanged(s);
+      }
+      now = now.add(away);
+      for (final s in [
+        AppLifecycleState.hidden,
+        AppLifecycleState.inactive,
+        AppLifecycleState.resumed,
+      ]) {
+        lockOf(c).onLifecycleChanged(s);
+      }
+      return (c, prompt, turningOff);
+    }
+
+    test('cancelling after a long absence locks the app', () async {
+      final (c, prompt, turningOff) = await leaveDuring(
+        const Duration(minutes: 5),
+      );
+      prompt.completeError(
+        const LocalAuthException(code: LocalAuthExceptionCode.userCanceled),
+      );
+      expect(await turningOff, 'lock_cancelled');
+      expect(c.read(appLockProvider).enabled, isTrue);
+      expect(c.read(appLockProvider).showLockScreen, isTrue);
+    });
+
+    test('cancelling after a short absence stays unlocked', () async {
+      final (c, prompt, turningOff) = await leaveDuring(
+        const Duration(seconds: 5),
+      );
+      prompt.complete(false);
+      expect(await turningOff, 'lock_failed');
+      expect(c.read(appLockProvider).showLockScreen, isFalse);
+    });
+
+    test('authenticating on return counts as presence', () async {
+      final (c, prompt, turningOff) = await leaveDuring(
+        const Duration(minutes: 5),
+      );
+      prompt.complete(true);
+      expect(await turningOff, isNull);
+      expect(c.read(appLockProvider).enabled, isFalse);
+      expect(c.read(appLockProvider).showLockScreen, isFalse);
+    });
+  });
 
   test('cancelling the prompt stays locked without an error', () async {
     final c = await start(signedInAs: 'A', lockOn: true);

@@ -1,5 +1,6 @@
 import 'dart:ui' show Locale, PlatformDispatcher;
 
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
 
 import '../../models/currency_info.dart';
@@ -28,10 +29,32 @@ abstract final class AppLocale {
 
   /// Reads the device locale and makes it the default for intl.
   /// Returns the BCP-47 tag (for example `en-IN`) to store on the profile.
-  static String initFromDevice() {
+  static Future<String> initFromDevice() async {
     final device = PlatformDispatcher.instance.locale;
-    Intl.defaultLocale = normalize(device.toLanguageTag());
+    await useLocale(device.toLanguageTag());
     return toBcp47(device);
+  }
+
+  /// Loads intl's date symbols and makes [tag] (or [fallback] when intl
+  /// has no number or date data for it) the default locale.
+  ///
+  /// Every `DateFormat` built without an explicit locale uses the default,
+  /// and throws `LocaleDataException` for any locale other than `en_US`
+  /// until its date symbols are loaded, so this runs before the first
+  /// frame.
+  static Future<String> useLocale(String? tag) async {
+    await initializeDateFormatting();
+    final number = normalize(tag);
+    final locale = DateFormat.localeExists(number)
+        ? number
+        : Intl.verifiedLocale(
+                number,
+                DateFormat.localeExists,
+                onFailure: (_) => fallback,
+              ) ??
+              fallback;
+    Intl.defaultLocale = locale;
+    return locale;
   }
 
   /// `en-IN` style tag for [locale], as stored in `profiles.locale`.

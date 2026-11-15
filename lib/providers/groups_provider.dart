@@ -54,6 +54,16 @@ class GroupsState {
 class GroupsNotifier extends AsyncNotifier<GroupsState> {
   GroupRepository get _repo => ref.read(groupRepositoryProvider);
 
+  /// Number of the latest scope switch; only the latest one updates or
+  /// rolls back the visible scope.
+  int _scopeSwitches = 0;
+
+  /// Scope writes run one after another so the server ends on the last.
+  Future<void> _scopeWrites = Future.value();
+
+  /// The active group the server holds as far as this device knows.
+  String? _serverScope;
+
   @override
   Future<GroupsState> build() async {
     final userId = ref.watch(currentUserIdProvider);
@@ -66,11 +76,29 @@ class GroupsNotifier extends AsyncNotifier<GroupsState> {
     ]);
     final groups = results[0]! as List<Group>;
     final saved = (results[1] as UserProfile?)?.activeGroupId;
+    _serverScope = saved;
     return GroupsState(
       groups: groups,
       activeGroupId: _resolve(groups, saved),
       userId: userId,
     );
+  }
+
+  /// Loads again after a failure. When the profile is what failed (the
+  /// groups need its saved scope), the profile is loaded again too.
+  void retry() {
+    if (ref.read(profileProvider).hasError) ref.invalidate(profileProvider);
+    ref.invalidateSelf();
+  }
+
+  /// Whether a result requested for [userId] may still be applied: the
+  /// notifier is reused across sign-ins, so after an await the signed-in
+  /// user (and the loaded state) may belong to someone else.
+  bool _isFor(String? userId) {
+    if (!ref.mounted || userId == null) return false;
+    if (ref.read(currentUserIdProvider) != userId) return false;
+    final owner = state.value?.userId;
+    return owner == null || owner == userId;
   }
 
   /// The saved active group if it is still an approved membership.
@@ -89,44 +117,55 @@ class GroupsNotifier extends AsyncNotifier<GroupsState> {
 
   /// Re-reads the group list, keeping the active scope when still valid.
   Future<AppFailure?> refresh() async {
+    final userId = ref.read(currentUserIdProvider);
     try {
       final groups = await _repo.fetchMyGroups();
-      if (!ref.mounted) return null;
-      final current = state.value ?? const GroupsState();
+      if (!_isFor(userId)) return null;
+      final active = state.value?.activeGroupId;
       state = AsyncData(
-        current.copyWith(
+        GroupsState(
           groups: groups,
-          activeGroupId: _resolve(groups, current.activeGroupId),
+          activeGroupId: _resolve(groups, active),
+          userId: userId,
         ),
       );
       return null;
     } on AppFailure catch (failure) {
+      if (!_isFor(userId)) return null;
       _report(failure);
       return failure;
     }
   }
 
-  /// Switches to [groupId] (null = personal). Writes the profile once; on
-  /// failure the previous scope is restored.
+  /// Switches to [groupId] (null = personal). Writes the profile once per
+  /// switch. Writes are sent in order, and when the latest switch fails
+  /// the scope the server holds is shown again.
   Future<AppFailure?> switchScope(String? groupId) async {
     final current = state.value;
-    if (current == null || current.activeGroupId == groupId) return null;
+    final userId = current?.userId;
+    if (current == null || userId == null) return null;
+    if (current.activeGroupId == groupId) return null;
     AppHaptics.selection();
+    final number = ++_scopeSwitches;
     state = AsyncData(current.copyWith(activeGroupId: groupId));
+    final write = _scopeWrites.then((_) => _repo.setActiveGroup(groupId));
+    _scopeWrites = write.then<void>((_) {}, onError: (Object _) {});
     try {
-      await _repo.setActiveGroup(groupId);
-      if (ref.mounted) {
+      await write;
+      if (!_isFor(userId)) return null;
+      _serverScope = groupId;
+      if (number == _scopeSwitches) {
         ref.read(profileProvider.notifier).setActiveGroupLocally(groupId);
       }
       return null;
     } on AppFailure catch (failure) {
-      if (ref.mounted) {
-        state = AsyncData(
-          (state.value ?? current).copyWith(
-            activeGroupId: current.activeGroupId,
-          ),
-        );
-      }
+      if (!_isFor(userId)) return null;
+      // A later switch decides the scope (and reports its own failure).
+      if (number != _scopeSwitches) return failure;
+      final now = state.value ?? current;
+      final restored = _resolve(now.groups, _serverScope);
+      state = AsyncData(now.copyWith(activeGroupId: restored));
+      ref.read(profileProvider.notifier).setActiveGroupLocally(restored);
       _report(failure);
       return failure;
     }
@@ -186,13 +225,15 @@ class GroupsNotifier extends AsyncNotifier<GroupsState> {
 
   /// Accepts an email invitation; the server makes that group active.
   Future<AppFailure?> acceptInvitation(String token) async {
+    final userId = ref.read(currentUserIdProvider);
     try {
       final groupId = await ref
           .read(invitationRepositoryProvider)
           .accept(token);
       await refresh();
-      if (!ref.mounted) return null;
-      final current = state.value ?? const GroupsState();
+      if (!_isFor(userId)) return null;
+      _serverScope = groupId;
+      final current = state.value ?? GroupsState(userId: userId);
       state = AsyncData(
         current.copyWith(activeGroupId: _resolve(current.groups, groupId)),
       );
@@ -200,6 +241,7 @@ class GroupsNotifier extends AsyncNotifier<GroupsState> {
       AppHaptics.success();
       return null;
     } on AppFailure catch (failure) {
+      if (!_isFor(userId)) return null;
       _report(failure);
       return failure;
     }
@@ -234,9 +276,10 @@ class GroupsNotifier extends AsyncNotifier<GroupsState> {
       _repo.fetchMyGroups(),
       ref.read(profileRepositoryProvider).fetch(userId),
     ]);
-    if (!ref.mounted) return;
+    if (!_isFor(userId)) return;
     final groups = results[0]! as List<Group>;
     final saved = (results[1] as UserProfile?)?.activeGroupId;
+    _serverScope = saved;
     final active = _resolve(groups, saved);
     state = AsyncData(
       GroupsState(groups: groups, activeGroupId: active, userId: userId),

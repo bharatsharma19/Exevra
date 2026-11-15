@@ -112,6 +112,9 @@ const Map<String, String> _byKey = {
       "An expense can't be moved between personal and a group.",
   'no_split_members': 'This group has no members who can share expenses.',
   'expense_not_saved_yet': 'This expense is still saving. Try again shortly.',
+  'expense_unconfirmed':
+      "We couldn't confirm this change was saved. Check your expenses before "
+      'trying again.',
   'viewer_cannot_add': 'Viewers can see group expenses but cannot add them.',
   // Settlements
   'settlement_exceeds_debt': "That's more than you currently owe this person.",
@@ -136,6 +139,8 @@ const Map<String, String> _byKey = {
   'google_unavailable': "Google sign-in isn't available in this version.",
   'google_failed': "Google sign-in didn't work. Please try again.",
   'apple_failed': "Sign in with Apple didn't work. Please try again.",
+  'apple_reauth_cancelled':
+      'Confirm with Apple to delete your account. Nothing was deleted.',
   'terms_required': 'Please accept the Terms of Service and Privacy Policy.',
   'password_mismatch': "The passwords don't match.",
   // App Lock (local_auth)

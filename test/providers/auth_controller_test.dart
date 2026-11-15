@@ -14,10 +14,12 @@ import '../support/fakes.dart';
 class FakeAccountRepository implements AccountRepository {
   AppFailure? failure;
   int calls = 0;
+  final List<String?> appleCodes = [];
 
   @override
   Future<void> deleteAccount({String? appleAuthorizationCode}) async {
     calls++;
+    appleCodes.add(appleAuthorizationCode);
     final f = failure;
     if (f != null) throw f;
   }
@@ -397,6 +399,26 @@ void main() {
             .getBool(UserPrefs.key('A', UserPrefs.appLock)),
         isTrue,
       );
+    });
+
+    test('an Apple user\'s fresh authorization code is sent', () async {
+      final c = await start(signedInAs: 'A');
+      backend.auth.appleCode = 'apple-code';
+      expect(await controllerOf(c).deleteAccount(), isNull);
+      expect(accounts.appleCodes, ['apple-code']);
+    });
+
+    test('cancelling the Apple confirmation deletes nothing', () async {
+      final c = await start(signedInAs: 'A');
+      backend.auth.appleCodeFailure = const AppFailure.business(
+        'apple_reauth_cancelled',
+      );
+      final failure = await controllerOf(c).deleteAccount();
+      await settle();
+      expect(failure, const AppFailure.business('apple_reauth_cancelled'));
+      expect(accounts.calls, 0);
+      expect(stateOf(c).phase, AuthPhase.signedIn);
+      expect(stateOf(c).isLoading, isFalse);
     });
 
     test('success signs out and clears the device data', () async {

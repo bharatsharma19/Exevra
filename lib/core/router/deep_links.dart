@@ -96,25 +96,42 @@ class AppLinksSource implements LinkSource {
 final linkSourceProvider = Provider<LinkSource>((ref) => AppLinksSource());
 
 /// Listens for incoming links for as long as it is watched and passes each
-/// recognised one to [onLink] once (the initial link may arrive twice).
+/// recognised one to [onLink]. The platform may report one tap twice (the
+/// initial link and the first stream event), so a link equal to the
+/// previous one within [duplicateWindow] is ignored; opening the same link
+/// again later works.
 class DeepLinkListener {
   DeepLinkListener({
     required LinkSource source,
     required this.onLink,
     String? appLinkHost,
-  }) : _host = appLinkHost ?? AppConfig.environment.appLinkHost {
+    DateTime Function()? clock,
+  }) : _host = appLinkHost ?? AppConfig.environment.appLinkHost,
+       _clock = clock ?? DateTime.now {
     unawaited(source.initialLink().then(_handle, onError: _onError));
     _sub = source.links.listen(_handle, onError: _onError);
   }
 
+  static const Duration duplicateWindow = Duration(seconds: 2);
+
   final void Function(DeepLink link) onLink;
   final String _host;
+  final DateTime Function() _clock;
   late final StreamSubscription<Uri> _sub;
   Uri? _last;
+  DateTime? _lastAt;
 
   void _handle(Uri? uri) {
-    if (uri == null || uri == _last) return;
+    if (uri == null) return;
+    final now = _clock();
+    final lastAt = _lastAt;
+    if (uri == _last &&
+        lastAt != null &&
+        now.difference(lastAt) < duplicateWindow) {
+      return;
+    }
     _last = uri;
+    _lastAt = now;
     final link = DeepLinks.parse(uri, appLinkHost: _host);
     if (link == null) {
       AppLogger.info('Ignored a link the app does not handle');

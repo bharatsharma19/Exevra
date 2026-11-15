@@ -110,7 +110,7 @@ class MyGroupsCard extends ConsumerWidget {
             FailureRetry(
               error: groupsAsync.error!,
               compact: true,
-              onRetry: () => ref.invalidate(groupsProvider),
+              onRetry: () => ref.read(groupsProvider.notifier).retry(),
             ),
           const SizedBox(height: 8),
           Wrap(

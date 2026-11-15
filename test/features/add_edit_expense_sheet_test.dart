@@ -239,7 +239,7 @@ void main() {
     tester,
   ) async {
     final (backend, container) = await _pump(tester);
-    backend.expenses.failWrites = const AppFailure.network();
+    backend.expenses.failWrites = const AppFailure.permissionDenied();
 
     await tester.enterText(find.byKey(const Key('expense-amount')), '10');
     await tester.enterText(find.byKey(const Key('expense-title')), 'Coffee');
@@ -247,12 +247,29 @@ void main() {
 
     expect(find.byKey(const Key('expense-form-error')), findsOneWidget);
     expect(
-      find.text(friendlyMessage(const AppFailure.network())),
+      find.text(friendlyMessage(const AppFailure.permissionDenied())),
       findsOneWidget,
     );
     expect(find.byType(AddEditExpenseSheet), findsOneWidget);
     expect(backend.expenses.rows, isEmpty);
     // Shown once, in the sheet, not under the modal barrier.
     expect(container.read(failureReporterProvider), isNull);
+  });
+
+  testWidgets('a save lost in transit asks to check before retrying', (
+    tester,
+  ) async {
+    final (backend, _) = await _pump(tester);
+    backend.expenses.failWrites = const AppFailure.network();
+
+    await tester.enterText(find.byKey(const Key('expense-amount')), '10');
+    await tester.enterText(find.byKey(const Key('expense-title')), 'Coffee');
+    await _save(tester);
+
+    expect(
+      find.text(friendlyMessageForKey('expense_unconfirmed')),
+      findsOneWidget,
+    );
+    expect(find.byType(AddEditExpenseSheet), findsOneWidget);
   });
 }

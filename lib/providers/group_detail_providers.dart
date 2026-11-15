@@ -16,6 +16,7 @@ import '../models/money.dart';
 import '../models/settlement.dart';
 import 'auth_provider.dart';
 import 'data_revision.dart';
+import 'expense_provider.dart';
 import 'failure_reporter.dart';
 import 'groups_provider.dart';
 
@@ -127,22 +128,111 @@ final settleSuggestionsProvider = FutureProvider.autoDispose
       return ref.watch(balanceRepositoryProvider).suggestions(groupId);
     });
 
-/// Settlements of a group, newest first, with record / confirm / void.
+/// Every pending payment of a group (not only the loaded history), for
+/// the amount a payer may still record.
+final pendingSettlementsProvider = FutureProvider.autoDispose
+    .family<List<Settlement>, String>((ref, groupId) {
+      _requireUser(ref);
+      ref.watch(dataRevisionProvider.select((r) => r.settlements));
+      return ref.watch(settlementRepositoryProvider).pending(groupId);
+    });
+
+/// The loaded part of a group's payment history.
+class SettlementHistory {
+  const SettlementHistory({
+    this.items = const [],
+    this.hasMore = false,
+    this.isLoadingMore = false,
+    this.loadMoreFailure,
+  });
+
+  /// Newest first (`created_at DESC, id DESC`).
+  final List<Settlement> items;
+  final bool hasMore;
+  final bool isLoadingMore;
+
+  /// Why the last "load more" failed.
+  final AppFailure? loadMoreFailure;
+}
+
+/// Settlements of a group, newest first and paged, with record / confirm
+/// / void.
 ///
 /// A recorded payment stays pending until the payee confirms it; only
 /// confirmed payments count in balances.
-class SettlementsNotifier extends AsyncNotifier<List<Settlement>> {
+class SettlementsNotifier extends AsyncNotifier<SettlementHistory> {
   SettlementsNotifier(this.groupId);
 
   final String groupId;
 
+  static const int pageSize = 50;
+
   SettlementRepository get _repo => ref.read(settlementRepositoryProvider);
 
   @override
-  Future<List<Settlement>> build() async {
+  Future<SettlementHistory> build() async {
     _requireUser(ref);
     ref.watch(dataRevisionProvider.select((r) => r.settlements));
-    return ref.watch(settlementRepositoryProvider).list(groupId);
+    final rows = await ref
+        .watch(settlementRepositoryProvider)
+        .list(groupId, limit: pageSize + 1);
+    return SettlementHistory(
+      items: rows.take(pageSize).toList(),
+      hasMore: rows.length > pageSize,
+    );
+  }
+
+  /// Loads the next page of older payments.
+  Future<void> loadMore() async {
+    final current = state.value;
+    if (current == null ||
+        !current.hasMore ||
+        current.isLoadingMore ||
+        current.items.isEmpty) {
+      return;
+    }
+    state = AsyncData(
+      SettlementHistory(
+        items: current.items,
+        hasMore: true,
+        isLoadingMore: true,
+      ),
+    );
+    try {
+      final rows = await _repo.list(
+        groupId,
+        after: current.items.last,
+        limit: pageSize + 1,
+      );
+      if (!ref.mounted) return;
+      final now = state.value ?? current;
+      final known = {for (final s in now.items) s.id};
+      state = AsyncData(
+        SettlementHistory(
+          items: [
+            ...now.items,
+            ...rows.take(pageSize).where((s) => !known.contains(s.id)),
+          ],
+          hasMore: rows.length > pageSize,
+        ),
+      );
+    } on AppFailure catch (failure) {
+      if (!ref.mounted) return;
+      final now = state.value ?? current;
+      state = AsyncData(
+        SettlementHistory(
+          items: now.items,
+          hasMore: true,
+          loadMoreFailure: failure,
+        ),
+      );
+    }
+  }
+
+  /// Newest first, ties by id (the server's order).
+  static int _newestFirst(Settlement a, Settlement b) {
+    final byTime = b.createdAt.compareTo(a.createdAt);
+    return byTime != 0 ? byTime : b.id.compareTo(a.id);
   }
 
   Future<AppFailure?> _write(
@@ -152,10 +242,13 @@ class SettlementsNotifier extends AsyncNotifier<List<Settlement>> {
     try {
       final saved = await action();
       if (!ref.mounted) return null;
-      final current = state.value ?? const <Settlement>[];
+      final current = state.value ?? const SettlementHistory();
       state = AsyncData(
-        [saved, ...current.where((s) => s.id != saved.id)]
-          ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+        SettlementHistory(
+          items: [saved, ...current.items.where((s) => s.id != saved.id)]
+            ..sort(_newestFirst),
+          hasMore: current.hasMore,
+        ),
       );
       ref.read(dataRevisionProvider.notifier).bump(DataKind.settlements);
       AppHaptics.success();
@@ -197,7 +290,7 @@ class SettlementsNotifier extends AsyncNotifier<List<Settlement>> {
 }
 
 final settlementsProvider = AsyncNotifierProvider.autoDispose
-    .family<SettlementsNotifier, List<Settlement>, String>(
+    .family<SettlementsNotifier, SettlementHistory, String>(
       SettlementsNotifier.new,
     );
 
@@ -284,8 +377,15 @@ final groupRealtimeProvider = Provider.autoDispose<void>((ref) {
       .watch(expenseRepositoryProvider)
       .watchGroup(group.id)
       .listen(
-        (kind) {
-          pending.add(switch (kind) {
+        (change) {
+          final deleted = change.deletedExpenseId;
+          // Deletions arrive for every expense on the server; only those
+          // a list shows matter here.
+          if (deleted != null &&
+              !ref.read(expenseListRegistryProvider).shows(deleted)) {
+            return;
+          }
+          pending.add(switch (change.kind) {
             GroupChangeKind.expenses => DataKind.expenses,
             GroupChangeKind.members => DataKind.members,
             GroupChangeKind.settlements => DataKind.settlements,

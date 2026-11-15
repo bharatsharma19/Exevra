@@ -226,6 +226,19 @@ class FakeAuthService implements AuthService {
     return result;
   }
 
+  /// What [appleAuthorizationCode] returns (null: no Apple identity), or
+  /// the failure it throws.
+  String? appleCode;
+  AppFailure? appleCodeFailure;
+
+  @override
+  Future<String?> appleAuthorizationCode() async {
+    calls.add('appleCode');
+    final f = appleCodeFailure;
+    if (f != null) throw f;
+    return appleCode;
+  }
+
   @override
   Future<void> updateFullName(String fullName) async {
     calls.add('fullName:$fullName');
@@ -255,9 +268,15 @@ class FakeProfileRepository implements ProfileRepository {
   final Map<String, UserProfile> profiles = {};
   final List<(String, ProfileUpdate)> updates = [];
   AppFailure? failUpdates;
+  AppFailure? failFetch;
+
+  /// When set, updates wait for it before running.
+  Completer<void>? holdUpdates;
 
   @override
   Future<UserProfile> fetch(String userId) async {
+    final f = failFetch;
+    if (f != null) throw f;
     final p = profiles[userId];
     if (p == null) throw const AppFailure.notFound(key: 'profile_not_found');
     return p;
@@ -266,6 +285,7 @@ class FakeProfileRepository implements ProfileRepository {
   @override
   Future<UserProfile> update(String userId, ProfileUpdate update) async {
     updates.add((userId, update));
+    await holdUpdates?.future;
     final failure = failUpdates;
     if (failure != null) throw failure;
     final saved = (profiles[userId] ?? profileOf(userId)).apply(update);
@@ -299,15 +319,35 @@ class FakeGroupRepository implements GroupRepository {
   final List<String?> activeGroupWrites = [];
   AppFailure? failSetActive;
 
+  /// Group ids whose `set_active_group` call fails.
+  final Set<String?> failSetActiveFor = {};
+
+  /// The active group the server holds (the last successful write).
+  String? serverActiveGroup;
+
+  /// When non-empty, each fetch waits for the next completer and returns
+  /// what it completes with.
+  final List<Completer<List<Group>>> heldFetches = [];
+
+  /// When non-empty, each `set_active_group` call waits for the next one.
+  final List<Completer<void>> heldSetActive = [];
+
   @override
-  Future<List<Group>> fetchMyGroups() async =>
-      groupsByUser[currentUser()] ?? const [];
+  Future<List<Group>> fetchMyGroups() async {
+    if (heldFetches.isNotEmpty) return heldFetches.removeAt(0).future;
+    return groupsByUser[currentUser()] ?? const [];
+  }
 
   @override
   Future<void> setActiveGroup(String? groupId) async {
+    if (heldSetActive.isNotEmpty) await heldSetActive.removeAt(0).future;
     activeGroupWrites.add(groupId);
     final failure = failSetActive;
     if (failure != null) throw failure;
+    if (failSetActiveFor.contains(groupId)) {
+      throw const AppFailure.network();
+    }
+    serverActiveGroup = groupId;
   }
 
   /// Members per group as `get_group_members` returns them.
@@ -524,6 +564,9 @@ class FakeExpenseRepository implements ExpenseRepository {
   /// returns what it completes with.
   final List<Completer<ExpensePage>> heldFetches = [];
 
+  /// When set, create, update and delete wait for it before running.
+  Completer<void>? holdWrites;
+
   bool _visible(String userId, ExpenseQuery query, Expense e) =>
       switch (query.scope) {
         PersonalScope() => e.isPersonal && e.userId == userId,
@@ -571,6 +614,7 @@ class FakeExpenseRepository implements ExpenseRepository {
   @override
   Future<Expense> create(String userId, ExpenseDraft draft) async {
     await Future<void>.delayed(Duration.zero);
+    await holdWrites?.future;
     final failure = failWrites;
     if (failure != null) throw failure;
     final saved = draft
@@ -583,6 +627,7 @@ class FakeExpenseRepository implements ExpenseRepository {
   @override
   Future<Expense> update(Expense expense) async {
     await Future<void>.delayed(Duration.zero);
+    await holdWrites?.future;
     final failure = failWrites;
     if (failure != null) throw failure;
     final saved = expense.copyWith(isSyncing: false);
@@ -595,6 +640,7 @@ class FakeExpenseRepository implements ExpenseRepository {
   @override
   Future<void> delete(String expenseId) async {
     await Future<void>.delayed(Duration.zero);
+    await holdWrites?.future;
     final failure = failWrites;
     if (failure != null) throw failure;
     if (failDeleteIds.contains(expenseId)) {
@@ -604,8 +650,18 @@ class FakeExpenseRepository implements ExpenseRepository {
     rows.removeWhere((e) => e.id == expenseId);
   }
 
+  /// Realtime changes pushed by the test (per group).
+  final StreamController<GroupChange> realtime =
+      StreamController<GroupChange>.broadcast();
+  final List<String> watchedGroups = [];
+
   @override
-  Stream<GroupChangeKind> watchGroup(String groupId) => const Stream.empty();
+  Stream<GroupChange> watchGroup(String groupId) {
+    watchedGroups.add(groupId);
+    return realtime.stream;
+  }
+
+  Future<void> closeRealtime() => realtime.close();
 }
 
 /// Server-computed insights per group (null key = personal scope).
@@ -674,10 +730,34 @@ class FakeSettlementRepository implements SettlementRepository {
   String? adminId;
   int _ids = 0;
 
+  int listCalls = 0;
+  int pendingCalls = 0;
+
+  static int _newestFirst(Settlement a, Settlement b) {
+    final t = b.createdAt.compareTo(a.createdAt);
+    return t != 0 ? t : b.id.compareTo(a.id);
+  }
+
   @override
-  Future<List<Settlement>> list(String groupId, {int limit = 50}) async =>
-      rows.where((s) => s.groupId == groupId).toList()
-        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  Future<List<Settlement>> list(
+    String groupId, {
+    Settlement? after,
+    int limit = 50,
+  }) async {
+    listCalls++;
+    final sorted = rows.where((s) => s.groupId == groupId).toList()
+      ..sort(_newestFirst);
+    final rest = after == null
+        ? sorted
+        : sorted.where((s) => _newestFirst(after, s) < 0).toList();
+    return rest.take(limit).toList();
+  }
+
+  @override
+  Future<List<Settlement>> pending(String groupId) async {
+    pendingCalls++;
+    return rows.where((s) => s.groupId == groupId && s.isPending).toList();
+  }
 
   @override
   Future<List<SettlementEvent>> events(String settlementId) async => const [];
