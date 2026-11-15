@@ -10,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/config/app_config.dart';
 import 'core/constants/app_constants.dart';
 import 'core/logging/app_logger.dart';
+import 'core/observability/crash_reporting.dart';
 import 'core/router/app_router.dart';
 import 'core/router/deep_links.dart';
 import 'core/storage/preferences.dart';
@@ -17,14 +18,20 @@ import 'core/storage/secure_session_storage.dart';
 import 'core/theme/app_theme.dart';
 import 'core/ui/root_messenger.dart';
 import 'core/utils/app_locale.dart';
+import 'core/widgets/app_snackbar.dart' show SnackbarHost;
 import 'features/auth/screens/app_lock_screen.dart';
 import 'features/startup/service_unavailable_app.dart';
+import 'l10n/l10n.dart';
 import 'models/profile.dart';
 import 'providers/app_lock_provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/profile_provider.dart';
 
-Future<void> main() async {
+/// Starts the app with crash reporting installed (Sentry only when a
+/// `SENTRY_DSN` was compiled in; otherwise errors are logged locally).
+Future<void> main() => runAppGuarded(_bootstrap);
+
+Future<void> _bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // 1. Enforce Portrait Orientation Lock
@@ -78,6 +85,7 @@ Future<void> main() async {
     );
   } catch (e, stackTrace) {
     AppLogger.error('Supabase initialization failed', e, stackTrace);
+    await captureFailure(e, stackTrace);
     runApp(const ServiceUnavailableApp());
     return;
   }
@@ -197,12 +205,19 @@ class _ExevraAppState extends ConsumerState<ExevraApp>
     return MaterialApp.router(
       title: AppConstants.appName,
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
+      theme: AppTheme.light(),
+      darkTheme: AppTheme.dark(),
       themeMode: themeMode,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       routerConfig: router,
+      // The single root messenger: AppSnackbar and every screen's
+      // ScaffoldMessenger.of(context) show through it.
       scaffoldMessengerKey: rootScaffoldMessengerKey,
-      builder: (context, child) => LockGate(child: child ?? const SizedBox()),
+      // SnackbarHost puts snack bars above sheets and dialogs; LockGate
+      // stays above everything, snack bars included.
+      builder: (context, child) =>
+          LockGate(child: SnackbarHost(child: child ?? const SizedBox())),
     );
   }
 }
