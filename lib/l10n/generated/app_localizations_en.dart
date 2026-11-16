@@ -197,7 +197,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'At least 8 characters with upper and lower case letters and a number.';
 
   @override
-  String get authCodeLabel => '6-digit code';
+  String get authCodeLabel => '8-digit code';
 
   @override
   String get authNameLabel => 'Your name';
@@ -239,7 +239,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get authAgreeTerms =>
-      'I agree to the Terms of Service and the Privacy Policy.';
+      'I\'m 18 or older and agree to the Terms and Privacy Policy';
 
   @override
   String get authTermsLink => 'Terms of Service';
@@ -261,7 +261,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get authVerifySubtitle =>
-      'We sent a confirmation link and a 6-digit code to';
+      'We sent a confirmation link and an 8-digit code to';
 
   @override
   String get authVerifyCode => 'Verify code';
@@ -315,14 +315,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get authForgotSubtitle =>
-      'Enter your account\'s email address and we\'ll send you a 6-digit code.';
+      'Enter your account\'s email address and we\'ll send you an 8-digit code.';
 
   @override
   String get authCodeTitle => 'Enter the code';
 
   @override
   String authCodeSubtitle(String email) {
-    return 'Enter the 6-digit code we emailed to $email and choose a new password.';
+    return 'Enter the 8-digit code we emailed to $email and choose a new password.';
   }
 
   @override
@@ -330,7 +330,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get authCodeSent =>
-      'If an account exists for this address, we emailed it a 6-digit code.';
+      'If an account exists for this address, we emailed it an 8-digit code.';
 
   @override
   String get authSetNewPassword => 'Set new password';

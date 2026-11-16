@@ -15,7 +15,7 @@ import '../../../providers/auth_provider.dart';
 import '../widgets/auth_widgets.dart';
 import '../../../core/utils/app_clock.dart';
 
-/// Password reset with a 6-digit code from the email, so it works even
+/// Password reset with an 8-digit code from the email, so it works even
 /// when the email is opened on another device.
 ///
 /// Step 1 asks for the address; step 2 takes the code and the new

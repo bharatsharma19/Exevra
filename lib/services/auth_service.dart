@@ -17,7 +17,7 @@ enum SignUpOutcome {
   /// The server returned a session (email confirmation is off).
   signedIn,
 
-  /// The account was created and a confirmation email (link and 6-digit
+  /// The account was created and a confirmation email (link and 8-digit
   /// code) was sent. There is no session until the email is confirmed.
   confirmationSent,
 
@@ -80,10 +80,10 @@ abstract interface class AuthService {
   /// Resends the sign-up confirmation email (works without a session).
   Future<void> resendSignupConfirmation(String email);
 
-  /// Confirms the sign-up with the 6-digit code from the email and signs in.
+  /// Confirms the sign-up with the 8-digit code from the email and signs in.
   Future<void> verifySignupCode({required String email, required String code});
 
-  /// Emails a 6-digit password reset code.
+  /// Emails an 8-digit password reset code.
   Future<void> sendPasswordResetCode(String email);
 
   /// Exchanges a reset code for a recovery session. Returns the session's

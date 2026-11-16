@@ -60,9 +60,9 @@ void main() {
     expect(Validators.validateDisplayName('x' * 61), isNotNull);
   });
 
-  test('codes are exactly 6 digits', () {
-    expect(Validators.validateOtp('123456'), isNull);
-    expect(Validators.validateOtp('12345'), isNotNull);
-    expect(Validators.validateOtp('abcdef'), isNotNull);
+  test('codes are exactly 8 digits', () {
+    expect(Validators.validateOtp('12345678'), isNull);
+    expect(Validators.validateOtp('123456'), isNotNull);
+    expect(Validators.validateOtp('abcdefgh'), isNotNull);
   });
 }

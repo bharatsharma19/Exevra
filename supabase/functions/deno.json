@@ -1,5 +1,5 @@
 {
-  "lock": false,
+  "lock": true,
   "compilerOptions": {
     "strict": true,
     "noImplicitReturns": true,

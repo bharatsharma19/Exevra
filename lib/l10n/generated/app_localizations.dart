@@ -445,7 +445,7 @@ abstract class AppLocalizations {
   /// Label of the field for the code from the email.
   ///
   /// In en, this message translates to:
-  /// **'6-digit code'**
+  /// **'8-digit code'**
   String get authCodeLabel;
 
   /// No description provided for @authNameLabel.
@@ -523,7 +523,7 @@ abstract class AppLocalizations {
   /// Label of the sign-up checkbox. The two documents open from the links under it.
   ///
   /// In en, this message translates to:
-  /// **'I agree to the Terms of Service and the Privacy Policy.'**
+  /// **'I\'m 18 or older and agree to the Terms and Privacy Policy'**
   String get authAgreeTerms;
 
   /// No description provided for @authTermsLink.
@@ -565,7 +565,7 @@ abstract class AppLocalizations {
   /// Followed by the email address on its own line.
   ///
   /// In en, this message translates to:
-  /// **'We sent a confirmation link and a 6-digit code to'**
+  /// **'We sent a confirmation link and an 8-digit code to'**
   String get authVerifySubtitle;
 
   /// No description provided for @authVerifyCode.
@@ -649,7 +649,7 @@ abstract class AppLocalizations {
   /// No description provided for @authForgotSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Enter your account\'s email address and we\'ll send you a 6-digit code.'**
+  /// **'Enter your account\'s email address and we\'ll send you an 8-digit code.'**
   String get authForgotSubtitle;
 
   /// No description provided for @authCodeTitle.
@@ -661,7 +661,7 @@ abstract class AppLocalizations {
   /// No description provided for @authCodeSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Enter the 6-digit code we emailed to {email} and choose a new password.'**
+  /// **'Enter the 8-digit code we emailed to {email} and choose a new password.'**
   String authCodeSubtitle(String email);
 
   /// No description provided for @authSendCode.
@@ -673,7 +673,7 @@ abstract class AppLocalizations {
   /// No description provided for @authCodeSent.
   ///
   /// In en, this message translates to:
-  /// **'If an account exists for this address, we emailed it a 6-digit code.'**
+  /// **'If an account exists for this address, we emailed it an 8-digit code.'**
   String get authCodeSent;
 
   /// No description provided for @authSetNewPassword.
