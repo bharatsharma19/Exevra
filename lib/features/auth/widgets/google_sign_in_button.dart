@@ -53,6 +53,9 @@ class GoogleSignInButton extends StatelessWidget {
         button: true,
         enabled: enabled,
         label: text,
+        // excludeSemantics drops the InkWell's own action, so the node
+        // carries the tap itself for TalkBack and VoiceOver.
+        onTap: enabled ? onPressed : null,
         excludeSemantics: true,
         child: Opacity(
           // Guidelines: a disabled button keeps its colours at 38% opacity.

@@ -11,6 +11,7 @@ import 'package:expense_manager/l10n/l10n.dart';
 import 'package:expense_manager/providers/auth_provider.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -328,11 +329,45 @@ void main() {
         );
         await expectLater(tester, meetsGuideline(textContrastGuideline));
         await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
         await tester.tap(find.byType(GoogleSignInButton));
         expect(taps, 1);
+
+        // Screen readers activate it with a semantic tap, not a pointer.
+        final node = find.semantics.byLabel('Continue with Google');
+        expect(
+          node.evaluate().single.getSemanticsData().hasAction(
+            SemanticsAction.tap,
+          ),
+          isTrue,
+        );
+        tester.semantics.tap(node);
+        await tester.pump();
+        expect(taps, 2);
         handle.dispose();
       });
     }
+
+    testWidgets('offers no tap action while loading', (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: Scaffold(
+            body: Center(
+              child: GoogleSignInButton(onPressed: () {}, isLoading: true),
+            ),
+          ),
+        ),
+      );
+      final data = find.semantics
+          .byLabel('Continue with Google')
+          .evaluate()
+          .single
+          .getSemanticsData();
+      expect(data.hasAction(SemanticsAction.tap), isFalse);
+      handle.dispose();
+    });
 
     test('parses the logo path data', () {
       final bounds = parseSvgPath('M0 0L10 0V10H0Z').getBounds();
