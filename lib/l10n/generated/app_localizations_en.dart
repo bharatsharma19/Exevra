@@ -559,6 +559,9 @@ class AppLocalizationsEn extends AppLocalizations {
       'For your security, enter your password to delete your account.';
 
   @override
+  String get settingsReauthPasswordMissing => 'Enter your password';
+
+  @override
   String settingsReauthProvider(String provider) {
     return 'For your security, sign in with $provider again to delete your account.';
   }

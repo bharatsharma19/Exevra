@@ -300,6 +300,10 @@
   "settingsDeleted": "Your account was deleted.",
   "settingsReauthTitle": "Confirm it's you",
   "settingsReauthPassword": "For your security, enter your password to delete your account.",
+  "settingsReauthPasswordMissing": "Enter your password",
+  "@settingsReauthPasswordMissing": {
+    "description": "Inline error when Continue is tapped with an empty password."
+  },
   "settingsReauthProvider": "For your security, sign in with {provider} again to delete your account.",
   "@settingsReauthProvider": {"placeholders": {"provider": {"type": "String", "example": "Google"}}},
   "settingsReauthContinueWith": "Continue with {provider}",

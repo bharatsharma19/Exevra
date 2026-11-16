@@ -159,6 +159,7 @@ class _PasswordDialog extends StatefulWidget {
 
 class _PasswordDialogState extends State<_PasswordDialog> {
   final _controller = TextEditingController();
+  bool _missing = false;
 
   @override
   void dispose() {
@@ -168,7 +169,10 @@ class _PasswordDialogState extends State<_PasswordDialog> {
 
   void _submit() {
     final password = _controller.text;
-    if (password.isEmpty) return;
+    if (password.isEmpty) {
+      setState(() => _missing = true);
+      return;
+    }
     Navigator.of(context).pop(password);
   }
 
@@ -191,6 +195,10 @@ class _PasswordDialogState extends State<_PasswordDialog> {
               autofocus: true,
               label: l10n.authPasswordLabel,
               textInputAction: TextInputAction.done,
+              errorText: _missing ? l10n.settingsReauthPasswordMissing : null,
+              onChanged: (_) {
+                if (_missing) setState(() => _missing = false);
+              },
               onFieldSubmitted: (_) => _submit(),
             ),
           ),

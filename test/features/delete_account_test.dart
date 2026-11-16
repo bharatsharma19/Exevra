@@ -102,7 +102,16 @@ void main() {
     expect(accounts.calls, 1);
     expect(find.text("Confirm it's you"), findsOneWidget);
 
+    // Continue with no password says what is missing and stays.
+    await tester.tap(find.byKey(const Key('reauth-continue')));
+    await _frames(tester, 3);
+    expect(find.text('Enter your password'), findsOneWidget);
+    expect(find.text("Confirm it's you"), findsOneWidget);
+    expect(backend.auth.calls.where((c) => c.startsWith('reauth')), isEmpty);
+
     await tester.enterText(find.byKey(const Key('reauth-password')), 'pw-1');
+    await tester.pump();
+    expect(find.text('Enter your password'), findsNothing);
     await tester.tap(find.byKey(const Key('reauth-continue')));
     await _frames(tester);
 

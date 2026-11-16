@@ -1078,6 +1078,12 @@ abstract class AppLocalizations {
   /// **'For your security, enter your password to delete your account.'**
   String get settingsReauthPassword;
 
+  /// Inline error when Continue is tapped with an empty password.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter your password'**
+  String get settingsReauthPasswordMissing;
+
   /// No description provided for @settingsReauthProvider.
   ///
   /// In en, this message translates to:
