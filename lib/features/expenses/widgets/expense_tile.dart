@@ -23,6 +23,9 @@ enum ExpenseAction {
 /// One expense in the list: category icon, title, category and time, who
 /// paid (group expenses) and the amount, plus an actions menu.
 ///
+/// A locked group expense (someone in it left the group) shows a lock and
+/// the reason, and its Delete item is disabled.
+///
 /// The row body is one screen reader item and one button (edit); the menu
 /// is a separate button so it stays reachable.
 class ExpenseTile extends StatelessWidget {
@@ -34,6 +37,7 @@ class ExpenseTile extends StatelessWidget {
     required this.canEdit,
     required this.canDelete,
     required this.onAction,
+    this.locked = false,
     super.key,
   });
 
@@ -55,6 +59,11 @@ class ExpenseTile extends StatelessWidget {
 
   /// Called with the chosen menu action.
   final ValueChanged<ExpenseAction> onAction;
+
+  /// Whether the expense is locked because someone in it left the group:
+  /// the row says so and Delete is disabled (the title, category, date and
+  /// note stay editable).
+  final bool locked;
 
   @override
   Widget build(BuildContext context) {
@@ -104,6 +113,29 @@ class ExpenseTile extends StatelessWidget {
                   payerLabel!,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  style: textTheme.labelMedium?.copyWith(
+                    color: palette.textSecondary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+        if (locked) ...[
+          const SizedBox(height: AppSpacing.xxs),
+          Row(
+            key: const Key('expense-locked'),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.lock_outline_rounded,
+                size: 14,
+                color: palette.textSecondary,
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              Flexible(
+                child: Text(
+                  l10n.expensesLockedRow,
                   style: textTheme.labelMedium?.copyWith(
                     color: palette.textSecondary,
                   ),
@@ -173,7 +205,18 @@ class ExpenseTile extends StatelessWidget {
                       title: Text(l10n.expensesEdit),
                     ),
                   ),
-                if (canDelete)
+                if (canDelete && locked)
+                  PopupMenuItem(
+                    enabled: false,
+                    value: ExpenseAction.delete,
+                    child: ListTile(
+                      enabled: false,
+                      leading: const Icon(Icons.lock_outline_rounded),
+                      title: Text(l10n.delete),
+                      subtitle: Text(l10n.expensesLockedRow),
+                    ),
+                  )
+                else if (canDelete)
                   PopupMenuItem(
                     value: ExpenseAction.delete,
                     child: ListTile(

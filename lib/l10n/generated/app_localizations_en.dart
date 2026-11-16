@@ -284,6 +284,15 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get expensesSectionToday => 'Today';
+
+  @override
+  String get expensesSectionYesterday => 'Yesterday';
+
+  @override
+  String get expensesSectionTomorrow => 'Tomorrow';
+
+  @override
   String get expensesOnlyPayerCanEdit =>
       'Only the person who paid can edit this expense.';
 
@@ -389,6 +398,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get expensesLockedTitle => 'This expense is locked';
+
+  @override
+  String get expensesLockedRow => 'Locked: someone in it left the group';
 
   @override
   String get expensesDeleteTitle => 'Delete expense?';

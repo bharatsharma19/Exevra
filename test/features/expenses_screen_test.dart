@@ -103,9 +103,14 @@ void main() {
           ),
           ..._many(2),
         ],
+        // The long row is locked, so its reason line must fit too.
+        setUp: (b) {
+          b.groups.membersByGroup['g1'] = [memberOf('u1')];
+          b.expenses.participants['long'] = ['u1', 'u-left'];
+        },
       );
       expectNoOverflow(tester);
-      expect(find.byType(ExpensesScreen), findsOneWidget);
+      expect(find.byKey(const Key('expense-locked')), findsOneWidget);
     });
   }
 
@@ -361,7 +366,7 @@ void main() {
     expect(find.text('Undo'), findsNothing);
   });
 
-  testWidgets('a group expense shared with someone who left is not deleted', (
+  testWidgets('a locked group expense shows the lock and cannot be deleted', (
     tester,
   ) async {
     final group = groupOf('g1', adminId: 'u1');
@@ -375,18 +380,90 @@ void main() {
       },
     );
 
+    // The row says why, with a lock, before any menu is opened.
+    final row = find.byKey(const Key('expense-locked'));
+    expect(row, findsOneWidget);
+    expect(
+      find.descendant(
+        of: row,
+        matching: find.byIcon(Icons.lock_outline_rounded),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Locked: someone in it left the group'), findsOneWidget);
+
+    await _openMenu(tester, 'Shared');
+    final item = tester.widget<PopupMenuItem<Object?>>(
+      find.ancestor(
+        of: find.text('Delete').last,
+        matching: find.byWidgetPredicate((w) => w is PopupMenuItem),
+      ),
+    );
+    expect(item.enabled, isFalse);
+    // Edit stays: the title, category, date and note can still change.
+    expect(find.text('Edit'), findsOneWidget);
+    await tester.tap(find.text('Delete').last, warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete expense?'), findsNothing);
+    expect(backend.expenses.rows, hasLength(1));
+    expect(backend.expenses.deleted, isEmpty);
+  });
+
+  testWidgets('an expense that locks after the list loaded is not deleted', (
+    tester,
+  ) async {
+    final group = groupOf('g1', adminId: 'u1');
+    final (backend, container) = await _pump(
+      tester,
+      group: group,
+      rows: [expenseOf('ge', userId: 'u1', groupId: 'g1', title: 'Shared')],
+      setUp: (b) {
+        b.groups.membersByGroup['g1'] = [memberOf('u1'), memberOf('u2')];
+        b.expenses.participants['ge'] = ['u1', 'u2'];
+      },
+    );
+    expect(find.byKey(const Key('expense-locked')), findsNothing);
+
+    // u2 leaves while the row still shows the earlier answer.
+    final hold = Completer<void>();
+    backend.groups.gate.hold = hold;
+    backend.groups.membersByGroup['g1'] = [memberOf('u1')];
+    container.invalidate(expenseLockedProvider);
+    await tester.pump();
+
     await _openMenu(tester, 'Shared');
     await tester.tap(find.text('Delete').last);
+    await tester.pump();
+    hold.complete();
+    backend.groups.gate.hold = null;
     await tester.pumpAndSettle();
 
     expect(find.text('Delete expense?'), findsNothing);
     expect(find.text('This expense is locked'), findsOneWidget);
-    expect(find.byIcon(Icons.lock_outline_rounded), findsOneWidget);
     expect(
       find.text(friendlyMessageForKey('expense_locked_member_left')),
       findsOneWidget,
     );
-    expect(backend.expenses.rows, hasLength(1));
     expect(backend.expenses.deleted, isEmpty);
+  });
+
+  testWidgets('date headers come from the app strings', (tester) async {
+    final now = DateTime.now();
+    await _pump(
+      tester,
+      rows: [
+        expenseOf('t', userId: 'u1', title: 'Lunch', spentAt: now),
+        expenseOf(
+          'y',
+          userId: 'u1',
+          title: 'Taxi',
+          spentAt: now.subtract(const Duration(days: 1)),
+        ),
+      ],
+    );
+
+    expect(find.text('Today'), findsOneWidget);
+    expect(find.text('Yesterday'), findsOneWidget);
   });
 }

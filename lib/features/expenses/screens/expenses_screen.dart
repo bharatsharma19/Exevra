@@ -217,15 +217,29 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
                 actionLabel: l10n.expensesAddFirst,
                 onAction: _openEditor,
               ),
-        tileOf: (expense) => ExpenseTile(
-          key: ValueKey('expense-${expense.id}'),
-          expense: expense,
-          payerLabel: _payerLabel(expense, members, mixed),
-          canEdit: _canEdit(expense),
-          canDelete: _canDelete(expense),
-          onTap: () => _onTap(expense),
-          onAction: (action) => _onAction(expense, action),
-        ),
+        tileOf: (expense) {
+          final canEdit = _canEdit(expense);
+          final canDelete = _canDelete(expense);
+          // Only rows the user can act on check the lock (two reads per
+          // row); the server still refuses a locked change either way.
+          final lockKey = canEdit || canDelete
+              ? expenseLockKeyOf(expense)
+              : null;
+          return Consumer(
+            key: ValueKey('expense-${expense.id}'),
+            builder: (context, ref, _) => ExpenseTile(
+              expense: expense,
+              payerLabel: _payerLabel(expense, members, mixed),
+              canEdit: canEdit,
+              canDelete: canDelete,
+              locked:
+                  lockKey != null &&
+                  (ref.watch(expenseLockedProvider(lockKey)).value ?? false),
+              onTap: () => _onTap(expense),
+              onAction: (action) => _onAction(expense, action),
+            ),
+          );
+        },
       );
     }
 
@@ -354,10 +368,11 @@ class _ExpenseList extends StatelessWidget {
             return _Footer(list: list, onLoadMore: onLoadMore);
           }
           final expense = items[i];
-          final section = DateHelpers.sectionHeader(expense.spentAt);
+          final now = DateTime.now();
+          final section = _sectionTitle(l10n, expense.spentAt, now);
           final showHeader =
               i == 0 ||
-              section != DateHelpers.sectionHeader(items[i - 1].spentAt);
+              section != _sectionTitle(l10n, items[i - 1].spentAt, now);
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -382,6 +397,16 @@ class _ExpenseList extends StatelessWidget {
     );
   }
 }
+
+/// The date header for an expense at [instant]: Today, Yesterday and
+/// Tomorrow from the app's strings, else a weekday or a locale date.
+String _sectionTitle(AppLocalizations l10n, DateTime instant, DateTime now) =>
+    switch (DateHelpers.calendarDaysBetween(instant, now)) {
+      0 => l10n.expensesSectionToday,
+      1 => l10n.expensesSectionYesterday,
+      -1 => l10n.expensesSectionTomorrow,
+      _ => DateHelpers.sectionHeader(instant, now: now),
+    };
 
 /// Loads the next page when it comes into view; Retry when that failed.
 class _Footer extends StatelessWidget {

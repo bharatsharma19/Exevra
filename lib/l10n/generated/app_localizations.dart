@@ -574,6 +574,24 @@ abstract class AppLocalizations {
   /// **'{count, plural, =1{1 expense found} other{{count} expenses found}}'**
   String expensesResultCount(int count);
 
+  /// No description provided for @expensesSectionToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Today'**
+  String get expensesSectionToday;
+
+  /// No description provided for @expensesSectionYesterday.
+  ///
+  /// In en, this message translates to:
+  /// **'Yesterday'**
+  String get expensesSectionYesterday;
+
+  /// No description provided for @expensesSectionTomorrow.
+  ///
+  /// In en, this message translates to:
+  /// **'Tomorrow'**
+  String get expensesSectionTomorrow;
+
   /// No description provided for @expensesOnlyPayerCanEdit.
   ///
   /// In en, this message translates to:
@@ -777,6 +795,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'This expense is locked'**
   String get expensesLockedTitle;
+
+  /// No description provided for @expensesLockedRow.
+  ///
+  /// In en, this message translates to:
+  /// **'Locked: someone in it left the group'**
+  String get expensesLockedRow;
 
   /// No description provided for @expensesDeleteTitle.
   ///
