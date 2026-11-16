@@ -151,18 +151,39 @@ class SettleUpCard extends StatelessWidget {
 
 /// Top category and the biggest expense of the period.
 class HighlightsRow extends StatelessWidget {
-  const HighlightsRow({required this.insights, super.key});
+  const HighlightsRow({
+    required this.insights,
+    this.loading = false,
+    this.failed = false,
+    super.key,
+  });
 
   final ExpenseInsights? insights;
+
+  /// Insights are on their way: placeholders instead of "None yet".
+  final bool loading;
+
+  /// Insights failed to load: a short inline error instead of "None yet"
+  /// (the summary card above offers Retry).
+  final bool failed;
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final top = insights?.topCategory;
-    final biggest = insights?.highest;
+    final data = insights;
+    final state = data != null
+        ? _HighlightState.ready
+        : failed
+        ? _HighlightState.failed
+        : loading
+        ? _HighlightState.loading
+        : _HighlightState.ready;
+    final top = data?.topCategory;
+    final biggest = data?.highest;
     final cards = [
       _HighlightCard(
         key: const Key('dashboard-top-category'),
+        state: state,
         label: l10n.dashboardTopCategory,
         leading: top == null
             ? const _IconBadge(icon: Icons.pie_chart_outline_rounded)
@@ -172,6 +193,7 @@ class HighlightsRow extends StatelessWidget {
       ),
       _HighlightCard(
         key: const Key('dashboard-biggest'),
+        state: state,
         label: l10n.dashboardBiggestExpense,
         leading: biggest == null
             ? const _IconBadge(icon: Icons.arrow_upward_rounded)
@@ -229,8 +251,11 @@ class _IconBadge extends StatelessWidget {
   }
 }
 
+enum _HighlightState { ready, loading, failed }
+
 class _HighlightCard extends StatelessWidget {
   const _HighlightCard({
+    required this.state,
     required this.label,
     required this.leading,
     required this.value,
@@ -238,6 +263,7 @@ class _HighlightCard extends StatelessWidget {
     super.key,
   });
 
+  final _HighlightState state;
   final String label;
   final Widget leading;
   final String value;
@@ -245,21 +271,51 @@ class _HighlightCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final palette = context.palette;
     final textTheme = Theme.of(context).textTheme;
-    return AppCard(
-      child: MergeSemantics(
-        child: Column(
+    final labelText = Text(
+      label,
+      style: textTheme.bodySmall?.copyWith(color: palette.textSecondary),
+    );
+    final Widget body;
+    switch (state) {
+      case _HighlightState.loading:
+        body = Semantics(
+          label: '$label, ${l10n.loading}',
+          excludeSemantics: true,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SkeletonBox.circle(size: 40),
+              const SizedBox(height: AppSpacing.sm),
+              labelText,
+              const SizedBox(height: AppSpacing.xs),
+              const SkeletonBox(width: 96, height: 18),
+            ],
+          ),
+        );
+      case _HighlightState.failed:
+        body = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const _IconBadge(icon: Icons.error_outline_rounded),
+            const SizedBox(height: AppSpacing.sm),
+            labelText,
+            Text(
+              l10n.dashboardHighlightFailed,
+              key: const Key('dashboard-highlight-failed'),
+              style: textTheme.bodyMedium?.copyWith(color: palette.danger),
+            ),
+          ],
+        );
+      case _HighlightState.ready:
+        body = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             leading,
             const SizedBox(height: AppSpacing.sm),
-            Text(
-              label,
-              style: textTheme.bodySmall?.copyWith(
-                color: palette.textSecondary,
-              ),
-            ),
+            labelText,
             Text(
               value,
               maxLines: 2,
@@ -279,8 +335,8 @@ class _HighlightCard extends StatelessWidget {
                 ),
               ),
           ],
-        ),
-      ),
-    );
+        );
+    }
+    return AppCard(child: MergeSemantics(child: body));
   }
 }

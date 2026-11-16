@@ -200,7 +200,11 @@ class DashboardScreen extends ConsumerWidget {
         onAction: () => goTab(context, AppRoutes.insights),
         padding: const EdgeInsetsDirectional.only(bottom: AppSpacing.xs),
       ),
-      HighlightsRow(insights: insightsAsync.value),
+      HighlightsRow(
+        insights: insightsAsync.value,
+        loading: insightsAsync.isLoading,
+        failed: insightsAsync.hasError,
+      ),
       const SizedBox(height: AppSpacing.md),
       RecentExpensesSection(
         title: inGroup

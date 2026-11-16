@@ -901,6 +901,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get dashboardNoneYet => 'None yet';
 
   @override
+  String get dashboardHighlightFailed => 'Couldn\'t load';
+
+  @override
   String get dashboardRecentPersonal => 'Recent personal expenses';
 
   @override

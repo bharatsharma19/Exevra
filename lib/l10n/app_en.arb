@@ -554,6 +554,10 @@
   "dashboardTopCategory": "Top category",
   "dashboardBiggestExpense": "Biggest expense",
   "dashboardNoneYet": "None yet",
+  "dashboardHighlightFailed": "Couldn't load",
+  "@dashboardHighlightFailed": {
+    "description": "Shown in a Home highlight card when the insights failed to load."
+  },
   "dashboardRecentPersonal": "Recent personal expenses",
   "dashboardRecentGroup": "Recent in {group}",
   "@dashboardRecentGroup": {

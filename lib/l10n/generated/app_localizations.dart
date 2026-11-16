@@ -1660,6 +1660,12 @@ abstract class AppLocalizations {
   /// **'None yet'**
   String get dashboardNoneYet;
 
+  /// Shown in a Home highlight card when the insights failed to load.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load'**
+  String get dashboardHighlightFailed;
+
   /// No description provided for @dashboardRecentPersonal.
   ///
   /// In en, this message translates to:

@@ -823,6 +823,9 @@ class FakeInsightsRepository implements InsightsRepository {
   AppFailure? failure;
   int calls = 0;
 
+  /// When set, fetches wait for it.
+  Completer<void>? hold;
+
   /// The timeframe of every fetch, in order.
   final List<InsightTimeframe> timeframes = [];
 
@@ -836,6 +839,7 @@ class FakeInsightsRepository implements InsightsRepository {
   }) async {
     calls++;
     timeframes.add(timeframe);
+    await hold?.future;
     final f = failure;
     if (f != null) throw f;
     return byGroup[groupId] ??

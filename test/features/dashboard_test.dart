@@ -369,6 +369,42 @@ void main() {
     expect(find.byType(SkeletonList), findsNothing);
   });
 
+  testWidgets('highlights show placeholders while insights load', (
+    tester,
+  ) async {
+    final hold = Completer<void>();
+    await _pump(
+      tester,
+      settle: false,
+      setUp: (b) {
+        _richGroup(b);
+        b.insights.hold = hold;
+      },
+    );
+    await tester.pump();
+    for (final key in ['dashboard-top-category', 'dashboard-biggest']) {
+      expect(
+        find.descendant(
+          of: find.byKey(Key(key)),
+          matching: find.byType(SkeletonBox),
+        ),
+        findsWidgets,
+      );
+    }
+    expect(find.text(l10n.dashboardNoneYet), findsNothing);
+
+    hold.complete();
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('dashboard-top-category')),
+        matching: find.byType(SkeletonBox),
+      ),
+      findsNothing,
+    );
+    expect(find.text('Food'), findsWidgets);
+  });
+
   testWidgets('a failed summary shows no figure and offers Retry', (
     tester,
   ) async {
@@ -379,6 +415,9 @@ void main() {
 
     expect(find.text('—'), findsOneWidget);
     expect(find.text(friendlyMessage(const AppFailure.network())), findsOne);
+    // The highlights say they could not load, not that there is nothing.
+    expect(find.text(l10n.dashboardHighlightFailed), findsNWidgets(2));
+    expect(find.text(l10n.dashboardNoneYet), findsNothing);
 
     backend.insights
       ..failure = null
