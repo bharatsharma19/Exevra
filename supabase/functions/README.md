@@ -20,9 +20,11 @@ provider key and the service-role key.
   `npm:@supabase/supabase-js@2.118.0`). Code under `_shared` must not rely on bare specifiers,
   because each function is bundled with its own `deno.json`.
 - One `deno.json` per function (used by the bundler). There is no `import_map.json`. The root
-  `deno.json` here holds fmt, lint and task settings. Lockfiles are disabled (`"lock": false`)
-  in the root and in every function's `deno.json`, because the pins are exact, so running Deno
-  from any folder creates no `deno.lock` (`deno.lock` is also gitignored here). Each function's
+  `deno.json` here holds fmt, lint and task settings and enables the committed `deno.lock`
+  (`"lock": true`), so `deno task check` locally and in CI verifies the integrity of every
+  remote and transitive dependency. Refresh it with `deno cache --lock=deno.lock` over the
+  entry points and tests after changing a pin. Each function's own `deno.json` keeps
+  `"lock": false` for the bundler, whose pins are exact. Each function's
   `deno.json` repeats the strict compiler options, so `deno check index.ts` run inside a function
   folder is as strict as the root check.
 - No CORS handling: the only client is the mobile app.
