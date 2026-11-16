@@ -112,8 +112,8 @@ supabase start -x studio,imgproxy,logflare,vector,supavisor,storage-api
 supabase db reset          # apply every migration from scratch
 supabase test db           # run the pgTAP tests
 
-# Edge Functions with local secrets (gitignored)
-cp supabase/functions/.env.example supabase/functions/.env
+# Edge Functions with local secrets (gitignored; -n never overwrites an existing file)
+cp -n supabase/functions/.env.example supabase/functions/.env
 supabase functions serve --env-file supabase/functions/.env
 ```
 
@@ -146,10 +146,13 @@ supabase db dump --remote --data-only -f ~/exevra-backups/data.sql
 
 # 2. Drift check: compare the hosted schema with the baseline migration only.
 supabase start
-supabase db reset --version 20261115000000     # local database at the baseline
-supabase db diff --from local --to remote --schema public
-#    No output (or only cosmetic differences) means no drift. Resolve anything else first.
-supabase db reset                               # back to all migrations
+supabase db dump --remote --schema public -f /tmp/hosted_public.sql
+supabase db reset --version 20261115000000 --no-seed   # local database at the baseline
+supabase db dump --schema public -f /tmp/baseline_public.sql
+diff -u /tmp/baseline_public.sql /tmp/hosted_public.sql
+#    No output (or only the known drift listed in supabase/README.md) means you can go on.
+#    Resolve anything else first.
+supabase db reset                                       # back to all migrations
 
 # 3. Mark the baseline as already applied (the hosted database was created from it).
 supabase migration repair --remote --status applied 20261115000000
@@ -159,13 +162,14 @@ supabase db push --remote --dry-run
 supabase db push --remote
 ```
 
-`supabase db diff` only reads the hosted database. (`supabase db pull --remote` can also show
+The drift check only reads the hosted database. (`supabase db pull --remote` can also show
 drift, but in CLI 3 it records the pulled file in the hosted migration history, which then has
 to be reverted with `supabase migration repair --remote --status reverted <version>`.)
 
 ```sh
 # 5. Server secrets (gitignored file; same names as supabase/functions/.env.example).
-cp supabase/functions/.env.example supabase/.env.secrets
+#    Create the file once; -n never overwrites an existing one. Later, edit it in place.
+cp -n supabase/functions/.env.example supabase/.env.secrets
 #    Fill in the production values, then:
 supabase secrets set --env-file supabase/.env.secrets
 

@@ -70,7 +70,7 @@ Names are listed in [`.env.example`](./.env.example). `SUPABASE_URL`, `SUPABASE_
 ```sh
 cp supabase/functions/.env.example supabase/functions/.env   # gitignored; fill in values
 supabase functions serve --env-file supabase/functions/.env  # local
-supabase secrets set --env-file supabase/functions/.env      # hosted project
+supabase secrets set --env-file supabase/.env.secrets       # hosted project (production values)
 supabase functions deploy ai-chat send-invite delete-account
 ```
 
