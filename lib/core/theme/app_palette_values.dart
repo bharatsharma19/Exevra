@@ -143,3 +143,64 @@ const AppPalette _darkPalette = AppPalette(
   },
   categoryFallback: Color(0xFF94A3B8),
 );
+
+/// [AppPalette.lerp]: each colour moves from [a] to [b] by [t].
+AppPalette _lerpPalettes(AppPalette a, AppPalette b, double t) {
+  Color c(Color x, Color y) => Color.lerp(x, y, t)!;
+  return AppPalette(
+    brightness: t < 0.5 ? a.brightness : b.brightness,
+    background: c(a.background, b.background),
+    surface: c(a.surface, b.surface),
+    surfaceVariant: c(a.surfaceVariant, b.surfaceVariant),
+    surfaceElevated: c(a.surfaceElevated, b.surfaceElevated),
+    outline: c(a.outline, b.outline),
+    outlineVariant: c(a.outlineVariant, b.outlineVariant),
+    outlineStrong: c(a.outlineStrong, b.outlineStrong),
+    textPrimary: c(a.textPrimary, b.textPrimary),
+    textSecondary: c(a.textSecondary, b.textSecondary),
+    textTertiary: c(a.textTertiary, b.textTertiary),
+    accent: c(a.accent, b.accent),
+    textOnAccent: c(a.textOnAccent, b.textOnAccent),
+    accentContainer: c(a.accentContainer, b.accentContainer),
+    onAccentContainer: c(a.onAccentContainer, b.onAccentContainer),
+    secondary: c(a.secondary, b.secondary),
+    onSecondary: c(a.onSecondary, b.onSecondary),
+    secondaryContainer: c(a.secondaryContainer, b.secondaryContainer),
+    onSecondaryContainer: c(a.onSecondaryContainer, b.onSecondaryContainer),
+    success: c(a.success, b.success),
+    onSuccess: c(a.onSuccess, b.onSuccess),
+    successContainer: c(a.successContainer, b.successContainer),
+    onSuccessContainer: c(a.onSuccessContainer, b.onSuccessContainer),
+    warning: c(a.warning, b.warning),
+    onWarning: c(a.onWarning, b.onWarning),
+    warningContainer: c(a.warningContainer, b.warningContainer),
+    onWarningContainer: c(a.onWarningContainer, b.onWarningContainer),
+    danger: c(a.danger, b.danger),
+    onDanger: c(a.onDanger, b.onDanger),
+    dangerContainer: c(a.dangerContainer, b.dangerContainer),
+    onDangerContainer: c(a.onDangerContainer, b.onDangerContainer),
+    info: c(a.info, b.info),
+    onInfo: c(a.onInfo, b.onInfo),
+    infoContainer: c(a.infoContainer, b.infoContainer),
+    onInfoContainer: c(a.onInfoContainer, b.onInfoContainer),
+    positiveAmount: c(a.positiveAmount, b.positiveAmount),
+    negativeAmount: c(a.negativeAmount, b.negativeAmount),
+    inverseSurface: c(a.inverseSurface, b.inverseSurface),
+    onInverseSurface: c(a.onInverseSurface, b.onInverseSurface),
+    inverseAccent: c(a.inverseAccent, b.inverseAccent),
+    shimmerBase: c(a.shimmerBase, b.shimmerBase),
+    shimmerHighlight: c(a.shimmerHighlight, b.shimmerHighlight),
+    scrim: c(a.scrim, b.scrim),
+    focusRing: c(a.focusRing, b.focusRing),
+    chart: <Color>[
+      for (var i = 0; i < a.chart.length; i++)
+        c(a.chart[i], b.chart[i % b.chart.length]),
+    ],
+    onChart: c(a.onChart, b.onChart),
+    categories: <String, Color>{
+      for (final entry in a.categories.entries)
+        entry.key: c(entry.value, b.categoryColor(entry.key)),
+    },
+    categoryFallback: c(a.categoryFallback, b.categoryFallback),
+  );
+}

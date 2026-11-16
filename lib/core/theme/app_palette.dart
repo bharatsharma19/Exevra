@@ -351,63 +351,7 @@ class AppPalette extends ThemeExtension<AppPalette> {
   @override
   AppPalette lerp(covariant ThemeExtension<AppPalette>? other, double t) {
     if (other is! AppPalette) return this;
-    Color c(Color a, Color b) => Color.lerp(a, b, t)!;
-    return AppPalette(
-      brightness: t < 0.5 ? brightness : other.brightness,
-      background: c(background, other.background),
-      surface: c(surface, other.surface),
-      surfaceVariant: c(surfaceVariant, other.surfaceVariant),
-      surfaceElevated: c(surfaceElevated, other.surfaceElevated),
-      outline: c(outline, other.outline),
-      outlineVariant: c(outlineVariant, other.outlineVariant),
-      outlineStrong: c(outlineStrong, other.outlineStrong),
-      textPrimary: c(textPrimary, other.textPrimary),
-      textSecondary: c(textSecondary, other.textSecondary),
-      textTertiary: c(textTertiary, other.textTertiary),
-      accent: c(accent, other.accent),
-      textOnAccent: c(textOnAccent, other.textOnAccent),
-      accentContainer: c(accentContainer, other.accentContainer),
-      onAccentContainer: c(onAccentContainer, other.onAccentContainer),
-      secondary: c(secondary, other.secondary),
-      onSecondary: c(onSecondary, other.onSecondary),
-      secondaryContainer: c(secondaryContainer, other.secondaryContainer),
-      onSecondaryContainer: c(onSecondaryContainer, other.onSecondaryContainer),
-      success: c(success, other.success),
-      onSuccess: c(onSuccess, other.onSuccess),
-      successContainer: c(successContainer, other.successContainer),
-      onSuccessContainer: c(onSuccessContainer, other.onSuccessContainer),
-      warning: c(warning, other.warning),
-      onWarning: c(onWarning, other.onWarning),
-      warningContainer: c(warningContainer, other.warningContainer),
-      onWarningContainer: c(onWarningContainer, other.onWarningContainer),
-      danger: c(danger, other.danger),
-      onDanger: c(onDanger, other.onDanger),
-      dangerContainer: c(dangerContainer, other.dangerContainer),
-      onDangerContainer: c(onDangerContainer, other.onDangerContainer),
-      info: c(info, other.info),
-      onInfo: c(onInfo, other.onInfo),
-      infoContainer: c(infoContainer, other.infoContainer),
-      onInfoContainer: c(onInfoContainer, other.onInfoContainer),
-      positiveAmount: c(positiveAmount, other.positiveAmount),
-      negativeAmount: c(negativeAmount, other.negativeAmount),
-      inverseSurface: c(inverseSurface, other.inverseSurface),
-      onInverseSurface: c(onInverseSurface, other.onInverseSurface),
-      inverseAccent: c(inverseAccent, other.inverseAccent),
-      shimmerBase: c(shimmerBase, other.shimmerBase),
-      shimmerHighlight: c(shimmerHighlight, other.shimmerHighlight),
-      scrim: c(scrim, other.scrim),
-      focusRing: c(focusRing, other.focusRing),
-      chart: <Color>[
-        for (var i = 0; i < chart.length; i++)
-          c(chart[i], other.chart[i % other.chart.length]),
-      ],
-      onChart: c(onChart, other.onChart),
-      categories: <String, Color>{
-        for (final entry in categories.entries)
-          entry.key: c(entry.value, other.categoryColor(entry.key)),
-      },
-      categoryFallback: c(categoryFallback, other.categoryFallback),
-    );
+    return _lerpPalettes(this, other, t);
   }
 }
 

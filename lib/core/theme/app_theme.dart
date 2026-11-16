@@ -259,64 +259,8 @@ class AppTheme {
         ),
         shape: const RoundedRectangleBorder(borderRadius: AppRadius.mdAll),
       ),
-      chipTheme: ChipThemeData(
-        color: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.selected)
-              ? p.accentContainer
-              : p.surfaceVariant,
-        ),
-        side: WidgetStateBorderSide.resolveWith(
-          (states) => focused(states)
-              ? c.focusBorder
-              : BorderSide(
-                  color: states.contains(WidgetState.disabled)
-                      ? p.outlineVariant
-                      : states.contains(WidgetState.selected)
-                      ? p.accent
-                      : p.outline,
-                ),
-        ),
-        // Chips resolve only the colour of their label style, never a
-        // WidgetStateTextStyle itself: one would reach the label with no
-        // colour and no size, and the engine paints such text white (1.1:1
-        // on the light chip fill). So the style is plain and its colour is
-        // the state-dependent part.
-        labelStyle: text.labelLarge!.copyWith(
-          color: WidgetStateColor.resolveWith(
-            (states) => states.contains(WidgetState.disabled)
-                ? p.textTertiary
-                : states.contains(WidgetState.selected)
-                ? p.onAccentContainer
-                : p.textPrimary,
-          ),
-        ),
-        checkmarkColor: p.onAccentContainer,
-        iconTheme: IconThemeData(color: p.textSecondary, size: AppSizes.iconSm),
-        shape: const RoundedRectangleBorder(borderRadius: AppRadius.smAll),
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-        showCheckmark: true,
-      ),
-      floatingActionButtonTheme: FloatingActionButtonThemeData(
-        backgroundColor: p.accent,
-        foregroundColor: p.textOnAccent,
-        // Same accent state layer as filled buttons (see accentOverlay).
-        focusColor: p.onAccentContainer.withValues(alpha: _focusOpacity),
-        hoverColor: p.onAccentContainer.withValues(alpha: _hoverOpacity),
-        splashColor: p.onAccentContainer.withValues(alpha: _pressOpacity),
-        elevation: AppElevation.low,
-        focusElevation: AppElevation.medium,
-        hoverElevation: AppElevation.medium,
-        highlightElevation: AppElevation.medium,
-        // The FAB has no themeable side, but RawMaterialButton resolves a
-        // state-dependent shape, so the focus ring rides on the shape.
-        shape: WidgetStateOutlinedBorder.resolveWith(
-          (states) => RoundedRectangleBorder(
-            borderRadius: AppRadius.lgAll,
-            side: focused(states) ? c.focusRing : BorderSide.none,
-          ),
-        ),
-        extendedTextStyle: c.buttonText,
-      ),
+      chipTheme: c.chipTheme,
+      floatingActionButtonTheme: c.floatingActionButtonTheme,
       cardTheme: CardThemeData(
         color: p.surface,
         surfaceTintColor: Colors.transparent,
