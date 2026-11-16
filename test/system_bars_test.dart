@@ -61,9 +61,9 @@ void main() {
     ('light', Brightness.dark),
     ('dark', Brightness.light),
   ]) {
-    group('$theme theme', () {
+    group('$theme theme (${icons.name} icons)', () {
       testWidgets(
-        'a screen without an app bar gets ${icons.name} system bar icons',
+        'a screen without an app bar gets contrasting system bar icons',
         (tester) async {
           await _pump(tester, theme: theme);
           expect(find.byType(LoginScreen), findsOneWidget);
@@ -85,7 +85,7 @@ void main() {
         },
       );
 
-      testWidgets('the signed-in home gets ${icons.name} system bar icons', (
+      testWidgets('the signed-in home gets contrasting system bar icons', (
         tester,
       ) async {
         await _pump(tester, theme: theme, signedInAs: 'u1');
