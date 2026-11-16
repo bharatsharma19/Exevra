@@ -3,9 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/config/app_config.dart';
 import '../../../core/errors/failure_messages.dart';
+import '../../../core/widgets/app_snackbar.dart';
+import '../../../core/widgets/loading_button.dart';
+import '../../../l10n/l10n.dart';
 import '../../../providers/chat_provider.dart';
 import '../../../providers/profile_provider.dart';
-import '../chat_copy.dart';
+import '../../dashboard/widgets/feature_snackbar.dart';
 import 'safe_markdown.dart';
 
 /// Explains what the assistant sends and to whom, and asks for consent.
@@ -56,8 +59,10 @@ class _ChatConsentViewState extends ConsumerState<ChatConsentView> {
       ChatConsentView.privacyPolicy,
     ).catchError((Object _) => false);
     if (!opened && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Couldn't open the privacy policy.")),
+      showFeatureSnackbar(
+        context,
+        context.l10n.chatConsentPrivacyFailed,
+        kind: AppSnackbarKind.error,
       );
     }
   }
@@ -66,6 +71,7 @@ class _ChatConsentViewState extends ConsumerState<ChatConsentView> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final l10n = context.l10n;
     final body = theme.textTheme.bodyMedium?.copyWith(
       color: scheme.onSurfaceVariant,
     );
@@ -105,7 +111,7 @@ class _ChatConsentViewState extends ConsumerState<ChatConsentView> {
             Semantics(
               header: true,
               child: Text(
-                'Before you use ${ChatCopy.assistantName}',
+                l10n.chatConsentTitle(l10n.chatAssistantName),
                 style: theme.textTheme.headlineSmall?.copyWith(
                   color: scheme.onSurface,
                 ),
@@ -114,44 +120,35 @@ class _ChatConsentViewState extends ConsumerState<ChatConsentView> {
             const SizedBox(height: 16),
             section(
               Icons.receipt_long_outlined,
-              'What is sent',
-              'Your spending totals by category and month, your 15 most '
-                  'recent expenses (title, category, amount and date; for '
-                  'group expenses only your share), the names of your groups, '
-                  "your currency, time zone, language and today's date, and "
-                  'the messages you write, including earlier messages in '
-                  'this chat.',
+              l10n.chatConsentWhatTitle,
+              l10n.chatConsentWhatBody,
             ),
             section(
               Icons.cloud_outlined,
-              'Who receives it',
-              "Anthropic's Claude answers your questions. If it is "
-                  "unavailable, Google's Gemini is used as a backup.",
+              l10n.chatConsentWhoTitle,
+              l10n.chatConsentWhoBody,
             ),
             section(
               Icons.lightbulb_outline,
-              'Why',
-              'So the assistant can answer questions about your own '
-                  'spending, budgets and ways to save.',
+              l10n.chatConsentWhyTitle,
+              l10n.chatConsentWhyBody,
             ),
             section(
               Icons.toggle_on_outlined,
-              "It's optional",
-              'You can use Exevra without the assistant and turn it off '
-                  'at any time in Settings. Turning it off also deletes this '
-                  'conversation from this device.',
+              l10n.chatConsentOptionalTitle,
+              l10n.chatConsentOptionalBody,
             ),
             Align(
               alignment: AlignmentDirectional.centerStart,
               child: TextButton.icon(
                 onPressed: _openPrivacy,
                 icon: const Icon(Icons.open_in_new, size: 18),
-                label: const Text('Read the privacy policy'),
+                label: Text(l10n.chatConsentPrivacy),
               ),
             ),
             const SizedBox(height: 8),
             Text(
-              ChatCopy.disclaimer,
+              l10n.chatDisclaimer,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: scheme.onSurfaceVariant,
               ),
@@ -164,17 +161,10 @@ class _ChatConsentViewState extends ConsumerState<ChatConsentView> {
               ),
             ],
             const SizedBox(height: 20),
-            FilledButton(
-              onPressed: _saving ? null : _allow,
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(48),
-              ),
-              child: _saving
-                  ? const SizedBox.square(
-                      dimension: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Allow and continue'),
+            LoadingButton(
+              label: l10n.chatConsentAllow,
+              isLoading: _saving,
+              onPressed: _allow,
             ),
             const SizedBox(height: 8),
             TextButton(
@@ -182,7 +172,7 @@ class _ChatConsentViewState extends ConsumerState<ChatConsentView> {
               style: TextButton.styleFrom(
                 minimumSize: const Size.fromHeight(48),
               ),
-              child: const Text('Not now'),
+              child: Text(l10n.chatConsentNotNow),
             ),
           ],
         ),

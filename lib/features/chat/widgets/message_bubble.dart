@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/accessibility/reduce_motion.dart';
+import '../../../core/theme/app_tokens.dart';
+import '../../../core/widgets/app_snackbar.dart';
+import '../../../l10n/l10n.dart';
+import '../../dashboard/widgets/feature_snackbar.dart';
 import '../chat_copy.dart';
+import '../chat_error_copy.dart';
 import '../models/chat_message.dart';
 import 'report_sheet.dart';
 import 'safe_markdown.dart';
@@ -47,7 +53,7 @@ class MessageBubble extends StatelessWidget {
             ),
           ),
           child: Semantics(
-            label: 'You said',
+            label: context.l10n.chatYouSaid,
             child: SelectableText(
               message.text,
               style: TextStyle(color: scheme.onPrimaryContainer, height: 1.4),
@@ -61,17 +67,24 @@ class MessageBubble extends StatelessWidget {
   Widget _assistant(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final label = [
-      ChatCopy.assistantName,
-      if (message.provider != null) message.provider!.label,
-    ].join(' · ');
+    final l10n = context.l10n;
+    final provider = message.provider;
+    final label = provider == null
+        ? l10n.chatAssistantName
+        : l10n.chatAuthorLine(l10n.chatAssistantName, provider.label);
     final hasText = message.text.trim().isNotEmpty;
     final notice = switch (message.status) {
-      ChatMessageStatus.interrupted => ChatCopy.interrupted,
-      ChatMessageStatus.stopped => ChatCopy.stopped,
-      ChatMessageStatus.truncated => ChatCopy.truncated,
+      ChatMessageStatus.interrupted => l10n.chatInterrupted,
+      ChatMessageStatus.stopped => l10n.chatStopped,
+      ChatMessageStatus.truncated => l10n.chatTruncated,
       _ => null,
     };
+    // The stored fallback of a declined answer is shown in the app's words.
+    final text =
+        message.status == ChatMessageStatus.declined &&
+            message.text == ChatCopy.declinedFallback
+        ? l10n.chatDeclinedFallback
+        : message.text;
 
     final content = <Widget>[
       Text(
@@ -83,7 +96,8 @@ class MessageBubble extends StatelessWidget {
       const SizedBox(height: 6),
       if (message.status == ChatMessageStatus.error)
         _ErrorCard(
-          message: ChatCopy.error(
+          message: chatErrorText(
+            l10n,
             message.errorCode,
             serverMessage: message.serverMessage,
           ),
@@ -92,7 +106,7 @@ class MessageBubble extends StatelessWidget {
       else if (message.isStreaming && !hasText)
         const _Typing()
       else
-        SafeMarkdown(data: message.text),
+        SafeMarkdown(data: text),
       if (notice != null) ...[
         const SizedBox(height: 8),
         Text(
@@ -120,6 +134,9 @@ class MessageBubble extends StatelessWidget {
           maxWidth: MediaQuery.sizeOf(context).width * 0.9,
         ),
         child: GestureDetector(
+          // Screen readers use the Report button instead; a long-press
+          // action on the text would be a too-small target.
+          excludeFromSemantics: true,
           onLongPress: message.hasUsableText
               ? () => showReportSheet(context, message)
               : null,
@@ -159,32 +176,34 @@ class _Actions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final l10n = context.l10n;
     final usable = message.hasUsableText;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
+    return Wrap(
       children: [
         if (onRetry != null)
           IconButton(
-            tooltip: 'Retry',
+            tooltip: l10n.retry,
             icon: Icon(Icons.refresh_rounded, color: scheme.primary),
             onPressed: onRetry,
           ),
         if (usable)
           IconButton(
-            tooltip: 'Copy message',
+            tooltip: l10n.chatCopyTooltip,
             icon: Icon(Icons.copy_rounded, color: scheme.onSurfaceVariant),
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: message.text));
               if (context.mounted) {
-                ScaffoldMessenger.of(
+                showFeatureSnackbar(
                   context,
-                ).showSnackBar(const SnackBar(content: Text('Copied')));
+                  l10n.chatCopied,
+                  kind: AppSnackbarKind.success,
+                );
               }
             },
           ),
         if (usable)
           IconButton(
-            tooltip: 'Report response',
+            tooltip: l10n.chatReportTooltip,
             icon: Icon(Icons.flag_outlined, color: scheme.onSurfaceVariant),
             onPressed: () => showReportSheet(context, message),
           ),
@@ -244,7 +263,7 @@ class _ErrorCard extends StatelessWidget {
                   minimumSize: const Size(48, 48),
                 ),
                 icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text('Retry'),
+                label: Text(context.l10n.retry),
               ),
             ),
         ],
@@ -259,20 +278,31 @@ class _Typing extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // The spinner stays still with reduced motion; the text says it all.
+    final still = context.reduceMotion;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox.square(
-            dimension: 14,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: scheme.primary,
+          ExcludeSemantics(
+            child: SizedBox.square(
+              dimension: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                value: still ? 0.75 : null,
+                color: scheme.primary,
+              ),
             ),
           ),
           const SizedBox(width: 10),
-          Text('Thinking…', style: TextStyle(color: scheme.onSurfaceVariant)),
+          // Wraps instead of overflowing at large text on narrow screens.
+          Flexible(
+            child: Text(
+              context.l10n.chatThinking,
+              style: TextStyle(color: scheme.onSurfaceVariant),
+            ),
+          ),
         ],
       ),
     );

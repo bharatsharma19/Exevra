@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/accessibility/reduce_motion.dart';
 import '../../core/theme/app_palette.dart';
+import '../../core/theme/system_ui.dart';
 import '../../core/theme/app_tokens.dart';
 import '../../core/widgets/loading_button.dart';
 import '../../l10n/l10n.dart';
@@ -129,74 +130,78 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && _page > 0) _goTo(_page - 1);
       },
-      child: Scaffold(
-        backgroundColor: palette.background,
-        body: SafeArea(
-          child: Column(
-            children: [
-              Align(
-                alignment: AlignmentDirectional.centerEnd,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.sm,
-                    vertical: AppSpacing.xs,
-                  ),
-                  // The button keeps its own semantics node (focusable, with
-                  // the focus action keyboard and switch users rely on); only
-                  // its label is replaced by the fuller tooltip text.
-                  child: Tooltip(
-                    message: l10n.onboardingSkipTooltip,
-                    excludeFromSemantics: true,
-                    child: TextButton(
-                      onPressed: onSkip,
-                      child: Text(
-                        l10n.onboardingSkip,
-                        semanticsLabel: l10n.onboardingSkipTooltip,
+      // No app bar here, so the region gives the status and navigation bar
+      // icons the right brightness for the theme.
+      child: SystemUiRegion(
+        child: Scaffold(
+          backgroundColor: palette.background,
+          body: SafeArea(
+            child: Column(
+              children: [
+                Align(
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                      vertical: AppSpacing.xs,
+                    ),
+                    // The button keeps its own semantics node (focusable, with
+                    // the focus action keyboard and switch users rely on); only
+                    // its label is replaced by the fuller tooltip text.
+                    child: Tooltip(
+                      message: l10n.onboardingSkipTooltip,
+                      excludeFromSemantics: true,
+                      child: TextButton(
+                        onPressed: onSkip,
+                        child: Text(
+                          l10n.onboardingSkip,
+                          semanticsLabel: l10n.onboardingSkipTooltip,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              Expanded(
-                child: PageView(
-                  controller: _controller,
-                  onPageChanged: (page) => setState(() => _page = page),
-                  children: [
-                    for (final page in pages) _OnboardingPage(content: page),
-                  ],
+                Expanded(
+                  child: PageView(
+                    controller: _controller,
+                    onPageChanged: (page) => setState(() => _page = page),
+                    children: [
+                      for (final page in pages) _OnboardingPage(content: page),
+                    ],
+                  ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.xl,
-                  AppSpacing.md,
-                  AppSpacing.xl,
-                  AppSpacing.xl,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    OnboardingPageIndicator(
-                      current: _page,
-                      count: _pageCount,
-                      title: pages[_page].title,
-                    ),
-                    const SizedBox(height: AppSpacing.xl),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 420),
-                      child: LoadingButton(
-                        label: _isLast
-                            ? l10n.onboardingGetStarted
-                            : l10n.onboardingNext,
-                        icon: _isLast ? null : Icons.arrow_forward,
-                        isLoading: _saving && _isLast,
-                        onPressed: _finishing ? null : _next,
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.xl,
+                    AppSpacing.md,
+                    AppSpacing.xl,
+                    AppSpacing.xl,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      OnboardingPageIndicator(
+                        current: _page,
+                        count: _pageCount,
+                        title: pages[_page].title,
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: AppSpacing.xl),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 420),
+                        child: LoadingButton(
+                          label: _isLast
+                              ? l10n.onboardingGetStarted
+                              : l10n.onboardingNext,
+                          icon: _isLast ? null : Icons.arrow_forward,
+                          isLoading: _saving && _isLast,
+                          onPressed: _finishing ? null : _next,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

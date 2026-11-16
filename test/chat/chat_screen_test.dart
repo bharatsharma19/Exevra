@@ -1,16 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:expense_manager/core/constants/app_constants.dart';
 import 'package:expense_manager/core/storage/preferences.dart';
 import 'package:expense_manager/core/theme/app_theme.dart';
 import 'package:expense_manager/data/ai/ai_chat_models.dart';
 import 'package:expense_manager/data/repositories/ai_report_repository.dart';
-import 'package:expense_manager/features/chat/chat_copy.dart';
+import 'package:expense_manager/features/chat/chat_error_copy.dart';
 import 'package:expense_manager/features/chat/screens/chat_screen.dart';
+import 'package:expense_manager/features/chat/widgets/chat_empty_view.dart';
 import 'package:expense_manager/features/chat/widgets/consent_view.dart';
 import 'package:expense_manager/features/chat/widgets/report_sheet.dart';
 import 'package:expense_manager/features/chat/widgets/safe_markdown.dart';
+import 'package:expense_manager/l10n/l10n.dart';
 import 'package:expense_manager/providers/chat_provider.dart';
 import 'package:expense_manager/providers/profile_provider.dart';
 import 'package:flutter/gestures.dart';
@@ -21,6 +22,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fakes.dart';
 import 'chat_test_support.dart';
+
+final AppLocalizations l10n = lookupAppLocalizations(const Locale('en'));
 
 class _Env {
   _Env(this.container, this.api, this.backend, this.reports, this.launched);
@@ -103,9 +106,10 @@ void main() {
         tester,
       ) async {
         await _pump(tester, theme: theme);
-        expect(find.text(ChatCopy.emptyTitle), findsOneWidget);
-        expect(find.text(ChatCopy.disclaimer), findsNWidgets(2));
-        for (final prompt in AppConstants.aiQuickPrompts) {
+        expect(find.text(l10n.chatEmptyTitle), findsOneWidget);
+        // The empty view carries the disclaimer, so the footer leaves it out.
+        expect(find.text(l10n.chatDisclaimer), findsOneWidget);
+        for (final prompt in chatPrompts(l10n)) {
           expect(find.text(prompt), findsOneWidget);
         }
         final send = tester.widget<IconButton>(
@@ -117,12 +121,12 @@ void main() {
 
       testWidgets('streams a message and offers Stop', (tester) async {
         final env = await _pump(tester, theme: theme);
-        await tester.tap(find.text(AppConstants.aiQuickPrompts.first));
+        await tester.tap(find.text(chatPrompts(l10n).first));
         await tester.pump();
         expect(env.api.calls, hasLength(1));
         expect(find.byTooltip('Stop response'), findsOneWidget);
         expect(find.text('Thinking…'), findsOneWidget);
-        expect(find.bySemanticsLabel(ChatCopy.responding), findsOneWidget);
+        expect(find.bySemanticsLabel(l10n.chatResponding), findsOneWidget);
 
         env.api.last
           ..emit(const AiMeta(AiProvider.claude))
@@ -136,11 +140,16 @@ void main() {
         await tester.tap(find.byTooltip('Stop response'));
         await tester.pump();
         expect(env.api.last.aborted, isTrue);
-        expect(find.text(ChatCopy.stopped), findsOneWidget);
+        expect(find.text(l10n.chatStopped), findsOneWidget);
         expect(find.byTooltip('Send message'), findsOneWidget);
         expect(find.byTooltip('Copy message'), findsOneWidget);
         expect(find.byTooltip('Report response'), findsOneWidget);
-        expect(find.bySemanticsLabel(ChatCopy.complete), findsOneWidget);
+        // Stopping is announced as such, never as a complete answer.
+        expect(
+          _attachedLiveRegion(tester, l10n.chatAnnounceStopped),
+          isNotNull,
+        );
+        expect(_attachedLiveRegion(tester, l10n.chatAnnounceComplete), isNull);
       });
 
       testWidgets('error card with Retry', (tester) async {
@@ -195,7 +204,7 @@ void main() {
           isTrue,
         );
         expect(find.byType(ChatConsentView), findsNothing);
-        expect(find.text(ChatCopy.emptyTitle), findsOneWidget);
+        expect(find.text(l10n.chatEmptyTitle), findsOneWidget);
       });
 
       testWidgets('Not now leaves the assistant off', (tester) async {
@@ -219,7 +228,10 @@ void main() {
         await tester.pump();
         await tester.pump();
         expect(find.text('Hello'), findsOneWidget);
-        expect(find.text(ChatCopy.error(AiErrorCode.unavailable)), findsOne);
+        expect(
+          find.text(chatErrorText(l10n, AiErrorCode.unavailable)),
+          findsOne,
+        );
         await expectLater(tester, meetsGuideline(textContrastGuideline));
       });
 
@@ -230,8 +242,105 @@ void main() {
         await tester.pump();
         await expectLater(tester, meetsGuideline(textContrastGuideline));
       });
+
+      testWidgets('a conversation meets the tap-target guidelines', (
+        tester,
+      ) async {
+        final env = await _pump(tester, theme: theme);
+        await tester.tap(find.text(chatPrompts(l10n).first));
+        await tester.pump();
+        await env.api.last.finish([
+          const AiMeta(AiProvider.claude),
+          const AiDelta('An answer'),
+          const AiDone(),
+        ]);
+        await tester.pump();
+        await tester.pump();
+        await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+      });
     });
   }
+
+  group('live announcements', () {
+    for (final (name, events, expected) in [
+      (
+        'a failed answer',
+        const <AiStreamEvent>[AiStreamError(AiErrorCode.unavailable)],
+        l10n.chatAnnounceFailed(chatErrorText(l10n, AiErrorCode.unavailable)),
+      ),
+      (
+        'a declined answer',
+        const <AiStreamEvent>[
+          AiStreamError(AiErrorCode.declined, message: 'No.'),
+        ],
+        l10n.chatAnnounceDeclined,
+      ),
+      (
+        'an interrupted answer',
+        const <AiStreamEvent>[
+          AiDelta('Half'),
+          AiInterrupted(reason: 'timeout'),
+        ],
+        l10n.chatAnnounceInterrupted,
+      ),
+    ]) {
+      testWidgets('$name is not announced as complete', (tester) async {
+        final env = await _pump(tester, theme: AppTheme.light());
+        await tester.tap(find.text(chatPrompts(l10n).first));
+        await tester.pump();
+        await env.api.last.finish(events);
+        await tester.pump();
+        await tester.pump();
+        expect(_attachedLiveRegion(tester, expected), isNotNull);
+        expect(_attachedLiveRegion(tester, l10n.chatAnnounceComplete), isNull);
+      });
+    }
+
+    testWidgets('a quota error reads differently from a rate limit', (
+      tester,
+    ) async {
+      final env = await _pump(tester, theme: AppTheme.light());
+      await tester.tap(find.text(chatPrompts(l10n).first));
+      await tester.pump();
+      await env.api.last.fail(AiErrorCode.quotaExceeded);
+      await tester.pump();
+      await tester.pump();
+      final quota = chatErrorText(l10n, AiErrorCode.quotaExceeded);
+      expect(find.text(quota), findsOneWidget);
+      expect(find.text(l10n.chatErrorRateLimited), findsNothing);
+      expect(quota, contains('today'));
+      expect(quota, isNot(contains('UTC')));
+      expect(l10n.chatErrorRateLimited, contains('quickly'));
+    });
+
+    testWidgets('a saved conversation announces nothing on open', (
+      tester,
+    ) async {
+      final saved = jsonEncode([
+        ChatMessage(
+          id: 'q',
+          isUser: true,
+          text: 'Question',
+          createdAt: DateTime.utc(2026),
+        ).toJson(),
+        ChatMessage(
+          id: 'a',
+          isUser: false,
+          text: 'Answer',
+          createdAt: DateTime.utc(2026),
+        ).toJson(),
+      ]);
+      await _pump(
+        tester,
+        theme: AppTheme.light(),
+        prefs: {UserPrefs.key('u1', ChatNotifier.historyPref): saved},
+      );
+      await tester.pump();
+      expect(_attachedLiveRegion(tester, l10n.chatAnnounceComplete), isNull);
+    });
+  });
 
   group('large text on a small screen', () {
     void smallScreen(WidgetTester tester, {double keyboard = 0}) {
@@ -245,7 +354,7 @@ void main() {
 
     testWidgets('the conversation fits with the keyboard open', (tester) async {
       final env = await _pump(tester, theme: AppTheme.lightTheme);
-      await tester.tap(find.text(AppConstants.aiQuickPrompts.first));
+      await tester.tap(find.text(chatPrompts(l10n).first));
       await tester.pump();
       await env.api.last.finish([
         const AiDelta('You spent ₹1,200 on food.'),
@@ -261,6 +370,108 @@ void main() {
         (w) => w is ListView && w.scrollDirection == Axis.vertical,
       );
       expect(tester.getSize(list).height, greaterThan(100));
+    });
+
+    // The message field and Send must be fully on screen, not clipped by
+    // the footer, on a 320x568 phone at 200% text.
+    void expectInputVisible(WidgetTester tester, {double keyboard = 0}) {
+      final bottom = 568 - keyboard;
+      final appBar = tester.getRect(find.byType(AppBar));
+      for (final finder in [
+        find.byType(TextField),
+        find.byTooltip(l10n.chatSend),
+      ]) {
+        final rect = tester.getRect(finder);
+        expect(
+          rect.top,
+          greaterThanOrEqualTo(appBar.bottom),
+          reason: '$finder',
+        );
+        expect(rect.bottom, lessThanOrEqualTo(bottom), reason: '$finder');
+      }
+      // Nothing sits on top of Send: a tap at its centre reaches it.
+      final send = find.byTooltip(l10n.chatSend);
+      final hits = tester.hitTestOnBinding(tester.getCenter(send));
+      final sendBox = tester.renderObject(send);
+      expect(hits.path.any((e) => e.target == sendBox), isTrue);
+    }
+
+    for (final keyboard in [0.0, 250.0]) {
+      testWidgets('the message field stays visible at 320x568 '
+          '(keyboard ${keyboard.toInt()})', (tester) async {
+        final env = await _pump(tester, theme: AppTheme.light());
+        tester.view
+          ..physicalSize = const Size(960, 1704)
+          ..devicePixelRatio = 3
+          ..viewInsets = FakeViewPadding(bottom: keyboard * 3);
+        tester.platformDispatcher.textScaleFactorTestValue = 2;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        expect(find.text(l10n.chatDisclaimer), findsOneWidget);
+        expectInputVisible(tester, keyboard: keyboard);
+
+        await tester.enterText(find.byType(TextField), 'Hello');
+        await tester.pump();
+        await tester.tap(find.byTooltip(l10n.chatSend));
+        await tester.pump();
+        expect(env.api.calls, hasLength(1));
+        await env.api.last.finish([
+          const AiDelta('You spent ₹1,200 on food.'),
+          const AiDone(),
+        ]);
+        await tester.pump();
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        expectInputVisible(tester, keyboard: keyboard);
+      });
+    }
+
+    testWidgets('Thinking… fits 320dp at 200% text', (tester) async {
+      final env = await _pump(tester, theme: AppTheme.dark());
+      tester.view
+        ..physicalSize = const Size(960, 2400)
+        ..devicePixelRatio = 3;
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), 'Hello');
+      await tester.pump();
+      await tester.tap(find.byTooltip(l10n.chatSend));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text(l10n.chatThinking), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await env.api.last.finish([const AiDone()]);
+      await tester.pump();
+    });
+
+    testWidgets('opening the keyboard keeps the newest message in view', (
+      tester,
+    ) async {
+      final env = await _pump(tester, theme: AppTheme.light());
+      await tester.tap(find.text(chatPrompts(l10n).first));
+      await tester.pump();
+      final long = [for (var i = 0; i < 60; i++) 'Line $i of the answer.'];
+      await env.api.last.finish([AiDelta(long.join('\n\n')), const AiDone()]);
+      await tester.pump();
+      await tester.pump();
+      final list = find.byWidgetPredicate(
+        (w) => w is ListView && w.scrollDirection == Axis.vertical,
+      );
+      final position = tester
+          .state<ScrollableState>(
+            find.descendant(of: list, matching: find.byType(Scrollable)).first,
+          )
+          .position;
+      expect(position.pixels, position.maxScrollExtent);
+
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300 * 3);
+      addTearDown(tester.view.resetViewInsets);
+      await tester.pump();
+      await tester.pump();
+      expect(position.pixels, position.maxScrollExtent);
+      expect(find.byTooltip(l10n.chatJumpToLatest), findsNothing);
     });
 
     testWidgets('the link dialog scrolls', (tester) async {
@@ -284,7 +495,7 @@ void main() {
 
     testWidgets('the report sheet buttons wrap', (tester) async {
       final env = await _pump(tester, theme: AppTheme.darkTheme);
-      await tester.tap(find.text(AppConstants.aiQuickPrompts.first));
+      await tester.tap(find.text(chatPrompts(l10n).first));
       await tester.pump();
       await env.api.last.finish([const AiDelta('An answer'), const AiDone()]);
       await tester.pump();
@@ -317,7 +528,7 @@ void main() {
     tester,
   ) async {
     final env = await _pump(tester, theme: AppTheme.lightTheme);
-    await tester.tap(find.text(AppConstants.aiQuickPrompts.first));
+    await tester.tap(find.text(chatPrompts(l10n).first));
     await tester.pump();
     final long = [for (var i = 0; i < 80; i++) 'Line $i of the answer.'];
     env.api.last.emit(AiDelta(long.join('\n\n')));
@@ -411,14 +622,14 @@ void main() {
   ) async {
     final handle = tester.ensureSemantics();
     final env = await _pump(tester, theme: AppTheme.lightTheme);
-    await tester.tap(find.text(AppConstants.aiQuickPrompts.first));
+    await tester.tap(find.text(chatPrompts(l10n).first));
     await tester.pump();
-    expect(_attachedLiveRegion(tester, ChatCopy.responding), isNotNull);
+    expect(_attachedLiveRegion(tester, l10n.chatResponding), isNotNull);
 
     await env.api.last.finish([const AiDelta('An answer'), const AiDone()]);
     await tester.pump();
     await tester.pump();
-    expect(_attachedLiveRegion(tester, ChatCopy.complete), isNotNull);
+    expect(_attachedLiveRegion(tester, l10n.chatAnnounceComplete), isNotNull);
     handle.dispose();
   });
 
@@ -426,7 +637,7 @@ void main() {
     tester,
   ) async {
     final env = await _pump(tester, theme: AppTheme.lightTheme);
-    await tester.tap(find.text(AppConstants.aiQuickPrompts.last));
+    await tester.tap(find.text(chatPrompts(l10n).last));
     await tester.pump();
     await env.api.last.fail(AiErrorCode.consentRequired);
     await tester.pump();
@@ -438,7 +649,7 @@ void main() {
     tester,
   ) async {
     final env = await _pump(tester, theme: AppTheme.darkTheme);
-    await tester.tap(find.text(AppConstants.aiQuickPrompts.first));
+    await tester.tap(find.text(chatPrompts(l10n).first));
     await tester.pump();
     await tester.tap(find.byTooltip('Clear conversation'));
     await tester.pump(const Duration(milliseconds: 400));
@@ -451,7 +662,7 @@ void main() {
 
   testWidgets('report a response with a reason', (tester) async {
     final env = await _pump(tester, theme: AppTheme.lightTheme);
-    await tester.tap(find.text(AppConstants.aiQuickPrompts.first));
+    await tester.tap(find.text(chatPrompts(l10n).first));
     await tester.pump();
     await env.api.last.finish([
       const AiMeta(AiProvider.gemini),

@@ -1,18 +1,23 @@
 import 'dart:convert';
 
-import 'package:expense_manager/core/constants/app_constants.dart';
 import 'package:expense_manager/core/storage/preferences.dart';
 import 'package:expense_manager/data/ai/ai_chat_models.dart';
-import 'package:expense_manager/features/chat/chat_copy.dart';
+import 'package:expense_manager/features/chat/chat_error_copy.dart';
+import 'package:expense_manager/features/chat/widgets/chat_empty_view.dart';
+import 'package:expense_manager/l10n/l10n.dart';
 import 'package:expense_manager/providers/auth_provider.dart';
 import 'package:expense_manager/providers/chat_provider.dart';
 import 'package:expense_manager/providers/profile_provider.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../support/fakes.dart';
 import 'chat_test_support.dart';
+
+final AppLocalizations l10n = lookupAppLocalizations(const Locale('en'));
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -183,7 +188,7 @@ void main() {
     expect(last().text, 'Half an');
     expect(last().status, ChatMessageStatus.interrupted);
     expect(last().canRetry, isTrue);
-    expect(ChatCopy.interrupted, 'Response interrupted. Tap Retry.');
+    expect(l10n.chatInterrupted, 'Response interrupted. Tap Retry.');
   });
 
   test('declined with discard_partial replaces the partial text', () async {
@@ -217,8 +222,6 @@ void main() {
     const expected = {
       AiErrorCode.rateLimited:
           "You're sending messages quickly. Try again in a minute.",
-      AiErrorCode.quotaExceeded:
-          "You've reached today's assistant limit. It resets at midnight UTC.",
       AiErrorCode.unavailable:
           'The assistant is unavailable right now. Please try again shortly.',
       AiErrorCode.offline:
@@ -231,7 +234,7 @@ void main() {
         await sending.done;
         expect(last().status, ChatMessageStatus.error);
         expect(last().errorCode, code);
-        expect(ChatCopy.error(last().errorCode), copy);
+        expect(chatErrorText(l10n, last().errorCode), copy);
         expect(chat().consentRequired, isFalse);
       });
     }
@@ -245,7 +248,11 @@ void main() {
       await sending.done;
       expect(last().errorCode, AiErrorCode.unavailable);
       expect(
-        ChatCopy.error(last().errorCode, serverMessage: last().serverMessage),
+        chatErrorText(
+          l10n,
+          last().errorCode,
+          serverMessage: last().serverMessage,
+        ),
         busy,
       );
     });
@@ -255,47 +262,80 @@ void main() {
       await api.last.finish([const AiStreamError(AiErrorCode.rateLimited)]);
       await sending.done;
       expect(
-        ChatCopy.error(last().errorCode, serverMessage: last().serverMessage),
+        chatErrorText(
+          l10n,
+          last().errorCode,
+          serverMessage: last().serverMessage,
+        ),
         isNot(contains('quickly')),
       );
     });
 
-    test('429 quota_exceeded shows the server copy and keeps it', () async {
-      const copy =
-          "You've used today's assistant messages. It resets at "
-          'midnight UTC.';
-      final sending = await send('q');
-      await api.last.failWith(
-        const AiChatException(
-          AiErrorCode.quotaExceeded,
-          serverMessage: copy,
-          retryAfter: Duration(hours: 3),
-        ),
-      );
-      await sending.done;
-      expect(last().errorCode, AiErrorCode.quotaExceeded);
+    test('the daily limit says when it resets in local time', () {
+      // 18:30 UTC on 15 Nov: the quota resets at 00:00 UTC on 16 Nov.
+      final now = DateTime.utc(2026, 11, 15, 18, 30);
+      final reset = chatQuotaResetsAt(now);
+      expect(reset.isUtc, isFalse);
+      expect(reset.toUtc(), DateTime.utc(2026, 11, 16));
+      final copy = chatErrorText(l10n, AiErrorCode.quotaExceeded, now: now);
+      expect(copy, l10n.chatErrorQuota(DateFormat.jm().format(reset)));
+      expect(copy, contains("today's assistant limit"));
+      expect(copy, isNot(contains('UTC')));
+      expect(copy, isNot(contains('quickly')));
+      // Exactly at midnight the next reset is a full day away.
       expect(
-        ChatCopy.error(last().errorCode, serverMessage: last().serverMessage),
-        copy,
+        chatQuotaResetsAt(DateTime.utc(2026, 11, 16)).toUtc(),
+        DateTime.utc(2026, 11, 17),
       );
-      final restored = ChatMessage.fromJson(last().toJson())!;
-      expect(restored.serverMessage, copy);
     });
+
+    test(
+      '429 quota_exceeded keeps the server copy but shows local text',
+      () async {
+        const copy =
+            "You've used today's assistant messages. It resets at "
+            'midnight UTC.';
+        final sending = await send('q');
+        await api.last.failWith(
+          const AiChatException(
+            AiErrorCode.quotaExceeded,
+            serverMessage: copy,
+            retryAfter: Duration(hours: 3),
+          ),
+        );
+        await sending.done;
+        expect(last().errorCode, AiErrorCode.quotaExceeded);
+        expect(
+          chatErrorText(
+            l10n,
+            last().errorCode,
+            serverMessage: last().serverMessage,
+          ),
+          chatErrorText(l10n, AiErrorCode.quotaExceeded),
+        );
+        final restored = ChatMessage.fromJson(last().toJson())!;
+        expect(restored.serverMessage, copy);
+      },
+    );
 
     test('server copy is not used for local-only codes or when huge', () {
       expect(
-        ChatCopy.error(AiErrorCode.invalidRequest, serverMessage: 'bad tz'),
+        chatErrorText(
+          l10n,
+          AiErrorCode.invalidRequest,
+          serverMessage: 'bad tz',
+        ),
         isNot('bad tz'),
       );
       expect(
-        ChatCopy.error(AiErrorCode.unavailable, serverMessage: 'x' * 400),
-        ChatCopy.error(AiErrorCode.unavailable),
+        chatErrorText(l10n, AiErrorCode.unavailable, serverMessage: 'x' * 400),
+        chatErrorText(l10n, AiErrorCode.unavailable),
       );
     });
 
     test('every code has copy and none is raw', () {
       for (final code in AiErrorCode.values) {
-        final copy = ChatCopy.error(code);
+        final copy = chatErrorText(l10n, code);
         expect(copy, isNotEmpty);
         expect(copy, isNot(contains('Exception')));
       }
@@ -436,13 +476,13 @@ void main() {
   });
 
   test('every quick prompt is sent to the server unchanged', () async {
-    for (final prompt in AppConstants.aiQuickPrompts) {
+    for (final prompt in chatPrompts(l10n)) {
       final sending = await send(prompt);
       expect(api.last.turns.last, AiTurn.user(prompt));
       await api.last.finish([const AiDelta('ok'), const AiDone()]);
       await sending.done;
     }
-    expect(api.calls, hasLength(AppConstants.aiQuickPrompts.length));
+    expect(api.calls, hasLength(chatPrompts(l10n).length));
   });
 
   group('persistence', () {

@@ -66,15 +66,17 @@ void main() {
     }
 
     test('names AI providers only as display labels in the assistant', () {
-      // The consent text and the answer label name the providers; no other
-      // file may refer to them (provider calls live in the Edge Function).
+      // The consent text (in the generated strings) and the answer label
+      // name the providers; no other file may refer to them (provider calls
+      // live in the Edge Function).
       for (final marker in ['anthropic', 'gemini', 'claude-']) {
         expect(
           filesContaining(RegExp(marker, caseSensitive: false)),
           everyElement(
             isIn([
               'lib/data/ai/ai_chat_models.dart',
-              'lib/features/chat/widgets/consent_view.dart',
+              'lib/l10n/generated/app_localizations.dart',
+              'lib/l10n/generated/app_localizations_en.dart',
             ]),
           ),
           reason: marker,
