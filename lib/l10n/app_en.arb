@@ -619,11 +619,26 @@
   },
   "insightsScopeGroupFallback": "this group",
   "insightsTotalSpent": "Total spent",
+  "insightsTotalLabel": "Total spent, {period}: {amount}",
+  "@insightsTotalLabel": {
+    "description": "Screen reader label of the insights total.",
+    "placeholders": {
+      "period": {
+        "type": "String",
+        "example": "Last 30 days"
+      },
+      "amount": {
+        "type": "String",
+        "example": "₹1,200.00"
+      }
+    }
+  },
   "insightsExpenseCount": "{count, plural, =0{No expenses} =1{1 expense} other{{count} expenses}}",
   "@insightsExpenseCount": {
     "placeholders": {
       "count": {
-        "type": "int"
+        "type": "int",
+        "format": "decimalPattern"
       }
     }
   },
@@ -658,7 +673,8 @@
         "example": "₹1,200.00"
       },
       "activeCount": {
-        "type": "int"
+        "type": "int",
+        "format": "decimalPattern"
       },
       "bucketCount": {
         "type": "String",
@@ -670,7 +686,8 @@
   "@insightsDays": {
     "placeholders": {
       "count": {
-        "type": "int"
+        "type": "int",
+        "format": "decimalPattern"
       }
     }
   },
@@ -678,7 +695,8 @@
   "@insightsMonths": {
     "placeholders": {
       "count": {
-        "type": "int"
+        "type": "int",
+        "format": "decimalPattern"
       }
     }
   },

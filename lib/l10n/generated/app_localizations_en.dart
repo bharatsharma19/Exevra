@@ -980,11 +980,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String get insightsTotalSpent => 'Total spent';
 
   @override
+  String insightsTotalLabel(String period, String amount) {
+    return 'Total spent, $period: $amount';
+  }
+
+  @override
   String insightsExpenseCount(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count expenses',
+      other: '$countString expenses',
       one: '1 expense',
       zero: 'No expenses',
     );
@@ -1020,15 +1029,25 @@ class AppLocalizationsEn extends AppLocalizations {
     int activeCount,
     String bucketCount,
   ) {
-    return 'Bar chart of spending, $period. Highest: $date, $amount. $activeCount of $bucketCount with spending.';
+    final intl.NumberFormat activeCountNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String activeCountString = activeCountNumberFormat.format(
+      activeCount,
+    );
+
+    return 'Bar chart of spending, $period. Highest: $date, $amount. $activeCountString of $bucketCount with spending.';
   }
 
   @override
   String insightsDays(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count days',
+      other: '$countString days',
       one: '1 day',
     );
     return '$_temp0';
@@ -1036,10 +1055,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String insightsMonths(int count) {
+    final intl.NumberFormat countNumberFormat =
+        intl.NumberFormat.decimalPattern(localeName);
+    final String countString = countNumberFormat.format(count);
+
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count months',
+      other: '$countString months',
       one: '1 month',
     );
     return '$_temp0';

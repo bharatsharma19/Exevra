@@ -54,7 +54,7 @@ class InsightsSummaryCard extends StatelessWidget {
             total,
             key: const Key('insights-total'),
             scaleDown: true,
-            semanticLabel: '${l10n.insightsTotalSpent}, $period: $total',
+            semanticLabel: l10n.insightsTotalLabel(period, total),
             style: textTheme.displaySmall?.copyWith(
               fontWeight: FontWeight.w800,
               letterSpacing: -1,

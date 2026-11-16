@@ -133,12 +133,26 @@ void main() {
         await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
       });
 
-      testWidgets('empty and error states meet the guidelines', (tester) async {
+      testWidgets('the empty state meets the guidelines', (tester) async {
         await _pump(tester, theme: theme);
         expect(find.byKey(const Key('insights-empty')), findsOneWidget);
         await expectLater(tester, meetsGuideline(textContrastGuideline));
         await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
         await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      });
+
+      testWidgets('the error state meets the guidelines', (tester) async {
+        await _pump(
+          tester,
+          theme: theme,
+          setUp: (b) => b.insights.failure = const AppFailure.network(),
+        );
+        expect(find.byKey(const Key('insights-error')), findsOneWidget);
+        expect(find.text(l10n.retry), findsOneWidget);
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+        await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));
       });
 
       testWidgets('content fits 320dp at 200% text', (tester) async {
@@ -179,6 +193,23 @@ void main() {
       }
     });
   }
+
+  test('counts use the locale digit grouping', () {
+    expect(l10n.insightsExpenseCount(12345), '12,345 expenses');
+    expect(l10n.insightsDays(1000), '1,000 days');
+  });
+
+  testWidgets('the total is read with its period', (tester) async {
+    await _pump(tester, setUp: _rich);
+    final total = MoneyFormat.format(richInsights().total);
+    final amount = tester.widget<AmountText>(
+      find.byKey(const Key('insights-total')),
+    );
+    expect(
+      amount.semanticLabel,
+      l10n.insightsTotalLabel(l10n.insightsPeriodMonth, total),
+    );
+  });
 
   testWidgets('placeholders show while the first load runs', (tester) async {
     await _pump(tester, setUp: _rich, settle: false);

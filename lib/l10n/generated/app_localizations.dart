@@ -1798,6 +1798,12 @@ abstract class AppLocalizations {
   /// **'Total spent'**
   String get insightsTotalSpent;
 
+  /// Screen reader label of the insights total.
+  ///
+  /// In en, this message translates to:
+  /// **'Total spent, {period}: {amount}'**
+  String insightsTotalLabel(String period, String amount);
+
   /// No description provided for @insightsExpenseCount.
   ///
   /// In en, this message translates to:
