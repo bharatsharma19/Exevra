@@ -20,7 +20,7 @@ import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import '../support/fakes.dart';
 
 /// Pumps [screen] as the only route of a themed app (other locations show
-/// "route:<location>").
+/// `route:<location>`).
 Future<ProviderContainer> _pump(
   WidgetTester tester,
   Widget screen, {

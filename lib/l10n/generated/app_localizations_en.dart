@@ -572,6 +572,125 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsReauthChecking => 'Checking it\'s you…';
 
   @override
+  String get inviteTitle => 'Group invitation';
+
+  @override
+  String get inviteClose => 'Close';
+
+  @override
+  String get inviteLoading => 'Checking the invitation…';
+
+  @override
+  String get inviteProblemTitle => 'This invitation can\'t be opened';
+
+  @override
+  String inviteSignedInAs(String email) {
+    return 'You\'re signed in as $email.';
+  }
+
+  @override
+  String inviteWrongEmailHelp(String email) {
+    return 'Sign out and sign in with the address the invitation was sent to, or ask the group admin to invite $email instead.';
+  }
+
+  @override
+  String get inviteSwitchAccount => 'Sign out and use the invited address';
+
+  @override
+  String get inviteBack => 'Back';
+
+  @override
+  String get inviteGoHome => 'Go to Home';
+
+  @override
+  String get inviteSignedOutTitle => 'You\'ve been invited to a group';
+
+  @override
+  String get inviteSignedOutMessage =>
+      'Sign in or create an account with the invited email address to see the invitation and join.';
+
+  @override
+  String get inviteSignIn => 'Sign in to see it';
+
+  @override
+  String get inviteCreateAccount => 'Create an account';
+
+  @override
+  String invitePendingTitle(String group) {
+    return 'You\'re invited to $group';
+  }
+
+  @override
+  String invitePendingMessage(String inviter) {
+    return '$inviter invited you to share expenses in this group.';
+  }
+
+  @override
+  String get inviteSomeone => 'A group admin';
+
+  @override
+  String inviteAcceptedTitle(String group) {
+    return 'You\'re already in $group';
+  }
+
+  @override
+  String get inviteAcceptedMessage => 'You are already a member of this group.';
+
+  @override
+  String get inviteExpiredTitle => 'This invitation has expired';
+
+  @override
+  String get inviteExpiredMessage =>
+      'Ask someone in the group to send you a new invitation.';
+
+  @override
+  String get inviteCancelledTitle => 'This invitation is no longer active';
+
+  @override
+  String get inviteCancelledMessage =>
+      'It was cancelled or declined. Ask the group admin for a new one if you still want to join.';
+
+  @override
+  String get inviteGroupLabel => 'Group';
+
+  @override
+  String get inviteInvitedBy => 'Invited by';
+
+  @override
+  String get inviteRoleLabel => 'Your role';
+
+  @override
+  String get inviteValidUntil => 'Valid until';
+
+  @override
+  String get inviteExpiredOn => 'Expired on';
+
+  @override
+  String get inviteAccept => 'Join group';
+
+  @override
+  String get inviteDecline => 'Decline';
+
+  @override
+  String get inviteDeclineTitle => 'Decline this invitation?';
+
+  @override
+  String inviteDeclineMessage(String group) {
+    return 'You won\'t join $group. Someone in the group can invite you again later.';
+  }
+
+  @override
+  String get inviteDeclined => 'Invitation declined.';
+
+  @override
+  String inviteJoined(String group) {
+    return 'You joined $group.';
+  }
+
+  @override
+  String get inviteOpenGroup => 'Open the group';
+
+  @override
   String get onboardingSkip => 'Skip';
 
   @override

@@ -1096,6 +1096,210 @@ abstract class AppLocalizations {
   /// **'Checking it\'s you…'**
   String get settingsReauthChecking;
 
+  /// No description provided for @inviteTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Group invitation'**
+  String get inviteTitle;
+
+  /// No description provided for @inviteClose.
+  ///
+  /// In en, this message translates to:
+  /// **'Close'**
+  String get inviteClose;
+
+  /// No description provided for @inviteLoading.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking the invitation…'**
+  String get inviteLoading;
+
+  /// No description provided for @inviteProblemTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'This invitation can\'t be opened'**
+  String get inviteProblemTitle;
+
+  /// No description provided for @inviteSignedInAs.
+  ///
+  /// In en, this message translates to:
+  /// **'You\'re signed in as {email}.'**
+  String inviteSignedInAs(String email);
+
+  /// No description provided for @inviteWrongEmailHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign out and sign in with the address the invitation was sent to, or ask the group admin to invite {email} instead.'**
+  String inviteWrongEmailHelp(String email);
+
+  /// No description provided for @inviteSwitchAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign out and use the invited address'**
+  String get inviteSwitchAccount;
+
+  /// No description provided for @inviteBack.
+  ///
+  /// In en, this message translates to:
+  /// **'Back'**
+  String get inviteBack;
+
+  /// No description provided for @inviteGoHome.
+  ///
+  /// In en, this message translates to:
+  /// **'Go to Home'**
+  String get inviteGoHome;
+
+  /// No description provided for @inviteSignedOutTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'You\'ve been invited to a group'**
+  String get inviteSignedOutTitle;
+
+  /// No description provided for @inviteSignedOutMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in or create an account with the invited email address to see the invitation and join.'**
+  String get inviteSignedOutMessage;
+
+  /// No description provided for @inviteSignIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in to see it'**
+  String get inviteSignIn;
+
+  /// No description provided for @inviteCreateAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Create an account'**
+  String get inviteCreateAccount;
+
+  /// No description provided for @invitePendingTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'You\'re invited to {group}'**
+  String invitePendingTitle(String group);
+
+  /// No description provided for @invitePendingMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'{inviter} invited you to share expenses in this group.'**
+  String invitePendingMessage(String inviter);
+
+  /// Used when the inviter has no name.
+  ///
+  /// In en, this message translates to:
+  /// **'A group admin'**
+  String get inviteSomeone;
+
+  /// No description provided for @inviteAcceptedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'You\'re already in {group}'**
+  String inviteAcceptedTitle(String group);
+
+  /// No description provided for @inviteAcceptedMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'You are already a member of this group.'**
+  String get inviteAcceptedMessage;
+
+  /// No description provided for @inviteExpiredTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'This invitation has expired'**
+  String get inviteExpiredTitle;
+
+  /// No description provided for @inviteExpiredMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask someone in the group to send you a new invitation.'**
+  String get inviteExpiredMessage;
+
+  /// No description provided for @inviteCancelledTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'This invitation is no longer active'**
+  String get inviteCancelledTitle;
+
+  /// No description provided for @inviteCancelledMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'It was cancelled or declined. Ask the group admin for a new one if you still want to join.'**
+  String get inviteCancelledMessage;
+
+  /// No description provided for @inviteGroupLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Group'**
+  String get inviteGroupLabel;
+
+  /// No description provided for @inviteInvitedBy.
+  ///
+  /// In en, this message translates to:
+  /// **'Invited by'**
+  String get inviteInvitedBy;
+
+  /// No description provided for @inviteRoleLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Your role'**
+  String get inviteRoleLabel;
+
+  /// No description provided for @inviteValidUntil.
+  ///
+  /// In en, this message translates to:
+  /// **'Valid until'**
+  String get inviteValidUntil;
+
+  /// No description provided for @inviteExpiredOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Expired on'**
+  String get inviteExpiredOn;
+
+  /// No description provided for @inviteAccept.
+  ///
+  /// In en, this message translates to:
+  /// **'Join group'**
+  String get inviteAccept;
+
+  /// No description provided for @inviteDecline.
+  ///
+  /// In en, this message translates to:
+  /// **'Decline'**
+  String get inviteDecline;
+
+  /// No description provided for @inviteDeclineTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Decline this invitation?'**
+  String get inviteDeclineTitle;
+
+  /// No description provided for @inviteDeclineMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'You won\'t join {group}. Someone in the group can invite you again later.'**
+  String inviteDeclineMessage(String group);
+
+  /// No description provided for @inviteDeclined.
+  ///
+  /// In en, this message translates to:
+  /// **'Invitation declined.'**
+  String get inviteDeclined;
+
+  /// No description provided for @inviteJoined.
+  ///
+  /// In en, this message translates to:
+  /// **'You joined {group}.'**
+  String inviteJoined(String group);
+
+  /// No description provided for @inviteOpenGroup.
+  ///
+  /// In en, this message translates to:
+  /// **'Open the group'**
+  String get inviteOpenGroup;
+
   /// Button that leaves the introduction.
   ///
   /// In en, this message translates to:
