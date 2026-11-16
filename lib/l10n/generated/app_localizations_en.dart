@@ -994,7 +994,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String settleYouAreOwed(String amount) {
-    return 'You get back $amount';
+    return 'You\'re owed $amount';
   }
 
   @override
@@ -1007,7 +1007,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String settleMemberIsOwed(String name, String amount) {
-    return '$name gets back $amount';
+    return '$name is owed $amount';
   }
 
   @override

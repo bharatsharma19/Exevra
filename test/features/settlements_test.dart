@@ -374,7 +374,7 @@ void main() {
     await _pump(tester);
     expect(find.text('Balances (INR)'), findsOneWidget);
     expect(find.text('You owe ₹5.00'), findsOneWidget);
-    expect(find.text('User u2 gets back ₹5.00'), findsOneWidget);
+    expect(find.text('User u2 is owed ₹5.00'), findsOneWidget);
     expect(find.text('User u9 is settled up'), findsOneWidget);
     expect(find.text('You owe User u2 ₹5.00'), findsOneWidget);
   });

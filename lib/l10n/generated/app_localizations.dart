@@ -1711,7 +1711,7 @@ abstract class AppLocalizations {
   /// No description provided for @settleYouAreOwed.
   ///
   /// In en, this message translates to:
-  /// **'You get back {amount}'**
+  /// **'You\'re owed {amount}'**
   String settleYouAreOwed(String amount);
 
   /// No description provided for @settleYouAreSettled.
@@ -1729,7 +1729,7 @@ abstract class AppLocalizations {
   /// No description provided for @settleMemberIsOwed.
   ///
   /// In en, this message translates to:
-  /// **'{name} gets back {amount}'**
+  /// **'{name} is owed {amount}'**
   String settleMemberIsOwed(String name, String amount);
 
   /// No description provided for @settleMemberSettled.
