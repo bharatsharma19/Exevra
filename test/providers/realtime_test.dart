@@ -15,7 +15,8 @@ void main() {
   late ProviderContainer container;
 
   setUp(() async {
-    backend = TestBackend(signedInAs: 'u1');
+    backend = TestBackend(signedInAs: 'u1')
+      ..invitations = FakeInvitationRepository();
     backend.profiles.profiles['u1'] = profileOf('u1', activeGroupId: 'g1');
     backend.groups.groupsByUser['u1'] = [groupOf('g1', adminId: 'u1')];
     backend.expenses.rows.add(expenseOf('shared', userId: 'u2', groupId: 'g1'));
@@ -58,5 +59,24 @@ void main() {
     await afterDebounce();
 
     expect(container.read(dataRevisionProvider).expenses, before);
+  });
+
+  test('a member joining refreshes the pending invitations', () async {
+    // The admin invited someone; they accept on their own device.
+    final invitations = backend.invitations!;
+    await invitations.send(groupId: 'g1', email: 'friend@example.com');
+    container.listen(pendingInvitationsProvider('g1'), (_, _) {});
+    await container.read(pendingInvitationsProvider('g1').notifier).loaded;
+    expect(
+      container.read(pendingInvitationsProvider('g1')).value,
+      hasLength(1),
+    );
+
+    invitations.pending.clear();
+    backend.expenses.realtime.add(const GroupChange(GroupChangeKind.members));
+    await afterDebounce();
+    await container.read(pendingInvitationsProvider('g1').notifier).loaded;
+
+    expect(container.read(pendingInvitationsProvider('g1')).value, isEmpty);
   });
 }

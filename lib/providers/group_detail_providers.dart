@@ -400,10 +400,12 @@ final settlementEventsProvider = NotifierProvider.autoDispose
 class PendingInvitationsNotifier
     extends UserScopedFuture<List<GroupInvitation>> {
   PendingInvitationsNotifier(this.groupId)
-    : super(
-        (ref, _) =>
-            ref.watch(invitationRepositoryProvider).listPending(groupId),
-      );
+    : super((ref, _) {
+        // Someone accepting (a member change, also from realtime) takes
+        // their invitation off the pending list.
+        ref.watch(dataRevisionProvider.select((r) => r.members));
+        return ref.watch(invitationRepositoryProvider).listPending(groupId);
+      });
 
   final String groupId;
 
