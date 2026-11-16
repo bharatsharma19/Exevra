@@ -318,7 +318,8 @@ class _OnboardingPageState extends State<_OnboardingPage> {
         // The art shrinks on short screens and with the text size, so the
         // text keeps most of the room, and it is left out once it would be
         // too small to read. The page scrolls if it still does not fit.
-        final art = math.min(
+        final art =
+            math.min(
               200.0,
               math.min(constraints.maxWidth * 0.6, constraints.maxHeight * 0.4),
             ) /
