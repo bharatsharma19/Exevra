@@ -2,35 +2,37 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-/// Widgets must take colours from `AppPalette` or the `ColorScheme`. Only the
-/// theme files (lib/core/theme/, lib/core/constants/app_colors.dart) may
-/// define raw colours. The scope widens to all of lib/ once the screens are
-/// migrated.
+/// Widgets must take colours from `AppPalette` or the `ColorScheme`. Only
+/// the theme (lib/core/theme/) may define raw colours; every other file in
+/// lib/ is checked.
 void main() {
-  const scopes = ['lib/core/widgets', 'lib/core/accessibility'];
+  const themeDir = 'lib/core/theme/';
   final rawColors = RegExp(r'\bColors\.(?!transparent\b)\w+');
-  final hexColors = RegExp(r'0x[fF]{2}[0-9a-fA-F]{6}\b|Color\(0x');
+  final hexColors = RegExp(
+    r'0x[fF]{2}[0-9a-fA-F]{6}\b|Color\(\s*0x|Color\.from(?:ARGB|RGBO)\(',
+  );
+  final legacyConstants = RegExp(r'\bAppColors\b');
 
-  test('kit sources contain no hard-coded colours', () {
+  test('lib/ outside the theme contains no hard-coded colours', () {
     final offenders = <String>[];
     var files = 0;
-    for (final scope in scopes) {
-      final dir = Directory(scope);
-      expect(dir.existsSync(), isTrue, reason: '$scope is missing');
-      for (final file in dir.listSync(recursive: true).whereType<File>()) {
-        if (!file.path.endsWith('.dart')) continue;
-        files++;
-        final lines = file.readAsLinesSync();
-        for (var i = 0; i < lines.length; i++) {
-          final line = lines[i];
-          if (line.trimLeft().startsWith('//')) continue;
-          if (rawColors.hasMatch(line) || hexColors.hasMatch(line)) {
-            offenders.add('${file.path}:${i + 1}: ${line.trim()}');
-          }
+    for (final file in Directory('lib').listSync(recursive: true)) {
+      if (file is! File || !file.path.endsWith('.dart')) continue;
+      final path = file.path.replaceAll(r'\', '/');
+      if (path.startsWith(themeDir)) continue;
+      files++;
+      final lines = file.readAsLinesSync();
+      for (var i = 0; i < lines.length; i++) {
+        final line = lines[i];
+        if (line.trimLeft().startsWith('//')) continue;
+        if (rawColors.hasMatch(line) ||
+            hexColors.hasMatch(line) ||
+            legacyConstants.hasMatch(line)) {
+          offenders.add('$path:${i + 1}: ${line.trim()}');
         }
       }
     }
-    expect(files, greaterThan(0));
+    expect(files, greaterThan(100));
     expect(
       offenders,
       isEmpty,

@@ -47,15 +47,6 @@ class AppConstants {
   static const String keyAiConsent = 'app_ai_consent';
   static const String keyCachedProfile = 'app_cached_profile';
   static const String keySecureToken = 'app_secure_token';
-
-  // AI Financial Assistant Quick Prompts
-  static const List<String> aiQuickPrompts = [
-    'Analyze my top spending categories this month',
-    'Where am I overspending compared to last week?',
-    'Give me 3 actionable tips to cut expenses by 15%',
-    'Explain the 50/30/20 budgeting rule for my income',
-    'How much did our group spend on Food recently?',
-  ];
 }
 
 class ExpenseCategoryInfo {
