@@ -1,20 +1,25 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
-import '../../../core/constants/app_colors.dart';
-import '../../../core/utils/haptics.dart';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../providers/expense_provider.dart';
-import '../../../providers/insights_provider.dart';
-import '../../../providers/chat_provider.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../core/errors/app_failure.dart';
+import '../../../core/errors/failure_messages.dart';
+import '../../../core/platform/connectivity.dart';
+import '../../../core/theme/app_palette.dart';
+import '../../../core/utils/haptics.dart';
+import '../../../core/widgets/widgets.dart';
+import '../../../l10n/l10n.dart';
+import '../../../providers/failure_reporter.dart';
+import '../../../providers/group_detail_providers.dart';
+import '../widgets/feature_snackbar.dart';
+
+/// The signed-in frame: the offline banner above every tab, the tab content
+/// and the bottom navigation bar. It also shows every background failure
+/// once, as a friendly error snackbar.
 class MainNavigationShell extends ConsumerWidget {
-  final StatefulNavigationShell navigationShell;
+  const MainNavigationShell({super.key, required this.navigationShell});
 
-  const MainNavigationShell({
-    super.key,
-    required this.navigationShell,
-  });
+  final StatefulNavigationShell navigationShell;
 
   void _onTap(int index) {
     AppHaptics.selection();
@@ -24,85 +29,95 @@ class MainNavigationShell extends ConsumerWidget {
     );
   }
 
-  void _showError(BuildContext context, String message) {
-    if (message.isEmpty) return;
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message, style: const TextStyle(color: Colors.white)),
-        backgroundColor: Colors.red.shade600,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    ref.listen<ExpenseState>(expenseProvider, (prev, next) {
-      if (next.errorMessage != null && (prev?.errorMessage != next.errorMessage)) {
-        _showError(context, next.errorMessage!);
+    // Keeps the active group's realtime channel open while signed in.
+    ref.watch(groupRealtimeProvider);
+
+    // Every background failure (save, delete, switch group...) is shown
+    // here exactly once, as friendly copy. Assistant failures are shown in
+    // the reply bubble only.
+    ref.listen<ReportedFailure?>(failureReporterProvider, (prev, next) {
+      if (next != null && next.sequence != prev?.sequence) {
+        final message = friendlyMessage(
+          offlineAware(next.failure, offline: ref.read(isOfflineProvider)),
+        );
+        if (message.isNotEmpty) {
+          showFeatureSnackbar(context, message, kind: AppSnackbarKind.error);
+        }
       }
     });
-
-    ref.listen<InsightState>(insightProvider, (prev, next) {
-      if (next.errorMessage != null && (prev?.errorMessage != next.errorMessage)) {
-        _showError(context, next.errorMessage!);
-      }
-    });
-
-    ref.listen<ChatState>(chatProvider, (prev, next) {
-      if (next.errorMessage != null && (prev?.errorMessage != next.errorMessage)) {
-        _showError(context, next.errorMessage!);
-      }
-    });
-
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final offline = ref.watch(isOfflineProvider);
+    final l10n = context.l10n;
+    final palette = context.palette;
 
     return Scaffold(
-      body: navigationShell,
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          border: Border(
-            top: BorderSide(
-              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-              width: 1,
+      body: Column(
+        children: [
+          OfflineBanner(visible: offline, message: l10n.shellOfflineMessage),
+          Expanded(
+            // The body's own context: the Scaffold has already moved the
+            // tabs above the keyboard and the navigation bar, so the tabs
+            // (and sheets opened from them) must not pad for those again.
+            child: Builder(
+              builder: (bodyContext) => MediaQuery.removePadding(
+                context: bodyContext,
+                removeTop: offline,
+                child: navigationShell,
+              ),
             ),
           ),
-        ),
-        child: NavigationBar(
-          selectedIndex: navigationShell.currentIndex,
-          onDestinationSelected: _onTap,
-          backgroundColor: isDark ? AppColors.darkCard : AppColors.lightCard,
-          indicatorColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
-          destinations: [
-            NavigationDestination(
-              icon: const Icon(Icons.dashboard_outlined),
-              selectedIcon: Icon(Icons.dashboard_rounded, color: Theme.of(context).colorScheme.primary),
-              label: 'Dashboard',
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.receipt_long_outlined),
-              selectedIcon: Icon(Icons.receipt_long_rounded, color: Theme.of(context).colorScheme.primary),
-              label: 'Expenses',
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.insert_chart_outlined_rounded),
-              selectedIcon: Icon(Icons.insert_chart_rounded, color: Theme.of(context).colorScheme.primary),
-              label: 'Insights',
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.auto_awesome_outlined),
-              selectedIcon: Icon(Icons.auto_awesome_rounded, color: AppColors.primaryViolet),
-              label: 'AI Advisor',
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.person_outline_rounded),
-              selectedIcon: Icon(Icons.person_rounded, color: Theme.of(context).colorScheme.primary),
-              label: 'Profile',
-            ),
-          ],
+        ],
+      ),
+      // Snack bars (shown by the root SnackbarHost) stay above the bar.
+      bottomNavigationBar: SnackbarClearance(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border(top: BorderSide(color: palette.outlineVariant)),
+          ),
+          child: NavigationBar(
+            selectedIndex: navigationShell.currentIndex,
+            onDestinationSelected: _onTap,
+            destinations: [
+              AppNavigationDestination(
+                icon: const Icon(Icons.home_outlined),
+                selectedIcon: const Icon(Icons.home_rounded),
+                label: l10n.shellNavHome,
+              ),
+              AppNavigationDestination(
+                icon: const Icon(Icons.receipt_long_outlined),
+                selectedIcon: const Icon(Icons.receipt_long_rounded),
+                label: l10n.shellNavExpenses,
+              ),
+              AppNavigationDestination(
+                icon: const Icon(Icons.insert_chart_outlined_rounded),
+                selectedIcon: const Icon(Icons.insert_chart_rounded),
+                label: l10n.shellNavInsights,
+              ),
+              AppNavigationDestination(
+                icon: const Icon(Icons.auto_awesome_outlined),
+                selectedIcon: const Icon(Icons.auto_awesome_rounded),
+                label: l10n.shellNavAssistant,
+              ),
+              AppNavigationDestination(
+                icon: const Icon(Icons.person_outline_rounded),
+                selectedIcon: const Icon(Icons.person_rounded),
+                label: l10n.shellNavProfile,
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
+}
+
+/// A transport failure while the device is offline is explained as
+/// "you're offline" rather than as a server problem.
+AppFailure offlineAware(AppFailure failure, {required bool offline}) {
+  if (!offline) return failure;
+  return switch (failure) {
+    NetworkFailure() || TimeoutFailure() => const AppFailure.offline(),
+    _ => failure,
+  };
 }

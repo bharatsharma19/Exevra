@@ -1,15 +1,32 @@
-import 'dart:convert';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../core/constants/app_colors.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/haptics.dart';
-import '../../../providers/auth_provider.dart';
-import '../../../providers/expense_provider.dart';
-import '../../../services/supabase_service.dart';
 
+import '../../../core/errors/app_failure.dart';
+import '../../../core/errors/failure_messages.dart';
+import '../../../core/router/app_routes.dart';
+import '../../../core/router/navigation.dart';
+import '../../../core/theme/app_tokens.dart';
+import '../../../core/utils/haptics.dart';
+import '../../../core/widgets/widgets.dart';
+import '../../../data/repositories/invitation_repository.dart';
+import '../../../l10n/l10n.dart';
+import '../../../models/invitation.dart';
+import '../../../providers/auth_provider.dart';
+import '../../../providers/group_detail_providers.dart';
+import '../../../providers/groups_provider.dart';
+import '../../../providers/pending_invite_provider.dart';
+import '../widgets/invite_views.dart';
+import '../../../core/utils/app_clock.dart';
+
+/// Landing page of an invitation link (`/invite/<token>`).
+///
+/// Signed out, it asks to sign in (the invitation is kept for after). Signed
+/// in, it shows the group, the inviter, the role and the expiry, with Join
+/// and Decline (Decline asks first). An invitation for another address
+/// explains that and offers to switch account.
 class InviteScreen extends ConsumerStatefulWidget {
   final String token;
   const InviteScreen({super.key, required this.token});
@@ -19,486 +36,330 @@ class InviteScreen extends ConsumerStatefulWidget {
 }
 
 class _InviteScreenState extends ConsumerState<InviteScreen> {
-  bool _isLoading = true;
-  bool _isAccepting = false;
-  String? _error;
+  InviteBusy _busy = InviteBusy.none;
 
-  String? _groupName;
-  String? _inviterName;
-  String? _recipientEmail;
-  String? _status;
-  DateTime? _expiresAt;
-  bool _isLegacyCode = false;
-  String? _legacyCode;
+  /// A failed accept or decline, shown on this screen.
+  AppFailure? _actionFailure;
+
+  String get _token => widget.token.trim();
 
   @override
   void initState() {
     super.initState();
-    _loadInvitationDetails();
+    // Keep the invitation until a signed-in user has seen it, so it
+    // survives signing in (and a restart while signed out).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final pending = ref.read(pendingInviteProvider.notifier);
+      if (ref.read(currentUserIdProvider) == null) {
+        pending.set(_token);
+      } else {
+        pending.clear();
+      }
+    });
   }
 
-  Future<void> _loadInvitationDetails() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+  /// Signed in with another address: sign out and keep the invitation
+  /// for the next sign-in.
+  Future<void> _switchAccount() async {
+    await ref.read(authControllerProvider.notifier).signOut();
+    if (!mounted) return;
+    ref.read(pendingInviteProvider.notifier).set(_token);
+    setState(() => _actionFailure = null);
+  }
 
-    final token = widget.token.trim();
-    if (token.isEmpty) {
+  Future<void> _accept(String groupName) async {
+    setState(() {
+      _busy = InviteBusy.accepting;
+      _actionFailure = null;
+    });
+    AppHaptics.light();
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final joined = context.l10n.inviteJoined(groupName);
+    final failure = await ref
+        .read(groupsProvider.notifier)
+        .acceptInvitation(_token);
+    if (!mounted) return;
+    if (failure != null) {
+      AppHaptics.error();
       setState(() {
-        _isLoading = false;
-        _error = 'Invitation link is missing a security token.';
+        _busy = InviteBusy.none;
+        _actionFailure = failure;
       });
       return;
     }
-
-    try {
-      // 1. First attempt to query cryptographic token via RPC / table
-      final details =
-          await SupabaseService.instance.getInvitationDetails(token);
-
-      if (details != null) {
-        final expiresAtStr = details['expires_at'] as String?;
-        final expiresAt =
-            expiresAtStr != null ? DateTime.tryParse(expiresAtStr) : null;
-        final isExpired = details['is_expired'] == true ||
-            (expiresAt != null && DateTime.now().isAfter(expiresAt));
-
-        setState(() {
-          _groupName = details['group_name'] as String? ?? 'Shared Group';
-          _inviterName = details['inviter_name'] as String? ?? 'A member';
-          _recipientEmail = details['email'] as String?;
-          _status = isExpired ? 'expired' : (details['status'] as String? ?? 'pending');
-          _expiresAt = expiresAt;
-          _isLoading = false;
-        });
-        return;
-      }
-
-      // 2. If not found in invitations table, fallback to legacy base64 format (code|exp)
-      _tryLegacyToken(token);
-    } catch (e) {
-      _tryLegacyToken(token);
-    }
+    AppSnackbar.showSuccess(joined, messenger: messenger);
+    context.go(AppRoutes.dashboard);
   }
 
-  void _tryLegacyToken(String rawToken) {
-    try {
-      final normalizedToken = base64Url.normalize(rawToken);
-      final decoded = utf8.decode(base64Url.decode(normalizedToken));
-      final parts = decoded.split('|');
-
-      if (parts.length >= 2) {
-        final code = parts[0];
-        final exp = int.tryParse(parts[1]) ?? 0;
-        final isExpired = DateTime.now().millisecondsSinceEpoch > exp;
-
-        setState(() {
-          _isLegacyCode = true;
-          _legacyCode = code;
-          _groupName = 'Expense Group ($code)';
-          _inviterName = 'A group member';
-          _status = isExpired ? 'expired' : 'pending';
-          _expiresAt = DateTime.fromMillisecondsSinceEpoch(exp);
-          _isLoading = false;
-        });
-        return;
-      }
-    } catch (_) {}
-
+  Future<void> _decline(String groupName) async {
+    final l10n = context.l10n;
+    final confirmed = await showConfirmDialog(
+      context,
+      title: l10n.inviteDeclineTitle,
+      message: l10n.inviteDeclineMessage(groupName),
+      confirmLabel: l10n.inviteDecline,
+      destructive: true,
+    );
+    if (!confirmed || !mounted) return;
     setState(() {
-      _isLoading = false;
-      _error = 'This invitation link is invalid or has expired.';
+      _busy = InviteBusy.declining;
+      _actionFailure = null;
     });
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      await ref.read(invitationRepositoryProvider).decline(_token);
+      if (!mounted) return;
+      AppSnackbar.showInfo(l10n.inviteDeclined, messenger: messenger);
+      context.go(AppRoutes.dashboard);
+    } on AppFailure catch (failure) {
+      if (!mounted) return;
+      AppHaptics.error();
+      setState(() {
+        _busy = InviteBusy.none;
+        _actionFailure = failure;
+      });
+    }
   }
 
-  Future<void> _acceptInvitation() async {
-    setState(() => _isAccepting = true);
-    AppHaptics.light();
-
-    try {
-      bool success = false;
-
-      if (_isLegacyCode && _legacyCode != null) {
-        success = await ref
-            .read(expenseProvider.notifier)
-            .joinGroup(_legacyCode!);
-      } else {
-        success = await ref
-            .read(expenseProvider.notifier)
-            .acceptInvitation(widget.token.trim());
-      }
-
-      if (success && mounted) {
-        AppHaptics.success();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Successfully joined ${_groupName ?? "the group"}!',
-            ),
-            backgroundColor: AppColors.primaryEmerald,
-          ),
-        );
-        context.go('/dashboard');
-      } else if (mounted) {
-        setState(() {
-          _isAccepting = false;
-          _error = 'Could not accept invitation. It may have expired or already been accepted.';
-        });
-        AppHaptics.error();
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isAccepting = false;
-          _error = e.toString().replaceAll('Exception:', '').trim();
-        });
-        AppHaptics.error();
-      }
-    }
+  void _close() {
+    ref.read(pendingInviteProvider.notifier).clear();
+    popOrGo(context, AppRoutes.root);
   }
 
   @override
   Widget build(BuildContext context) {
-    final authState = ref.watch(authNotifierProvider);
-    final isAuthenticated = authState.isAuthenticated;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
+    final l10n = context.l10n;
+    final isAuthenticated = ref.watch(currentUserIdProvider) != null;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Group Invitation'),
-        leading: IconButton(
-          icon: const Icon(Icons.close_rounded),
-          onPressed: () {
-            if (context.canPop()) {
-              context.pop();
-            } else {
-              context.go('/dashboard');
-            }
-          },
+        title: Text(l10n.inviteTitle),
+        leading: AppIconButton(
+          icon: Icons.close_rounded,
+          tooltip: l10n.inviteClose,
+          onPressed: _close,
         ),
       ),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: _buildContent(context, isAuthenticated, isDark),
+      body: SafeArea(
+        top: false,
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(AppSpacing.xl),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: _content(context, isAuthenticated),
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildContent(
-    BuildContext context,
-    bool isAuthenticated,
-    bool isDark,
-  ) {
-    if (_isLoading) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 16),
-          Text(
-            'Verifying invitation details...',
-            style: TextStyle(
-              fontSize: 14,
-              color: isDark
-                  ? AppColors.darkTextSecondary
-                  : AppColors.lightTextSecondary,
-            ),
+  Widget _content(BuildContext context, bool isAuthenticated) {
+    final l10n = context.l10n;
+    // Details are only shown to the signed-in invitee (the server checks
+    // the invitation email), so a signed-out visitor sees sign-in first.
+    final AsyncValue<InvitationDetails?> async = _token.isEmpty
+        ? const AsyncError(
+            AppFailure.business('invite_not_found'),
+            StackTrace.empty,
+          )
+        : isAuthenticated
+        ? ref.watch(invitationDetailsProvider(_token))
+        : const AsyncData(null);
+    final details = async.value;
+    final failure = _actionFailure ?? async.error;
+
+    if (async.isLoading && details == null) return const InviteLoadingView();
+    if (failure != null) return _problem(context, failure, isAuthenticated);
+    if (details == null) return _signedOut(context);
+
+    final now = AppClock.now();
+    final isExpired =
+        details.status == InvitationStatus.expired ||
+        !now.isBefore(details.expiresAt);
+    final inviter = details.inviterName?.trim().isNotEmpty ?? false
+        ? details.inviterName!
+        : l10n.inviteSomeone;
+    final group = details.groupName;
+
+    final (hero, actions) = switch (details.status) {
+      InvitationStatus.accepted => (
+        InviteHero(
+          icon: Icons.check_circle_outline_rounded,
+          tone: InviteTone.success,
+          title: l10n.inviteAcceptedTitle(group),
+          message: l10n.inviteAcceptedMessage,
+        ),
+        <Widget>[
+          LoadingButton(
+            label: l10n.inviteOpenGroup,
+            onPressed: () => context.go(AppRoutes.dashboard),
           ),
         ],
-      );
-    }
-
-    if (_error != null) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppColors.error.withValues(alpha: 0.15),
-            ),
-            child: const Icon(
-              Icons.error_outline_rounded,
-              size: 48,
-              color: AppColors.error,
-            ),
+      ),
+      InvitationStatus.revoked || InvitationStatus.declined => (
+        InviteHero(
+          icon: Icons.block_rounded,
+          tone: InviteTone.danger,
+          title: l10n.inviteCancelledTitle,
+          message: l10n.inviteCancelledMessage,
+        ),
+        <Widget>[_goHome(context)],
+      ),
+      _ when isExpired => (
+        InviteHero(
+          icon: Icons.hourglass_disabled_rounded,
+          tone: InviteTone.warning,
+          title: l10n.inviteExpiredTitle,
+          message: l10n.inviteExpiredMessage,
+        ),
+        <Widget>[_goHome(context)],
+      ),
+      _ => (
+        InviteHero(
+          icon: Icons.group_add_rounded,
+          title: l10n.invitePendingTitle(group),
+          message: l10n.invitePendingMessage(inviter),
+        ),
+        <Widget>[
+          LoadingButton(
+            key: const Key('invite-accept'),
+            label: l10n.inviteAccept,
+            icon: Icons.check_rounded,
+            isLoading: _busy == InviteBusy.accepting,
+            onPressed: _busy == InviteBusy.none
+                ? () => unawaited(_accept(group))
+                : null,
           ),
-          const SizedBox(height: 20),
-          const Text(
-            'Invitation Issue',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _error!,
-            style: const TextStyle(fontSize: 14, color: AppColors.error),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: () => context.go('/dashboard'),
-            child: const Text('Go to Dashboard'),
+          const SizedBox(height: AppSpacing.md),
+          LoadingButton(
+            key: const Key('invite-decline'),
+            label: l10n.inviteDecline,
+            variant: LoadingButtonVariant.secondary,
+            isLoading: _busy == InviteBusy.declining,
+            onPressed: _busy == InviteBusy.none
+                ? () => unawaited(_decline(group))
+                : null,
           ),
         ],
-      );
-    }
-
-    final isExpired = _status == 'expired';
-    final isAlreadyAccepted = _status == 'accepted';
-    final isRevoked = _status == 'revoked';
+      ),
+    };
 
     return Column(
-      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Glowing Icon
-        Center(
-          child: Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                colors: isExpired || isRevoked
-                    ? [Colors.orangeAccent, Colors.redAccent]
-                    : [AppColors.primaryCyan, AppColors.primaryViolet],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: (isExpired || isRevoked
-                          ? Colors.orange
-                          : AppColors.primaryCyan)
-                      .withValues(alpha: 0.3),
-                  blurRadius: 20,
-                  spreadRadius: 2,
+        hero,
+        const SizedBox(height: AppSpacing.xl),
+        InviteDetailsCard(
+          details: details,
+          inviterName: inviter,
+          isExpired: isExpired,
+        ),
+        const SizedBox(height: AppSpacing.xl),
+        ...actions,
+      ],
+    );
+  }
+
+  Widget _goHome(BuildContext context) => LoadingButton(
+    key: const Key('invite-home'),
+    label: context.l10n.inviteGoHome,
+    variant: LoadingButtonVariant.secondary,
+    onPressed: () => context.go(AppRoutes.dashboard),
+  );
+
+  Widget _signedOut(BuildContext context) {
+    final l10n = context.l10n;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InviteHero(
+          icon: Icons.mail_outline_rounded,
+          title: l10n.inviteSignedOutTitle,
+          message: l10n.inviteSignedOutMessage,
+        ),
+        const SizedBox(height: AppSpacing.xl),
+        LoadingButton(
+          key: const Key('invite-sign-in'),
+          label: l10n.inviteSignIn,
+          onPressed: () {
+            ref.read(pendingInviteProvider.notifier).set(_token);
+            context.go(AppRoutes.login);
+          },
+        ),
+        const SizedBox(height: AppSpacing.md),
+        LoadingButton(
+          key: const Key('invite-register'),
+          label: l10n.inviteCreateAccount,
+          variant: LoadingButtonVariant.secondary,
+          onPressed: () {
+            ref.read(pendingInviteProvider.notifier).set(_token);
+            context.go(AppRoutes.register);
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _problem(BuildContext context, Object error, bool isAuthenticated) {
+    final l10n = context.l10n;
+    final failure = error is AppFailure ? error : const AppFailure.unknown();
+    final signedInEmail = ref.watch(authControllerProvider).user?.email;
+    final wrongEmail =
+        failure.key == 'invite_email_mismatch' && signedInEmail != null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InviteHero(
+          icon: wrongEmail
+              ? Icons.alternate_email_rounded
+              : Icons.error_outline_rounded,
+          tone: InviteTone.danger,
+          title: l10n.inviteProblemTitle,
+          message: friendlyMessage(failure),
+        ),
+        if (wrongEmail) ...[
+          const SizedBox(height: AppSpacing.lg),
+          AppCard(
+            key: const Key('invite-wrong-email'),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  l10n.inviteSignedInAs(signedInEmail),
+                  style: Theme.of(context).textTheme.titleSmall,
                 ),
+                const SizedBox(height: AppSpacing.sm),
+                Text(l10n.inviteWrongEmailHelp(signedInEmail)),
               ],
             ),
-            child: Icon(
-              isExpired || isRevoked
-                  ? Icons.hourglass_disabled_rounded
-                  : (isAlreadyAccepted
-                      ? Icons.check_circle_rounded
-                      : Icons.group_add_rounded),
-              size: 40,
-              color: Colors.white,
-            ),
           ),
-        ).animate().scale(duration: 350.ms, curve: Curves.easeOutBack),
-
-        const SizedBox(height: 24),
-
-        Text(
-          isAlreadyAccepted
-              ? 'Already Joined!'
-              : (isExpired
-                  ? 'Invitation Expired'
-                  : (isRevoked
-                      ? 'Invitation Revoked'
-                      : "You're Invited to Join")),
-          style: const TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.5,
-          ),
-          textAlign: TextAlign.center,
-        ),
-
-        const SizedBox(height: 8),
-
-        Text(
-          isAlreadyAccepted
-              ? 'You are already an active member of this group.'
-              : (isExpired
-                  ? 'This invitation link has expired. Please ask an admin or member to send a new invite.'
-                  : (isRevoked
-                      ? 'This invitation has been cancelled by the group admin.'
-                      : '$_inviterName has invited you to join their shared group on Exevra.')),
-          style: TextStyle(
-            fontSize: 14,
-            color: isDark
-                ? AppColors.darkTextSecondary
-                : AppColors.lightTextSecondary,
-          ),
-          textAlign: TextAlign.center,
-        ),
-
-        const SizedBox(height: 24),
-
-        // Group Details Glass Card
-        GlassCard(
-          borderRadius: 20,
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 20,
-                    backgroundColor:
-                        AppColors.primaryCyan.withValues(alpha: 0.15),
-                    child: const Icon(
-                      Icons.groups_rounded,
-                      color: AppColors.primaryCyan,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _groupName ?? 'Shared Group',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        Text(
-                          'Invited by $_inviterName',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: isDark
-                                ? AppColors.darkTextTertiary
-                                : AppColors.lightTextTertiary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              if (_recipientEmail != null) ...[
-                const Divider(height: 24),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.email_outlined,
-                      size: 16,
-                      color: isDark
-                          ? AppColors.darkTextTertiary
-                          : AppColors.lightTextTertiary,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Invited Email: $_recipientEmail',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isDark
-                              ? AppColors.darkTextSecondary
-                              : AppColors.lightTextSecondary,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-              if (_expiresAt != null) ...[
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.schedule_rounded,
-                      size: 16,
-                      color: isDark
-                          ? AppColors.darkTextTertiary
-                          : AppColors.lightTextTertiary,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      isExpired
-                          ? 'Expired on ${_expiresAt!.day}/${_expiresAt!.month}/${_expiresAt!.year}'
-                          : 'Valid until ${_expiresAt!.day}/${_expiresAt!.month}/${_expiresAt!.year}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: isExpired
-                            ? AppColors.error
-                            : (isDark
-                                ? AppColors.darkTextTertiary
-                                : AppColors.lightTextTertiary),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 28),
-
-        // Action Buttons
-        if (isAlreadyAccepted) ...[
-          ElevatedButton(
-            onPressed: () => context.go('/dashboard'),
-            child: const Text('Open Group Dashboard'),
-          ),
-        ] else if (isExpired || isRevoked) ...[
-          ElevatedButton(
-            onPressed: () => context.go('/dashboard'),
-            child: const Text('Return to Dashboard'),
-          ),
-        ] else if (isAuthenticated) ...[
-          _isAccepting
-              ? const Center(child: CircularProgressIndicator())
-              : ElevatedButton.icon(
-                  onPressed: _acceptInvitation,
-                  icon: const Icon(Icons.check_circle_outline_rounded),
-                  label: const Text('Accept & Join Group'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    backgroundColor: AppColors.primaryCyan,
-                    foregroundColor: Colors.black,
-                  ),
-                ),
-          const SizedBox(height: 12),
-          TextButton(
-            onPressed: () => context.go('/dashboard'),
-            child: const Text('Decline'),
-          ),
-        ] else ...[
-          Text(
-            'Sign in or register an account to join this group:',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: isDark
-                  ? AppColors.darkTextSecondary
-                  : AppColors.lightTextSecondary,
-            ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 14),
-          ElevatedButton(
-            onPressed: () {
-              final returnTo =
-                  Uri.encodeComponent('/invite?token=${widget.token}');
-              context.go('/login?returnTo=$returnTo');
-            },
-            child: const Text('Sign In to Accept'),
-          ),
-          const SizedBox(height: 10),
-          OutlinedButton(
-            onPressed: () {
-              final returnTo =
-                  Uri.encodeComponent('/invite?token=${widget.token}');
-              context.go('/register?returnTo=$returnTo');
-            },
-            child: const Text('Create New Account'),
+          const SizedBox(height: AppSpacing.lg),
+          LoadingButton(
+            key: const Key('invite-switch-account'),
+            label: l10n.inviteSwitchAccount,
+            onPressed: () => unawaited(_switchAccount()),
           ),
         ],
+        const SizedBox(height: AppSpacing.xl),
+        if (_actionFailure != null) ...[
+          LoadingButton(
+            label: l10n.inviteBack,
+            variant: LoadingButtonVariant.secondary,
+            onPressed: () => setState(() => _actionFailure = null),
+          ),
+          const SizedBox(height: AppSpacing.md),
+        ] else if (isAuthenticated && _token.isNotEmpty && !wrongEmail) ...[
+          LoadingButton(
+            key: const Key('invite-retry'),
+            label: l10n.retry,
+            icon: Icons.refresh_rounded,
+            onPressed: () => ref.invalidate(invitationDetailsProvider(_token)),
+          ),
+          const SizedBox(height: AppSpacing.md),
+        ],
+        _goHome(context),
       ],
     );
   }

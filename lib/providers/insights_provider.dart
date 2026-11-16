@@ -1,81 +1,92 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/insight_model.dart';
-import '../services/supabase_service.dart';
-import '../core/utils/haptics.dart';
+
+import '../core/errors/app_failure.dart';
+import '../core/platform/device_time_zone.dart';
+import '../data/repositories/insights_repository.dart';
+import '../models/insights.dart';
 import 'auth_provider.dart';
-import 'expense_provider.dart';
+import 'data_revision.dart';
+import 'groups_provider.dart';
+import 'profile_provider.dart';
 
-class InsightState {
-  final String timeframe; // 'weekly', 'monthly', 'yearly'
-  final FinancialInsight insight;
-  final bool isLoading;
-  final String? errorMessage;
+/// Timeframe chosen on the insights screen. Reset when the user changes.
+class InsightsTimeframeNotifier extends Notifier<InsightTimeframe> {
+  @override
+  InsightTimeframe build() {
+    ref.watch(currentUserIdProvider);
+    return InsightTimeframe.month;
+  }
 
-  const InsightState({
-    this.timeframe = 'monthly',
-    required this.insight,
-    this.isLoading = false,
-    this.errorMessage,
+  void set(InsightTimeframe timeframe) => state = timeframe;
+}
+
+final insightsTimeframeProvider =
+    NotifierProvider<InsightsTimeframeNotifier, InsightTimeframe>(
+      InsightsTimeframeNotifier.new,
+    );
+
+/// What one insights request covers.
+class InsightsKey {
+  const InsightsKey({
+    required this.userId,
+    required this.scope,
+    required this.timeframe,
+    this.groupId,
   });
 
-  InsightState copyWith({
-    String? timeframe,
-    FinancialInsight? insight,
-    bool? isLoading,
-    Object? errorMessage = const Object(),
-  }) {
-    return InsightState(
-      timeframe: timeframe ?? this.timeframe,
-      insight: insight ?? this.insight,
-      isLoading: isLoading ?? this.isLoading,
-      errorMessage: errorMessage == const Object() ? this.errorMessage : errorMessage as String?,
-    );
-  }
+  final String userId;
+  final InsightScope scope;
+  final InsightTimeframe timeframe;
+
+  /// Set for group scope only.
+  final String? groupId;
+
+  @override
+  bool operator ==(Object other) =>
+      other is InsightsKey &&
+      other.userId == userId &&
+      other.scope == scope &&
+      other.timeframe == timeframe &&
+      other.groupId == groupId;
+
+  @override
+  int get hashCode => Object.hash(userId, scope, timeframe, groupId);
 }
 
-class InsightNotifier extends StateNotifier<InsightState> {
-  final SupabaseService _service;
-  final Ref _ref;
-
-  InsightNotifier(this._service, this._ref)
-      : super(InsightState(insight: FinancialInsight.empty('monthly'))) {
-    loadInsights();
-  }
-
-  Future<void> setTimeframe(String timeframe) async {
-    if (state.timeframe == timeframe) return;
-    AppHaptics.selection();
-    state = state.copyWith(timeframe: timeframe);
-    await loadInsights();
-  }
-
-  Future<void> loadInsights() async {
-    state = state.copyWith(isLoading: true, errorMessage: null);
-    try {
-      final auth = _ref.read(authNotifierProvider);
-      final groupId = auth.profile?.groupId;
-
-      final data = await _service.getExpenseInsights(
-        timeframe: state.timeframe,
-        groupId: groupId,
+/// Insights for the active scope: the group when one is active (and
+/// readable), otherwise personal. Null while signed out or while groups
+/// load. Pass a [InsightTimeframe] to pick the window.
+final activeInsightsKeyProvider =
+    Provider.family<InsightsKey?, InsightTimeframe>((ref, timeframe) {
+      final userId = ref.watch(currentUserIdProvider);
+      if (userId == null || !ref.watch(groupsReadyProvider)) return null;
+      final group = ref.watch(activeGroupProvider);
+      final inGroup = group != null && group.canRead;
+      return InsightsKey(
+        userId: userId,
+        scope: inGroup ? InsightScope.group : InsightScope.personal,
+        timeframe: timeframe,
+        groupId: inGroup ? group.id : null,
       );
+    });
 
-      state = state.copyWith(
-        insight: data,
-        isLoading: false,
+/// Server-side spending summary, bucketed in the device time zone.
+/// Reloads when expenses change.
+final insightsProvider = FutureProvider.autoDispose
+    .family<ExpenseInsights, InsightsKey>((ref, key) async {
+      if (ref.watch(currentUserIdProvider) != key.userId) {
+        throw const AppFailure.sessionExpired();
+      }
+      ref.watch(dataRevisionProvider.select((r) => r.expenses));
+      ref.watch(dataRevisionProvider.select((r) => r.settlements));
+      final repo = ref.watch(insightsRepositoryProvider);
+      final currency = ref.watch(preferredCurrencyProvider);
+      final zone = await ref.watch(deviceTimeZoneProvider.future);
+      return repo.fetch(
+        scope: key.scope,
+        timeframe: key.timeframe,
+        timeZone: zone,
+        preferredCurrency: currency,
+        groupId: key.groupId,
       );
-    } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage: e.toString(),
-      );
-    }
-  }
-}
-
-final insightProvider = StateNotifierProvider<InsightNotifier, InsightState>((ref) {
-  final service = ref.watch(supabaseServiceProvider);
-  // Auto-refresh when expenses change
-  ref.watch(expenseProvider.select((s) => s.expenses.length));
-  return InsightNotifier(service, ref);
-});
+    });

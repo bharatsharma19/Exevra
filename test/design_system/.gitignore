@@ -1,0 +1,2 @@
+# Alchemist writes diff images here when a golden test fails.
+failures/

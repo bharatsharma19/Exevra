@@ -1,68 +1,73 @@
-/// Input validation logic for auth, profile, and expense creation
+import '../errors/failure_messages.dart';
+
+/// Form validators. They return user-facing copy or null.
 class Validators {
   Validators._();
 
+  // Deliberately permissive (plus addressing, subdomains, long TLDs); the
+  // server validates the address for real.
+  static final RegExp _email = RegExp(
+    r'^[^\s@]+@[^\s@.]+(\.[^\s@.]+)*\.[^\s@.]{2,}$',
+  );
+
   static String? validateEmail(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Email address is required';
-    }
-    final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
-    if (!emailRegex.hasMatch(value.trim())) {
+    final email = value?.trim() ?? '';
+    if (email.isEmpty) return 'Email address is required';
+    if (email.length > 254 || !_email.hasMatch(email)) {
       return 'Please enter a valid email address';
     }
     return null;
   }
 
-  static String? validatePassword(String? value) {
-    if (value == null || value.isEmpty) {
-      return 'Password is required';
-    }
+  /// Sign-in only checks that a password was typed: older accounts may
+  /// predate the current rules.
+  static String? validateLoginPassword(String? value) {
+    if (value == null || value.isEmpty) return 'Password is required';
+    return null;
+  }
+
+  /// Rules for a new password; they match the server policy (8+
+  /// characters with upper and lower case letters and a digit).
+  static String? validateNewPassword(String? value) {
+    if (value == null || value.isEmpty) return 'Password is required';
     if (value.length < 8) {
       return 'Password must be at least 8 characters long';
     }
-    if (!value.contains(RegExp(r'[A-Za-z]'))) {
-      return 'Password must contain at least one letter';
+    if (value.length > 72) {
+      return 'Password must be at most 72 characters long';
     }
-    if (!value.contains(RegExp(r'[0-9]'))) {
-      return 'Password must contain at least one number';
+    if (!value.contains(RegExp('[a-z]'))) {
+      return 'Password must contain a lower-case letter';
+    }
+    if (!value.contains(RegExp('[A-Z]'))) {
+      return 'Password must contain an upper-case letter';
+    }
+    if (!value.contains(RegExp('[0-9]'))) {
+      return 'Password must contain a number';
     }
     return null;
   }
 
-  static String? validatePhone(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Phone number is required';
-    }
-    final cleaned = value.replaceAll(RegExp(r'[\s\-()]'), '');
-    final phoneRegex = RegExp(r'^\+?[1-9]\d{7,14}$');
-    if (!phoneRegex.hasMatch(cleaned)) {
-      return 'Please enter a valid international phone (e.g. +1234567890)';
-    }
+  /// Confirmation field for [password].
+  static String? Function(String?) confirmPassword(
+    String Function() password,
+  ) =>
+      (value) => value == password()
+      ? null
+      : friendlyMessageForKey('password_mismatch');
+
+  static String? validateDisplayName(String? value) {
+    final name = value?.trim() ?? '';
+    if (name.isEmpty) return 'Name is required';
+    if (name.length > 60) return 'Names must be 1 to 60 characters.';
     return null;
   }
 
   static String? validateOtp(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Verification code is required';
-    }
-    if (value.trim().length != 6 || !RegExp(r'^\d{6}$').hasMatch(value.trim())) {
-      return 'Please enter a 6-digit code';
-    }
-    return null;
-  }
-
-  static String? validateAmount(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Amount is required';
-    }
-    final trimmed = value.trim();
-    if (trimmed.startsWith('-')) {
-      return 'Amount must be greater than 0';
-    }
-    final cleaned = trimmed.replaceAll(RegExp(r'[^0-9.]'), '');
-    final amount = double.tryParse(cleaned);
-    if (amount == null || amount <= 0) {
-      return 'Amount must be greater than 0';
+    final code = value?.trim() ?? '';
+    if (code.isEmpty) return 'Verification code is required';
+    if (!RegExp(r'^\d{8}$').hasMatch(code)) {
+      return 'Please enter an 8-digit code';
     }
     return null;
   }

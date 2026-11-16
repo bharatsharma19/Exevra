@@ -1,15 +1,28 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../core/constants/app_colors.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/validators.dart';
+
+import '../../../core/config/legal_links.dart';
+import '../../../core/errors/app_failure.dart';
+import '../../../core/errors/failure_messages.dart';
+import '../../../core/router/app_routes.dart';
+import '../../../core/router/navigation.dart';
+import '../../../core/theme/app_palette.dart';
+import '../../../core/theme/app_tokens.dart';
 import '../../../core/utils/haptics.dart';
+import '../../../core/utils/validators.dart';
+import '../../../l10n/l10n.dart';
 import '../../../providers/auth_provider.dart';
+import '../widgets/auth_widgets.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
-  const RegisterScreen({super.key});
+  const RegisterScreen({super.key, this.links});
+
+  /// Terms and privacy pages; defaults to this build's.
+  final LegalLinks? links;
 
   @override
   ConsumerState<RegisterScreen> createState() => _RegisterScreenState();
@@ -17,251 +30,248 @@ class RegisterScreen extends ConsumerStatefulWidget {
 
 class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
-  bool _obscurePassword = true;
-  bool _obscureConfirm = true;
+  final _name = TextEditingController();
+  final _email = TextEditingController();
+  final _password = TextEditingController();
+  final _confirm = TextEditingController();
+  bool _acceptedTerms = false;
+  AppFailure? _failure;
+
+  LegalLinks get _links => widget.links ?? LegalLinks.current;
 
   @override
   void dispose() {
-    _nameController.dispose();
-    _emailController.dispose();
-    _passwordController.dispose();
-    _confirmPasswordController.dispose();
+    _name.dispose();
+    _email.dispose();
+    _password.dispose();
+    _confirm.dispose();
     super.dispose();
   }
 
-  void _submitRegister() {
-    if (_formKey.currentState?.validate() ?? false) {
-      if (_passwordController.text != _confirmPasswordController.text) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Passwords do not match'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-        return;
-      }
+  void _clearFailure() {
+    if (_failure != null) setState(() => _failure = null);
+  }
 
-      ref.read(authNotifierProvider.notifier).signUpWithEmail(
-            _emailController.text,
-            _passwordController.text,
-            _nameController.text,
-          );
+  Future<void> _submit() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    AppHaptics.light();
+    setState(() => _failure = null);
+    final failure = await ref
+        .read(authControllerProvider.notifier)
+        .signUp(
+          email: _email.text,
+          password: _password.text,
+          displayName: _name.text.trim(),
+        );
+    if (!mounted) return;
+    if (failure == null) {
+      TextInput.finishAutofillContext();
+    } else {
+      setState(() => _failure = failure);
     }
+  }
+
+  String _emailQuery() {
+    final email = _email.text.trim();
+    return email.isEmpty ? '' : '?email=${Uri.encodeComponent(email)}';
   }
 
   @override
   Widget build(BuildContext context) {
-    final authState = ref.watch(authNotifierProvider);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final busy = ref.watch(authControllerProvider.select((s) => s.isLoading));
+    final l10n = context.l10n;
+    final failure = _failure;
 
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded),
-          onPressed: () {
-            if (context.canPop()) {
-              context.pop();
-            } else {
-              context.go('/login');
-            }
-          },
+    return AuthScaffold(
+      title: l10n.authRegisterTitle,
+      subtitle: l10n.authRegisterSubtitle,
+      icon: Icons.person_add_alt_1_rounded,
+      onBack: () => popOrGo(context, AppRoutes.login),
+      content: [
+        if (failure != null) ...[
+          AuthMessage(friendlyMessage(failure)),
+          if (failure is AccountExistsFailure)
+            Wrap(
+              alignment: WrapAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () =>
+                      context.go('${AppRoutes.login}${_emailQuery()}'),
+                  child: Text(l10n.authSignIn),
+                ),
+                TextButton(
+                  onPressed: () =>
+                      context.go('${AppRoutes.forgotPassword}${_emailQuery()}'),
+                  child: Text(l10n.authResetPasswordAction),
+                ),
+              ],
+            ),
+          const SizedBox(height: AppSpacing.lg),
+        ],
+        AutofillGroup(
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: _name,
+                  textCapitalization: TextCapitalization.words,
+                  textInputAction: TextInputAction.next,
+                  autofillHints: const [AutofillHints.name],
+                  validator: Validators.validateDisplayName,
+                  onChanged: (_) => _clearFailure(),
+                  decoration: InputDecoration(
+                    labelText: l10n.authNameLabel,
+                    prefixIcon: const Icon(Icons.person_outline_rounded),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                EmailField(
+                  controller: _email,
+                  validator: Validators.validateEmail,
+                  onChanged: (_) => _clearFailure(),
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                PasswordField(
+                  controller: _password,
+                  isNewPassword: true,
+                  textInputAction: TextInputAction.next,
+                  validator: Validators.validateNewPassword,
+                  helperText: l10n.authPasswordRules,
+                  onChanged: (_) => _clearFailure(),
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                PasswordField(
+                  controller: _confirm,
+                  label: l10n.authConfirmPasswordLabel,
+                  isNewPassword: true,
+                  validator: Validators.confirmPassword(() => _password.text),
+                  onSubmitted: (_) => unawaited(_submit()),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                _TermsField(
+                  accepted: _acceptedTerms,
+                  onChanged: (value) => setState(() => _acceptedTerms = value),
+                  onOpenTerms: () =>
+                      unawaited(openExternal(context, _links.terms)),
+                  onOpenPrivacy: () =>
+                      unawaited(openExternal(context, _links.privacyPolicy)),
+                ),
+              ],
+            ),
+          ),
         ),
-      ),
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+        const SizedBox(height: AppSpacing.lg),
+        AuthPrimaryButton(
+          key: const Key('register-submit'),
+          label: l10n.authCreateAccount,
+          busy: busy,
+          onPressed: () => unawaited(_submit()),
+        ),
+      ],
+      footer: [
+        AuthSwitchPrompt(
+          prompt: l10n.authHaveAccount,
+          action: l10n.authSignIn,
+          onPressed: () => popOrGo(context, AppRoutes.login),
+        ),
+      ],
+    );
+  }
+}
+
+/// The required "I agree" checkbox (the whole row toggles it) with the
+/// Terms and Privacy links as their own buttons under it, so each is a
+/// 48 dp target that screen readers can reach.
+class _TermsField extends StatelessWidget {
+  const _TermsField({
+    required this.accepted,
+    required this.onChanged,
+    required this.onOpenTerms,
+    required this.onOpenPrivacy,
+  });
+
+  final bool accepted;
+  final ValueChanged<bool> onChanged;
+  final VoidCallback onOpenTerms;
+  final VoidCallback onOpenPrivacy;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final palette = context.palette;
+    return FormField<bool>(
+      initialValue: accepted,
+      validator: (_) =>
+          accepted ? null : friendlyMessageForKey('terms_required'),
+      builder: (field) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          MergeSemantics(
+            child: InkWell(
+              key: const Key('register-terms'),
+              borderRadius: AppRadius.mdAll,
+              onTap: () {
+                onChanged(!accepted);
+                field.didChange(!accepted);
+              },
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Create Account',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.5,
-                      color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
+                  Checkbox(
+                    value: accepted,
+                    onChanged: (value) {
+                      onChanged(value ?? false);
+                      field.didChange(value ?? false);
+                    },
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: AppSpacing.md,
+                      ),
+                      child: Text(
+                        l10n.authAgreeTerms,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: palette.textPrimary,
+                        ),
+                      ),
                     ),
-                  ).animate().fadeIn().slideY(begin: 0.2, end: 0),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Start tracking expenses with real-time financial telemetry',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-                    ),
-                  ).animate().fadeIn(delay: 100.ms),
-
-                  const SizedBox(height: 28),
-
-                  if (authState.errorMessage != null) ...[
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppColors.error.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.error.withValues(alpha: 0.4)),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.error_outline_rounded, color: AppColors.error, size: 20),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              authState.errorMessage!,
-                              style: const TextStyle(color: AppColors.error, fontSize: 13),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ).animate().shake(duration: 350.ms),
-                    const SizedBox(height: 18),
-                  ],
-
-                  GlassCard(
-                    borderRadius: 24,
-                    padding: const EdgeInsets.all(22),
-                    child: Column(
-                      children: [
-                        TextFormField(
-                          controller: _nameController,
-                          textCapitalization: TextCapitalization.words,
-                          textInputAction: TextInputAction.next,
-                          validator: (v) => Validators.validateRequired(v, 'Full Name'),
-                          decoration: const InputDecoration(
-                            labelText: 'Full Name',
-                            hintText: 'Alex Mercer',
-                            prefixIcon: Icon(Icons.person_outline_rounded),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          controller: _emailController,
-                          keyboardType: TextInputType.emailAddress,
-                          autocorrect: false,
-                          textInputAction: TextInputAction.next,
-                          validator: Validators.validateEmail,
-                          decoration: const InputDecoration(
-                            labelText: 'Email Address',
-                            hintText: 'alex.mercer@antigravity.io',
-                            prefixIcon: Icon(Icons.alternate_email_rounded),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          controller: _passwordController,
-                          obscureText: _obscurePassword,
-                          textInputAction: TextInputAction.next,
-                          validator: Validators.validatePassword,
-                          decoration: InputDecoration(
-                            labelText: 'Password (min 8 chars, 1 num, 1 letter)',
-                            prefixIcon: const Icon(Icons.lock_outline_rounded),
-                            suffixIcon: IconButton(
-                              icon: Icon(_obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined),
-                              onPressed: () {
-                                setState(() {
-                                  _obscurePassword = !_obscurePassword;
-                                });
-                              },
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          controller: _confirmPasswordController,
-                          obscureText: _obscureConfirm,
-                          textInputAction: TextInputAction.done,
-                          onFieldSubmitted: (_) => _submitRegister(),
-                          validator: (v) {
-                            if (v == null || v.isEmpty) return 'Confirm Password is required';
-                            if (v != _passwordController.text) return 'Passwords do not match';
-                            return null;
-                          },
-                          decoration: InputDecoration(
-                            labelText: 'Confirm Password',
-                            prefixIcon: const Icon(Icons.lock_reset_rounded),
-                            suffixIcon: IconButton(
-                              icon: Icon(_obscureConfirm ? Icons.visibility_outlined : Icons.visibility_off_outlined),
-                              onPressed: () {
-                                setState(() {
-                                  _obscureConfirm = !_obscureConfirm;
-                                });
-                              },
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton(
-                            onPressed: authState.isLoading ? null : _submitRegister,
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ),
-                            child: authState.isLoading
-                                ? const SizedBox(
-                                    height: 20,
-                                    width: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation(Colors.black),
-                                    ),
-                                  )
-                                : const Text(
-                                    'Create Account',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ).animate().fadeIn(delay: 200.ms).slideY(begin: 0.1, end: 0),
-
-                  const SizedBox(height: 24),
-
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'Already have an account?',
-                        style: TextStyle(
-                          color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-                          fontSize: 14,
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: () {
-                          AppHaptics.selection();
-                          context.pop();
-                        },
-                        child: Text(
-                          'Sign In',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.primary,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                    ],
                   ),
                 ],
               ),
             ),
           ),
-        ),
+          Wrap(
+            spacing: AppSpacing.sm,
+            children: [
+              TextButton.icon(
+                onPressed: onOpenTerms,
+                icon: const Icon(Icons.open_in_new_rounded),
+                label: Text(l10n.authTermsLink),
+              ),
+              TextButton.icon(
+                onPressed: onOpenPrivacy,
+                icon: const Icon(Icons.open_in_new_rounded),
+                label: Text(l10n.authPrivacyLink),
+              ),
+            ],
+          ),
+          if (field.hasError)
+            Semantics(
+              liveRegion: true,
+              child: Padding(
+                padding: const EdgeInsetsDirectional.only(start: AppSpacing.md),
+                child: Text(
+                  field.errorText!,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: palette.danger),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

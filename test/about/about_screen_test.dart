@@ -1,0 +1,333 @@
+import 'package:expense_manager/core/accessibility/focus_ring_overlay.dart';
+import 'package:expense_manager/core/config/legal_links.dart';
+import 'package:expense_manager/core/theme/app_palette.dart';
+import 'package:expense_manager/core/theme/app_theme.dart';
+import 'package:expense_manager/core/widgets/widgets.dart';
+import 'package:expense_manager/features/about/about_screen.dart';
+import 'package:expense_manager/l10n/l10n.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+
+const _links = LegalLinks('exevra.app');
+
+Widget _app(
+  Widget home, {
+  ThemeMode mode = ThemeMode.light,
+  double textScale = 1,
+}) => MaterialApp(
+  theme: AppTheme.light(),
+  darkTheme: AppTheme.dark(),
+  themeMode: mode,
+  localizationsDelegates: AppLocalizations.localizationsDelegates,
+  supportedLocales: AppLocalizations.supportedLocales,
+  builder: (context, child) => MediaQuery(
+    data: MediaQuery.of(
+      context,
+    ).copyWith(textScaler: TextScaler.linear(textScale)),
+    child: child!,
+  ),
+  home: home,
+);
+
+void main() {
+  setUp(() {
+    PackageInfo.setMockInitialValues(
+      appName: 'Exevra',
+      packageName: 'com.exevra.app',
+      version: '1.0.0',
+      buildNumber: '1',
+      buildSignature: '',
+    );
+  });
+
+  for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+    final palette = mode == ThemeMode.dark ? AppPalette.dark : AppPalette.light;
+
+    testWidgets('shows the brand, version, credit and rows ($mode)', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _app(
+          AboutScreen(links: _links, onDeleteAccount: () {}),
+          mode: mode,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('About'), findsOneWidget);
+      expect(find.byType(BrandMark), findsOneWidget);
+      expect(find.text('Exevra'), findsOneWidget);
+      expect(find.text('Expense & Split Tracker'), findsOneWidget);
+      expect(find.text('Version 1.0.0 (1)'), findsOneWidget);
+      expect(
+        find.text('Designed & developed by Bharat Sharma'),
+        findsOneWidget,
+      );
+      for (final row in [
+        'Privacy policy',
+        'Terms of use',
+        'Help & support',
+        'Open-source licenses',
+        'Account deletion info',
+      ]) {
+        expect(find.text(row), findsOneWidget, reason: row);
+      }
+      expect(find.text('support@exevra.app'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('Delete account'), 100);
+      expect(find.text('Delete account'), findsOneWidget);
+
+      final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
+      expect(
+        Theme.of(tester.element(find.byType(Scaffold))).scaffoldBackgroundColor,
+        palette.background,
+      );
+      expect(scaffold.backgroundColor, isNull);
+
+      final button = tester.widget<FilledButton>(
+        find.ancestor(
+          of: find.text('Delete account'),
+          matching: find.byType(FilledButton),
+        ),
+      );
+      expect(button.style!.backgroundColor!.resolve({}), palette.danger);
+    });
+  }
+
+  testWidgets('legal rows open their pages', (tester) async {
+    final opened = <Uri>[];
+    await tester.pumpWidget(
+      _app(
+        AboutScreen(
+          links: _links,
+          launcher: (uri) async {
+            opened.add(uri);
+            return true;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Privacy policy'));
+    await tester.tap(find.text('Terms of use'));
+    await tester.scrollUntilVisible(find.text('Account deletion info'), 100);
+    await tester.tap(find.text('Account deletion info'));
+    await tester.pump();
+    expect(opened, [
+      Uri.parse('https://exevra.app/privacy'),
+      Uri.parse('https://exevra.app/terms'),
+      Uri.parse('https://exevra.app/delete-account'),
+    ]);
+    expect(find.byType(SnackBar), findsNothing);
+  });
+
+  testWidgets('Help & support emails support with the app version', (
+    tester,
+  ) async {
+    Uri? opened;
+    await tester.pumpWidget(
+      _app(
+        AboutScreen(
+          links: _links,
+          launcher: (uri) async {
+            opened = uri;
+            return true;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Help & support'));
+    await tester.pump();
+    expect(opened!.scheme, 'mailto');
+    expect(opened!.path, 'support@exevra.app');
+    expect(opened!.queryParameters['subject'], 'Exevra support');
+    expect(opened!.queryParameters['body'], 'App version: 1.0.0 (1)');
+  });
+
+  testWidgets('a link that cannot open shows a friendly error', (tester) async {
+    await tester.pumpWidget(
+      _app(AboutScreen(links: _links, launcher: (_) async => false)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Help & support'));
+    await tester.pump();
+    expect(
+      find.text(
+        "Couldn't open an email app. Write to us at support@exevra.app.",
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Privacy policy'));
+    await tester.pump();
+    expect(
+      find.text("Couldn't open the link. Please try again later."),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('Delete account is hidden without a callback', (tester) async {
+    await tester.pumpWidget(_app(const AboutScreen(links: _links)));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete account'), findsNothing);
+    // The web page about deleting an account is always available.
+    expect(find.text('Account deletion info'), findsOneWidget);
+  });
+
+  testWidgets('Delete account calls back', (tester) async {
+    var calls = 0;
+    await tester.pumpWidget(
+      _app(AboutScreen(links: _links, onDeleteAccount: () => calls++)),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Delete account'), 100);
+    await tester.tap(find.text('Delete account'));
+    expect(calls, 1);
+  });
+
+  testWidgets('licences open the licence page with the legalese', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_app(const AboutScreen(links: _links)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open-source licenses'));
+    // The licence page loads asynchronously and shows a spinner, so it never
+    // settles; pump a few frames instead.
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.byType(LicensePage), findsOneWidget);
+    final page = tester.widget<LicensePage>(find.byType(LicensePage));
+    expect(page.applicationName, 'Exevra');
+    expect(page.applicationVersion, 'Version 1.0.0 (1)');
+    expect(page.applicationLegalese, '© 2026 Bharat Sharma');
+  });
+
+  testWidgets('licence rows get a visible keyboard focus ring', (tester) async {
+    LicenseRegistry.addLicense(
+      () => Stream.value(
+        const LicenseEntryWithLineBreaks(['zz_test_package'], 'Licence text'),
+      ),
+    );
+    FocusManager.instance.highlightStrategy =
+        FocusHighlightStrategy.alwaysTraditional;
+    addTearDown(
+      () => FocusManager.instance.highlightStrategy =
+          FocusHighlightStrategy.automatic,
+    );
+    await tester.pumpWidget(_app(const AboutScreen(links: _links)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open-source licenses'));
+    // The licences load outside the fake clock.
+    for (
+      var i = 0;
+      i < 10 && find.text('zz_test_package').evaluate().isEmpty;
+      i++
+    ) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(
+      find.ancestor(
+        of: find.byType(LicensePage),
+        matching: find.byType(FocusRingOverlay),
+      ),
+      findsOneWidget,
+    );
+    final ring = find.byKey(const ValueKey('focus-ring'));
+    expect(ring, findsNothing);
+
+    final row = find.ancestor(
+      of: find.text('zz_test_package'),
+      matching: find.byType(ListTile),
+    );
+    Focus.of(tester.element(find.text('zz_test_package'))).requestFocus();
+    await tester.pump();
+    await tester.pump();
+    expect(ring, findsOneWidget);
+    expect(tester.getRect(ring), tester.getRect(row));
+    final border =
+        (tester.widget<DecoratedBox>(ring).decoration as BoxDecoration).border!
+            as Border;
+    expect(border.top.color, AppPalette.light.focusRing);
+  });
+
+  testWidgets('rows are labelled and at least 48dp tall', (tester) async {
+    final handle = tester.ensureSemantics();
+    await tester.pumpWidget(
+      _app(AboutScreen(links: _links, onDeleteAccount: () {})),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.bySemanticsLabel(
+        RegExp('Privacy policy.*Opens in your browser', dotAll: true),
+      ),
+      findsOneWidget,
+    );
+    await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+    await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+    handle.dispose();
+  });
+
+  for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+    testWidgets('fits 320dp at 200% text ($mode)', (tester) async {
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        _app(
+          AboutScreen(links: _links, onDeleteAccount: () {}),
+          mode: mode,
+          textScale: 2,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.text('Delete account'), 200);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+
+    for (final textScale in [1.3, 1.5, 2.0]) {
+      testWidgets('no text is cut off at 320dp and ${textScale}x ($mode)', (
+        tester,
+      ) async {
+        // Tall enough that the whole list is built at once. The test font
+        // is about twice as wide as Roboto, so this is a stricter check than
+        // a real device.
+        tester.view.physicalSize = const Size(320, 3000);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await tester.pumpWidget(
+          _app(
+            AboutScreen(links: _links, onDeleteAccount: () {}),
+            mode: mode,
+            textScale: textScale,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Delete account'), findsOneWidget);
+        final paragraphs = tester
+            .renderObjectList<RenderParagraph>(
+              find.descendant(
+                of: find.byType(AboutScreen),
+                matching: find.byType(RichText),
+              ),
+            )
+            .toList();
+        expect(paragraphs, isNotEmpty);
+        for (final paragraph in paragraphs) {
+          expect(
+            paragraph.didExceedMaxLines,
+            isFalse,
+            reason: paragraph.text.toPlainText(),
+          );
+        }
+      });
+    }
+  }
+}

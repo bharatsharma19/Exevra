@@ -1,0 +1,268 @@
+import 'package:expense_manager/core/router/app_routes.dart';
+import 'package:expense_manager/providers/auth_provider.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  String? go(AuthPhase phase, String location, {String? invite}) =>
+      authRedirect(
+        phase: phase,
+        location: Uri.parse(location),
+        pendingInviteToken: invite,
+      );
+
+  const token = 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG';
+
+  group('introduction', () {
+    String? app(
+      String location, {
+      required bool? completed,
+      AuthPhase phase = AuthPhase.signedOut,
+    }) => appRedirect(
+      phase: phase,
+      location: Uri.parse(location),
+      onboardingCompleted: completed,
+    );
+
+    test('a fresh device goes to the introduction first', () {
+      expect(app('/splash', completed: false), '/onboarding');
+      expect(app('/login', completed: false), '/onboarding');
+      expect(app('/', completed: false), '/onboarding');
+      expect(
+        app('/dashboard', completed: false),
+        '/onboarding?next=%2Fdashboard',
+      );
+      expect(
+        app('/dashboard', completed: false, phase: AuthPhase.signedIn),
+        '/onboarding?next=%2Fdashboard',
+      );
+    });
+
+    test('the introduction keeps where the user was going', () {
+      expect(
+        app('/register', completed: false),
+        '/onboarding?next=%2Fregister',
+      );
+      expect(
+        app('/splash?from=%2Fexpenses', completed: false),
+        '/onboarding?next=%2Fexpenses',
+      );
+      expect(app('//evil.example/x', completed: false), '/onboarding');
+    });
+
+    test('only in-app places are accepted after the introduction', () {
+      expect(safeAfterIntro('/register'), '/register');
+      expect(safeAfterIntro('/expenses?q=1'), '/expenses?q=1');
+      expect(safeAfterIntro('/login'), '/login');
+      expect(safeAfterIntro('/onboarding'), isNull);
+      expect(safeAfterIntro('/splash'), isNull);
+      expect(safeAfterIntro('https://evil.example/register'), isNull);
+      expect(safeAfterIntro('//evil.example/register'), isNull);
+      expect(safeAfterIntro(null), isNull);
+    });
+
+    test('the introduction itself stays, whatever the auth phase', () {
+      expect(app('/onboarding', completed: false), isNull);
+      expect(
+        app('/onboarding', completed: false, phase: AuthPhase.initializing),
+        isNull,
+      );
+    });
+
+    test('invitation links are never sent to the introduction', () {
+      expect(app('/invite/$token', completed: false), isNull);
+      expect(app('/invite?token=$token', completed: false), isNull);
+    });
+
+    test('while the flag loads nothing redirects to it', () {
+      expect(app('/login', completed: null), isNull);
+      expect(
+        app('/splash', completed: null, phase: AuthPhase.initializing),
+        isNull,
+      );
+    });
+
+    test('once done, the auth rules apply (also to /onboarding)', () {
+      expect(app('/login', completed: true), isNull);
+      expect(app('/onboarding', completed: true), '/login');
+      expect(
+        app('/onboarding', completed: true, phase: AuthPhase.signedIn),
+        '/dashboard',
+      );
+    });
+
+    test('About is open to signed-out visitors', () {
+      expect(app('/about', completed: true), isNull);
+      expect(go(AuthPhase.signedIn, '/about'), isNull);
+      expect(go(AuthPhase.signedIn, '/profile/about'), isNull);
+      expect(go(AuthPhase.signedOut, '/profile/about'), startsWith('/login'));
+    });
+  });
+
+  group('links pushed by the platform', () {
+    String? map(String location) => platformLinkRedirect(Uri.parse(location));
+
+    test('a bare token path (Android) opens the invitation', () {
+      expect(map('/$token'), '/invite/$token');
+    });
+
+    test('a whole custom-scheme URL (iOS) opens the invitation', () {
+      expect(map('exevra://invite/$token'), '/invite/$token');
+      expect(map('exevra://invite?token=$token'), '/invite/$token');
+      expect(map('exevra://invite/bad'), '/');
+      expect(map('exevra://other/$token'), '/');
+    });
+
+    test('the auth callback goes home for the auth phase to route', () {
+      expect(map('com.exevra.app://auth-callback?code=abc'), '/');
+    });
+
+    test('ordinary routes are left alone', () {
+      for (final path in [
+        '/',
+        '/login',
+        '/dashboard',
+        '/invite',
+        '/invite/$token',
+        '/no-such-page',
+      ]) {
+        expect(map(path), isNull, reason: path);
+      }
+    });
+  });
+
+  group('initializing', () {
+    test('only the splash screen, keeping the target', () {
+      expect(go(AuthPhase.initializing, '/splash'), isNull);
+      expect(go(AuthPhase.initializing, '/login'), '/splash');
+      expect(
+        go(AuthPhase.initializing, '/expenses'),
+        '/splash?from=%2Fexpenses',
+      );
+      expect(go(AuthPhase.initializing, '/'), '/splash');
+    });
+  });
+
+  group('signedOut', () {
+    test('entry screens and invitations stay', () {
+      for (final path in [
+        '/login',
+        '/register',
+        '/forgot-password',
+        '/invite/$token',
+      ]) {
+        expect(go(AuthPhase.signedOut, path), isNull, reason: path);
+      }
+    });
+
+    test('everything else goes to login with returnTo', () {
+      expect(go(AuthPhase.signedOut, '/'), '/login');
+      expect(go(AuthPhase.signedOut, '/splash'), '/login');
+      expect(go(AuthPhase.signedOut, '/verify-email'), '/login');
+      expect(go(AuthPhase.signedOut, '/reset-password'), '/login');
+      expect(
+        go(AuthPhase.signedOut, '/dashboard'),
+        '/login?returnTo=%2Fdashboard',
+      );
+      expect(
+        go(AuthPhase.signedOut, '/splash?from=%2Finsights'),
+        '/login?returnTo=%2Finsights',
+      );
+    });
+
+    test('an invitation opened at cold start is shown', () {
+      expect(
+        go(
+          AuthPhase.signedOut,
+          '/splash?from=${Uri.encodeComponent('/invite/$token')}',
+        ),
+        '/invite/$token',
+      );
+    });
+  });
+
+  group('needsEmailVerification', () {
+    test('only the verification screen', () {
+      expect(go(AuthPhase.needsEmailVerification, '/verify-email'), isNull);
+      for (final path in ['/', '/login', '/dashboard', '/invite/$token']) {
+        expect(
+          go(AuthPhase.needsEmailVerification, path),
+          '/verify-email',
+          reason: path,
+        );
+      }
+    });
+  });
+
+  group('recoveringPassword', () {
+    test('only the new-password screen', () {
+      expect(go(AuthPhase.recoveringPassword, '/reset-password'), isNull);
+      for (final path in [
+        '/',
+        '/dashboard',
+        '/profile',
+        '/login',
+        '/verify-email',
+        '/invite/$token',
+      ]) {
+        expect(
+          go(AuthPhase.recoveringPassword, path),
+          '/reset-password',
+          reason: path,
+        );
+      }
+    });
+  });
+
+  group('signedIn', () {
+    test('app screens and invitations stay', () {
+      for (final path in [
+        '/dashboard',
+        '/expenses',
+        '/profile',
+        '/invite/$token',
+      ]) {
+        expect(go(AuthPhase.signedIn, path), isNull, reason: path);
+      }
+    });
+
+    test('auth screens go to the dashboard', () {
+      for (final path in [
+        '/',
+        '/splash',
+        '/login',
+        '/register',
+        '/forgot-password',
+        '/verify-email',
+        '/reset-password',
+      ]) {
+        expect(go(AuthPhase.signedIn, path), '/dashboard', reason: path);
+      }
+    });
+
+    test('returnTo is honoured only for safe in-app paths', () {
+      expect(
+        go(AuthPhase.signedIn, '/login?returnTo=%2Finsights'),
+        '/insights',
+      );
+      expect(go(AuthPhase.signedIn, '/splash?from=%2Fchat'), '/chat');
+      for (final bad in [
+        'https://evil.example',
+        '//evil.example',
+        r'/\evil',
+        '/login',
+        'dashboard',
+      ]) {
+        expect(
+          go(AuthPhase.signedIn, '/login?returnTo=${Uri.encodeComponent(bad)}'),
+          '/dashboard',
+          reason: bad,
+        );
+      }
+    });
+
+    test('a pending invitation wins after sign-in', () {
+      expect(go(AuthPhase.signedIn, '/login', invite: token), '/invite/$token');
+      expect(go(AuthPhase.signedIn, '/dashboard', invite: token), isNull);
+    });
+  });
+}

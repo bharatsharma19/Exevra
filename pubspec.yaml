@@ -1,5 +1,5 @@
 name: expense_manager
-description: "Exevra — Intelligent Financial Telemetry, Collaborative Budgeting & Multi-Model AI Insights."
+description: "Exevra: track personal expenses, split group costs and get AI spending insights."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -14,12 +14,11 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # In iOS, build-name is used as CFBundleShortVersionString while build-number is used as CFBundleVersion.
 # Read more about iOS versioning at
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
-# In Windows, build-name is used as the major, minor, and patch parts
-# of the product and file versions while build-number is used as the build suffix.
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.2.0 <4.0.0'
+  sdk: ^3.12.0
+  flutter: ">=3.44.0"
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -30,57 +29,104 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
 
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
-  cupertino_icons: ^1.0.8
-  flutter_riverpod: ^2.6.1
-  go_router: ^17.5.0
-  supabase_flutter: ^2.18.0
+  flutter_riverpod: ^3.5.0
+  go_router: ^18.1.4
+  supabase_flutter: ^2.18.3
   flutter_secure_storage: ^11.2.0
-  shared_preferences: ^2.5.5
+  shared_preferences: ^2.5.6
   flutter_animate: ^4.5.2
-  fl_chart: ^1.2.0
-  google_sign_in: ^6.2.2
+  fl_chart: ^1.3.1
+  google_sign_in: ^7.2.0
   sign_in_with_apple: ^8.2.0
-  intl: ^0.20.3
+  intl: ^0.20.2
   http: ^1.6.0
   uuid: ^4.6.0
   flutter_markdown_plus: ^1.0.12
-  local_auth: ^2.3.0
-  flutter_dotenv: ^5.2.1
-  mailer: ^7.2.0
+  markdown: ^7.3.1
+  local_auth: ^3.0.2
+  sentry_flutter: ^10.4.0
+  package_info_plus: ^10.2.2
+  url_launcher: ^6.3.3
+  app_links: ^7.2.2
+  crypto: ^3.0.8
+  connectivity_plus: ^7.3.2
+  flutter_native_splash: ^2.4.8
+  flutter_timezone: 5.1.1
+  share_plus: ^13.3.1
+  clock: ^1.1.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  integration_test:
+    sdk: flutter
 
   flutter_lints: ^6.0.0
-  flutter_launcher_icons: ^0.14.3
+  flutter_launcher_icons: ^0.14.4
+  mocktail: ^1.0.5
+  google_sign_in_platform_interface: ^3.1.0
+  alchemist: ^0.14.1
+  sentry_dart_plugin: ^3.4.0
 
+# Launcher icons: `dart run flutter_launcher_icons`. All three images are
+# generated from the source artwork by assets/branding/generate_branding.py.
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
   remove_alpha_ios: true
-  image_path: "assets/icons/app_icon.png"
-  min_sdk_android: 21
+  image_path: "assets/branding/icon_full_bleed.png"
+  min_sdk_android: 24
   adaptive_icon_background: "#070B14"
-  adaptive_icon_foreground: "assets/icons/app_icon_foreground.png"
+  adaptive_icon_foreground: "assets/branding/icon_foreground.png"
+  adaptive_icon_monochrome: "assets/branding/icon_monochrome.png"
+
+# Native launch screen: `dart run flutter_native_splash:create`.
+# Colours match AppColors.lightBackground and AppColors.darkBackground.
+flutter_native_splash:
+  color: "#F8FAFC"
+  color_dark: "#070B14"
+  image: assets/branding/splash_logo.png
+  image_dark: assets/branding/splash_logo.png
+  android_12:
+    color: "#F8FAFC"
+    color_dark: "#070B14"
+    image: assets/branding/splash_logo_android12.png
+    image_dark: assets/branding/splash_logo_android12.png
+  android: true
+  ios: true
+  web: false
+  fullscreen: false
+
+# Crash report symbols: after an obfuscated release build, run
+# `dart run sentry_dart_plugin` (see README, "Build and release"). It uploads
+# the split debug info and the obfuscation map. SENTRY_ORG and
+# SENTRY_AUTH_TOKEN come from the environment (never commit the token); pass
+# the release as --sentry-define=release=com.exevra.app@<version>+<build>.
+sentry:
+  project: exevra-android
+  upload_debug_symbols: true
+  symbols_path: build/symbols
+  dart_symbol_map_path: build/app/obfuscation.map.json
+  upload_sources: false
+  upload_source_maps: false
+  commits: "false"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
 # The following section is specific to Flutter packages.
 flutter:
+  # Generates AppLocalizations from lib/l10n (see l10n.yaml).
+  generate: true
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
 
-  assets:
-    - .env
-    - assets/icons/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

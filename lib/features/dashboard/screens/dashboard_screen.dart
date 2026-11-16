@@ -1,722 +1,288 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
-import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_constants.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/currency_formatter.dart';
-import '../../../core/utils/date_helpers.dart';
+
+import '../../../core/accessibility/reduce_motion.dart';
+import '../../../core/router/app_routes.dart';
+import '../../../core/router/navigation.dart';
+import '../../../core/theme/app_palette.dart';
+import '../../../core/theme/app_tokens.dart';
+import '../../../core/theme/system_ui.dart';
 import '../../../core/utils/haptics.dart';
+import '../../../core/widgets/widgets.dart';
+import '../../../l10n/l10n.dart';
+import '../../../models/balance.dart';
+import '../../../models/expense.dart';
+import '../../../models/insights.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/expense_provider.dart';
+import '../../../providers/group_detail_providers.dart';
+import '../../../providers/groups_provider.dart';
 import '../../../providers/insights_provider.dart';
+import '../../../providers/profile_provider.dart';
 import '../../expenses/screens/add_edit_expense_sheet.dart';
+import '../../insights/insights_labels.dart';
+import '../../onboarding/first_expense_nudge.dart';
+import '../../onboarding/onboarding_store.dart';
+import '../widgets/dashboard_cards.dart';
+import '../widgets/dashboard_header.dart';
+import '../widgets/recent_expenses_section.dart';
+import '../widgets/scope_switcher_sheet.dart';
+import '../widgets/spending_summary_card.dart';
 
+/// The one period every figure on the home screen covers. The summary,
+/// its label and the highlights all read it, so they always agree.
+const InsightTimeframe dashboardTimeframe = InsightTimeframe.month;
+
+/// How many expenses the recent list shows.
+const int dashboardRecentCount = 5;
+
+/// Home: the spending summary of the active scope (personal or the active
+/// group), highlights and the newest expenses of the same scope.
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
 
-  String _getGreeting() {
-    final hour = DateTime.now().hour;
-    if (hour < 12) return 'Good Morning';
-    if (hour < 17) return 'Good Afternoon';
-    return 'Good Evening';
-  }
-
-  void _showGroupSwitcher(BuildContext context, WidgetRef ref) {
-    AppHaptics.selection();
-    final expenseState = ref.read(expenseProvider);
-    final userGroups = expenseState.userGroups;
-    final currentGroupId = expenseState.currentGroup?.id;
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        final isDark = Theme.of(ctx).brightness == Brightness.dark;
-        return Container(
-          decoration: BoxDecoration(
-            color: isDark ? AppColors.darkCard : AppColors.lightCard,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: isDark ? Colors.white24 : Colors.black12,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Switch Active Group',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 12),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: CircleAvatar(
-                  backgroundColor: currentGroupId == null
-                      ? AppColors.primaryCyan
-                      : Colors.grey.withValues(alpha: 0.2),
-                  child: Icon(
-                    Icons.person_rounded,
-                    color: currentGroupId == null ? Colors.black : Colors.grey,
-                  ),
-                ),
-                title: const Text(
-                  'Personal Outflow Only',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
-                trailing: currentGroupId == null
-                    ? const Icon(Icons.check_rounded, color: AppColors.primaryCyan)
-                    : null,
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  ref.read(expenseProvider.notifier).switchGroup(null);
-                },
-              ),
-              if (userGroups.isNotEmpty) const Divider(),
-              ...userGroups.map((g) {
-                final isCurrent = g.id == currentGroupId;
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: CircleAvatar(
-                    backgroundColor: isCurrent
-                        ? AppColors.primaryViolet
-                        : Colors.grey.withValues(alpha: 0.2),
-                    child: Icon(
-                      Icons.groups_rounded,
-                      color: isCurrent ? Colors.white : Colors.grey,
-                    ),
-                  ),
-                  title: Text(g.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-                  trailing: isCurrent
-                      ? const Icon(Icons.check_rounded, color: AppColors.primaryViolet)
-                      : null,
-                  onTap: () {
-                    Navigator.of(ctx).pop();
-                    ref.read(expenseProvider.notifier).switchGroup(g.id);
-                  },
-                );
-              }),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.of(ctx).pop();
-                    context.push('/profile');
-                  },
-                  icon: const Icon(Icons.settings_outlined, size: 16),
-                  label: const Text('Manage Groups in Profile'),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final authState = ref.watch(authNotifierProvider);
-    final expenseState = ref.watch(expenseProvider);
-    final insightState = ref.watch(insightProvider);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final l10n = context.l10n;
+    final palette = context.palette;
 
-    final profile = authState.profile;
-    final resolvedDisplayName = (profile?.displayName != null && profile!.displayName.trim().isNotEmpty)
+    final authUser = ref.watch(authControllerProvider).user;
+    final profile = ref.watch(userProfileProvider);
+    final displayName =
+        (profile != null && profile.displayName.trim().isNotEmpty)
         ? profile.displayName
-        : (authState.user?.userMetadata?['full_name'] as String? ?? authState.user?.email?.split('@').first ?? 'User');
-    final currency = profile?.currency ?? AppConstants.defaultCurrency;
-    final group = expenseState.currentGroup;
+        : (authUser?.userMetadata?['full_name'] as String? ??
+              authUser?.email?.split('@').first ??
+              '');
+    final group = ref.watch(activeGroupProvider);
+    final inGroup = group != null && group.canRead;
+    final currentUserId = ref.watch(currentUserIdProvider);
 
-    final currentUserId = authState.user?.id;
-    final totalSpent = expenseState.userTotalOutflow(currentUserId);
-    final personalSpent = expenseState.personalSpent;
-    final groupSpent = expenseState.groupSpent;
-    final recentExpenses = expenseState.expenses.take(5).toList();
+    // Totals come from the server for the whole period of the active
+    // scope, never from the partially loaded list.
+    final insightsKey = ref.watch(
+      activeInsightsKeyProvider(dashboardTimeframe),
+    );
+    final insightsAsync = insightsKey == null
+        ? const AsyncLoading<ExpenseInsights>()
+        : ref.watch(insightsProvider(insightsKey));
 
-    return Scaffold(
-      body: Stack(
-        children: [
-          // Background ambient gradient glow
-          Positioned(
-            top: -100,
-            left: -60,
-            child: Container(
-              width: 260,
-              height: 260,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.primaryCyan.withValues(alpha: 0.12),
-              ),
-            ),
-          ),
-          Positioned(
-            top: 200,
-            right: -80,
-            child: Container(
-              width: 280,
-              height: 280,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.primaryViolet.withValues(alpha: 0.08),
-              ),
-            ),
-          ),
+    // The list uses the same scope as the summary: the active group's
+    // expenses, or the user's own personal expenses.
+    final listKey = ref.watch(dashboardExpenseKeyProvider);
+    final listAsync = listKey == null
+        ? const AsyncLoading<ExpenseListState>()
+        : ref.watch(expenseListProvider(listKey));
+    final recent =
+        listAsync.value?.items.take(dashboardRecentCount).toList() ??
+        const <Expense>[];
+    // Only once the list loaded (not while it loads or after a failure).
+    final hasNoExpenses =
+        listAsync.hasValue &&
+        !listAsync.isLoading &&
+        !listAsync.hasError &&
+        listAsync.requireValue.items.isEmpty;
+    // The first-expense tip is only for the personal list.
+    final nudgeDismissed =
+        ref.watch(firstExpenseNudgeDismissedProvider).value ?? true;
+    final showNudge = hasNoExpenses && !inGroup;
+    final nudgeOffersAdd = showNudge && !nudgeDismissed;
 
-          SafeArea(
-            child: RefreshIndicator(
-              onRefresh: () async {
-                await ref.read(expenseProvider.notifier).loadAll();
-                await ref.read(insightProvider.notifier).loadInsights();
-              },
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Header Bar
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _getGreeting(),
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              resolvedDisplayName,
-                              style: TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.5,
-                                color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
-                              ),
-                            ),
-                          ],
-                        ),
-                        // Group badge or avatar
-                        GestureDetector(
-                          onTap: () => _showGroupSwitcher(context, ref),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: isDark ? AppColors.darkCardElevated : AppColors.lightCardElevated,
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: group != null ? AppColors.primaryViolet : AppColors.primaryCyan,
-                                width: 1.2,
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  group != null ? Icons.groups_rounded : Icons.person_rounded,
-                                  size: 16,
-                                  color: group != null ? AppColors.primaryViolet : AppColors.primaryCyan,
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  group != null ? group.name : 'Personal',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                    color: group != null ? AppColors.primaryViolet : AppColors.primaryCyan,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ).animate().fadeIn(duration: 300.ms),
+    final balance = !inGroup
+        ? null
+        : ref
+              .watch(groupBalancesProvider(group.id))
+              .value
+              ?.where((b) => b.userId == currentUserId)
+              .firstOrNull
+              ?.net;
+    final List<SettleSuggestion> suggestions = !inGroup
+        ? const []
+        : ref.watch(settleSuggestionsProvider(group.id)).value ?? const [];
+    final members = ref.watch(activeGroupMembersProvider).value ?? const [];
+    String nameOf(String userId) {
+      for (final m in members) {
+        if (m.userId == userId) return m.label;
+      }
+      return l10n.dashboardMemberFallback;
+    }
 
-                    const SizedBox(height: 20),
+    bool canEdit(Expense expense) => expense.canEdit(
+      currentUserId,
+      canAddToGroup:
+          group != null && expense.groupId == group.id && group.canAddExpenses,
+    );
+    final canAdd = !inGroup || group.canAddExpenses;
 
-                    // Main Total Expense Neon Card
-                    GlassCard(
-                      borderRadius: 24,
-                      gradient: AppColors.darkCardGradient,
-                      padding: const EdgeInsets.all(22),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text(
-                                'TOTAL OUTFLOW',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 1.8,
-                                  color: AppColors.primaryCyan,
-                                ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: AppColors.primaryCyan.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text(
-                                  currency,
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w800,
-                                    color: AppColors.primaryCyan,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            CurrencyFormatter.format(totalSpent, currencyCode: currency),
-                            style: const TextStyle(
-                              fontSize: 38,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -1,
-                              color: Colors.white,
-                            ),
-                          ).animate().fadeIn(delay: 150.ms).slideX(begin: -0.1, end: 0),
-                          const SizedBox(height: 16),
+    void addExpense() {
+      AppHaptics.selection();
+      unawaited(AddEditExpenseSheet.show(context, listKey: listKey));
+    }
 
-                          // Personal vs Group Split Bar
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Container(width: 8, height: 8, decoration: const BoxDecoration(shape: BoxShape.circle, color: AppColors.primaryCyan)),
-                                        const SizedBox(width: 6),
-                                        const Text('Personal', style: TextStyle(fontSize: 12, color: Colors.white70)),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      CurrencyFormatter.format(personalSpent, currencyCode: currency),
-                                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Container(width: 1, height: 32, color: Colors.white12),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Container(width: 8, height: 8, decoration: const BoxDecoration(shape: BoxShape.circle, color: AppColors.primaryViolet)),
-                                        const SizedBox(width: 6),
-                                        const Text('Group Share', style: TextStyle(fontSize: 12, color: Colors.white70)),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      CurrencyFormatter.format(groupSpent, currencyCode: currency),
-                                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ).animate().fadeIn(delay: 200.ms).slideY(begin: 0.1, end: 0),
+    Future<void> refreshAll() async {
+      if (insightsKey != null) ref.invalidate(insightsProvider(insightsKey));
+      if (group != null) {
+        ref.invalidate(settleSuggestionsProvider(group.id));
+        ref.invalidate(groupBalancesProvider(group.id));
+      }
+      if (listKey != null) {
+        await ref.read(expenseListProvider(listKey).notifier).reload();
+      }
+    }
 
-                    const SizedBox(height: 18),
+    final period = timeframePeriod(l10n, dashboardTimeframe);
+    final reduceMotion = context.reduceMotion;
+    Widget entrance(Widget child, int order) => reduceMotion
+        ? child
+        : child
+              .animate()
+              .fadeIn(delay: (60 * order).ms, duration: AppDurations.medium)
+              .slideY(begin: 0.04, end: 0);
 
-                    // Quick Actions Row
-                    Row(
-                      children: [
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: () {
-                              AppHaptics.selection();
-                              AddEditExpenseSheet.show(context);
-                            },
-                            child: GlassCard(
-                              borderRadius: 18,
-                              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: const [
-                                  Icon(Icons.add_circle_outline_rounded, color: AppColors.primaryCyan, size: 20),
-                                  SizedBox(width: 8),
-                                  Text('Quick Add', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: () {
-                              AppHaptics.selection();
-                              context.push('/chat');
-                            },
-                            child: GlassCard(
-                              borderRadius: 18,
-                              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: const [
-                                  Icon(Icons.auto_awesome_rounded, color: AppColors.primaryViolet, size: 20),
-                                  SizedBox(width: 8),
-                                  Text('AI Advisor', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ).animate().fadeIn(delay: 250.ms),
-
-                    if (group != null && expenseState.settlements.isNotEmpty) ...[
-                      const SizedBox(height: 18),
-                      GlassCard(
-                        borderRadius: 20,
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                const Row(
-                                  children: [
-                                    Icon(
-                                      Icons.account_balance_wallet_rounded,
-                                      size: 18,
-                                      color: AppColors.primaryEmerald,
-                                    ),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'Group Balances & Debts',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                GestureDetector(
-                                  onTap: () => context.push('/profile'),
-                                  child: const Text(
-                                    'Settle Up →',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppColors.primaryCyan,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            ...expenseState.settlements.take(2).map((d) {
-                              final iOwe = d.fromUserId == currentUserId;
-                              final owedToMe = d.toUserId == currentUserId;
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 4),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      iOwe
-                                          ? Icons.arrow_circle_up_rounded
-                                          : (owedToMe
-                                              ? Icons.arrow_circle_down_rounded
-                                              : Icons.swap_horiz_rounded),
-                                      size: 16,
-                                      color: iOwe
-                                          ? AppColors.primaryRose
-                                          : (owedToMe
-                                              ? AppColors.primaryEmerald
-                                              : AppColors.primaryCyan),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Expanded(
-                                      child: Text(
-                                        iOwe
-                                            ? 'You owe ${d.toUserName}'
-                                            : (owedToMe
-                                                ? '${d.fromUserName} owes you'
-                                                : '${d.fromUserName} owes ${d.toUserName}'),
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    Text(
-                                      CurrencyFormatter.format(
-                                        d.amount,
-                                        currencyCode: currency,
-                                      ),
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w700,
-                                        color: iOwe
-                                            ? AppColors.primaryRose
-                                            : (owedToMe
-                                                ? AppColors.primaryEmerald
-                                                : null),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }),
-                          ],
-                        ),
-                      ).animate().fadeIn(delay: 280.ms),
-                    ],
-
-                    const SizedBox(height: 24),
-
-                    // Highlights Carousel
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Telemetry Highlights',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.3,
-                            color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
-                          ),
-                        ),
-                        GestureDetector(
-                          onTap: () => context.push('/insights'),
-                          child: Text(
-                            'Full Analytics →',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-
-                    Row(
-                      children: [
-                        Expanded(
-                          child: GlassCard(
-                            borderRadius: 18,
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Icon(Icons.speed_rounded, color: AppColors.primaryEmerald, size: 22),
-                                const SizedBox(height: 10),
-                                Text(
-                                  'Daily Average',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  CurrencyFormatter.format(insightState.insight.averageDaily, currencyCode: currency),
-                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: GlassCard(
-                            borderRadius: 18,
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Icon(Icons.pie_chart_outline_rounded, color: AppColors.primaryAmber, size: 22),
-                                const SizedBox(height: 10),
-                                Text(
-                                  'Top Category',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  insightState.insight.categoryBreakdown.isNotEmpty
-                                      ? insightState.insight.categoryBreakdown.first.category
-                                      : 'None',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ).animate().fadeIn(delay: 300.ms),
-
-                    const SizedBox(height: 26),
-
-                    // Recent Transactions Header
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Recent Outflows',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.3,
-                            color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
-                          ),
-                        ),
-                        GestureDetector(
-                          onTap: () => context.push('/expenses'),
-                          child: Text(
-                            'View All',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-
-                    if (expenseState.isLoading && expenseState.expenses.isEmpty) ...[
-                      GlassCard(
-                        borderRadius: 20,
-                        padding: const EdgeInsets.all(24),
-                        child: Center(
-                          child: CircularProgressIndicator(),
-                        ),
-                      ),
-                    ] else if (recentExpenses.isEmpty) ...[
-                      GlassCard(
-                        borderRadius: 20,
-                        padding: const EdgeInsets.all(24),
-                        child: Center(
-                          child: Column(
-                            children: const [
-                              Icon(Icons.receipt_long_outlined, size: 36, color: Colors.grey),
-                              SizedBox(height: 8),
-                              Text('No expenses logged yet.', style: TextStyle(color: Colors.grey)),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ] else ...[
-                      ...recentExpenses.map((expense) {
-                        final catColor = AppColors.getCategoryColor(expense.category);
-                        final catIcon = AppConstants.getCategoryIcon(expense.category);
-
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: GlassCard(
-                            borderRadius: 18,
-                            padding: const EdgeInsets.all(14),
-                            onTap: () {
-                              AppHaptics.selection();
-                              AddEditExpenseSheet.show(context, expense: expense);
-                            },
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 42,
-                                  height: 42,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: catColor.withValues(alpha: 0.16),
-                                  ),
-                                  child: Icon(catIcon, color: catColor, size: 20),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        expense.title,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        '${expense.category} • ${DateHelpers.formatTime(expense.date)} • ${DateHelpers.formatRelative(expense.date)}',
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Text(
-                                  CurrencyFormatter.format(expense.amount, currencyCode: currency),
-                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      }),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
+    final children = <Widget>[
+      DashboardHeader(
+        displayName: displayName,
+        scopeName: inGroup ? group.name : l10n.dashboardScopePersonal,
+        inGroup: inGroup,
+        onChangeScope: () => unawaited(showScopeSwitcher(context, ref)),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
+      if (showNudge) ...[
+        const SizedBox(height: AppSpacing.lg),
+        FirstExpenseNudge(
+          key: const Key('dashboard-first-expense'),
+          onAddExpense: addExpense,
+        ),
+      ],
+      const SizedBox(height: AppSpacing.lg),
+      entrance(
+        SpendingSummaryCard(
+          title: inGroup
+              ? l10n.dashboardGroupTotal
+              : l10n.dashboardYourSpending,
+          period: period,
+          note: inGroup
+              ? l10n.dashboardGroupScopeNote(group.name)
+              : l10n.dashboardPersonalScopeNote,
+          insights: insightsAsync.value,
+          loading: insightsAsync.isLoading,
+          error: insightsAsync.hasError ? insightsAsync.error : null,
+          balance: balance,
+          onRetry: () => unawaited(refreshAll()),
+        ),
+        1,
+      ),
+      if (suggestions.isNotEmpty) ...[
+        const SizedBox(height: AppSpacing.lg),
+        SettleUpCard(
+          suggestions: suggestions,
+          currentUserId: currentUserId,
+          nameOf: nameOf,
+          onSettleUp: () => goTab(context, AppRoutes.profile),
+        ),
+      ],
+      const SizedBox(height: AppSpacing.lg),
+      entrance(
+        AssistantEntryCard(
+          onTap: () {
+            AppHaptics.selection();
+            goTab(context, AppRoutes.chat);
+          },
+        ),
+        2,
+      ),
+      const SizedBox(height: AppSpacing.md),
+      SectionHeader(
+        title: l10n.dashboardHighlightsTitle,
+        actionLabel: l10n.dashboardSeeInsights,
+        onAction: () => goTab(context, AppRoutes.insights),
+        padding: const EdgeInsetsDirectional.only(bottom: AppSpacing.xs),
+      ),
+      HighlightsRow(
+        insights: insightsAsync.value,
+        loading: insightsAsync.isLoading,
+        failed: insightsAsync.hasError,
+      ),
+      const SizedBox(height: AppSpacing.md),
+      RecentExpensesSection(
+        title: inGroup
+            ? l10n.dashboardRecentGroup(group.name)
+            : l10n.dashboardRecentPersonal,
+        expenses: recent,
+        loading: listAsync.isLoading,
+        error: listAsync.hasError ? listAsync.error : null,
+        emptyTitle: inGroup
+            ? l10n.dashboardEmptyGroupTitle
+            : l10n.dashboardEmptyPersonalTitle,
+        emptyMessage: inGroup
+            ? l10n.dashboardEmptyGroupMessage(group.name)
+            : l10n.dashboardEmptyPersonalMessage,
+        onAdd: canAdd && !nudgeOffersAdd ? addExpense : null,
+        onSeeAll: () => goTab(context, AppRoutes.expenses),
+        onRetry: () => unawaited(refreshAll()),
+        canEdit: canEdit,
+        onOpen: (expense) {
           AppHaptics.selection();
-          AddEditExpenseSheet.show(context);
+          unawaited(
+            AddEditExpenseSheet.show(
+              context,
+              expense: expense,
+              listKey: listKey,
+            ),
+          );
         },
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Theme.of(context).colorScheme.onPrimary,
-        elevation: 4,
-        child: const Icon(Icons.add_rounded, size: 28),
-      ).animate().scale(delay: 400.ms, curve: Curves.easeOutBack),
+      ),
+    ];
+
+    // No app bar here, so the region keeps the bar icons readable on the
+    // accent wash and follows theme changes.
+    return SystemUiRegion(
+      child: Scaffold(
+        body: DecoratedBox(
+          // A soft accent wash at the top gives the frosted summary card
+          // something to blur; text sits on cards or the plain background.
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: const [0, 0.35],
+              colors: [
+                palette.accentContainer.withValues(alpha: 0.55),
+                palette.background,
+              ],
+            ),
+          ),
+          child: SafeArea(
+            bottom: false,
+            child: RefreshIndicator(
+              onRefresh: refreshAll,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.gutter,
+                  AppSpacing.lg,
+                  AppSpacing.gutter,
+                  // Room for the floating button over the last row.
+                  96,
+                ),
+                children: children,
+              ),
+            ),
+          ),
+        ),
+        floatingActionButton: canAdd
+            ? FloatingActionButton(
+                // Every tab stays alive in one page route: a shared default
+                // hero tag breaks the transition to sign-in.
+                heroTag: null,
+                tooltip: l10n.dashboardAddExpense,
+                onPressed: addExpense,
+                child: const Icon(Icons.add_rounded),
+              )
+            : null,
+      ),
     );
   }
 }

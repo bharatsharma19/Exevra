@@ -1,554 +1,438 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../core/constants/app_colors.dart';
+
 import '../../../core/constants/app_constants.dart';
-import '../../../core/utils/currency_formatter.dart';
-import '../../../core/utils/date_helpers.dart';
-import '../../../core/utils/validators.dart';
+import '../../../core/errors/failure_messages.dart';
+import '../../../core/theme/app_tokens.dart';
 import '../../../core/utils/haptics.dart';
-import '../../../models/expense_model.dart';
+import '../../../core/utils/money_format.dart';
+import '../../../core/utils/money_parser.dart';
+import '../../../core/widgets/widgets.dart';
+import '../../../l10n/l10n.dart';
+import '../../../models/expense.dart';
+import '../../../models/group.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/expense_provider.dart';
+import '../../../providers/groups_provider.dart';
+import '../../../providers/profile_provider.dart';
+import '../widgets/expense_amount_row.dart';
+import '../widgets/expense_form_fields.dart';
+import '../widgets/inline_notice.dart';
+import '../widgets/money_input_field.dart';
+import 'expense_sheet_save.dart';
+import '../../../core/utils/app_clock.dart';
 
+/// Adds a new expense or edits one.
+///
+/// * The amount is parsed with [MoneyParser] in the expense's currency and
+///   the device locale: a group expense always uses the group currency; a
+///   personal one any supported currency (the profile currency by default).
+/// * An expense can be moved between personal and the active group by its
+///   payer. A snack bar then offers Undo, which restores the expense
+///   exactly as it was: its scope and every field changed with the move
+///   (see [saveExpense]).
+/// * A group expense shared with someone who left the group is locked: its
+///   amount and group cannot change (title, category, date and note can),
+///   which the sheet shows with a lock notice.
+/// * Errors are shown inside the sheet; nothing is reported under the
+///   modal barrier. Leaving with unsaved changes asks first.
 class AddEditExpenseSheet extends ConsumerStatefulWidget {
+  const AddEditExpenseSheet({super.key, this.existingExpense, this.listKey});
+
   final Expense? existingExpense;
 
-  const AddEditExpenseSheet({super.key, this.existingExpense});
+  /// The list the sheet writes through (so its rows update at once).
+  /// Defaults to the active scope's list.
+  final ExpenseListKey? listKey;
 
-  static Future<void> show(BuildContext context, {Expense? expense}) {
-    return showModalBottomSheet(
+  /// Opens the sheet. Completes with true when the server saved it.
+  static Future<bool> show(
+    BuildContext context, {
+    Expense? expense,
+    ExpenseListKey? listKey,
+  }) async {
+    final saved = await showAppSheet<bool>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => AddEditExpenseSheet(existingExpense: expense),
+      // Dragging would close the sheet without the unsaved-changes check.
+      guarded: true,
+      showDragHandle: false,
+      builder: (context) =>
+          AddEditExpenseSheet(existingExpense: expense, listKey: listKey),
     );
+    return saved ?? false;
   }
 
   @override
-  ConsumerState<AddEditExpenseSheet> createState() => _AddEditExpenseSheetState();
+  ConsumerState<AddEditExpenseSheet> createState() =>
+      _AddEditExpenseSheetState();
 }
+
+/// The values a form started with, to detect unsaved changes.
+typedef _Snapshot = ({
+  String title,
+  String amount,
+  String note,
+  String category,
+  DateTime spentAt,
+  bool isGroup,
+  String personalCurrency,
+});
 
 class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _titleController;
   late final TextEditingController _amountController;
-  late final TextEditingController _notesController;
+  late final TextEditingController _noteController;
+  late _Snapshot _initial;
 
-  late String _selectedCategory;
-  late DateTime _selectedDate;
-  late bool _isGroupExpense;
+  /// Whether the user picked Personal or Group themselves.
+  bool _scopeChosen = false;
+
+  late String _category;
+
+  /// Local wall-clock time; sent as UTC.
+  late DateTime _spentAt;
+  late bool _isGroup;
+  late String _personalCurrency;
+
   bool _isSubmitting = false;
+  bool _allowPop = false;
+
+  /// Server or pre-check failure, shown above the save button.
+  String? _formError;
+
+  /// Why the other scope is unavailable, after the user tapped it.
+  String? _scopeHint;
+
+  /// The server refused a change because the expense is locked (someone
+  /// who shares it left the group), even if the check on opening missed it.
+  bool _lockedByServer = false;
+
+  /// Whether the edited expense is locked (see [expenseLockedProvider]);
+  /// updated on every build.
+  bool _locked = false;
+
+  Expense? get _existing => widget.existingExpense;
+  bool get _isEditing => _existing != null;
 
   @override
   void initState() {
     super.initState();
-    final expense = widget.existingExpense;
+    final expense = _existing;
     _titleController = TextEditingController(text: expense?.title ?? '');
     _amountController = TextEditingController(
-      text: expense != null ? expense.amount.toStringAsFixed(2) : '',
+      text: expense != null ? MoneyFormat.forInput(expense.amount) : '',
     );
-    _notesController = TextEditingController(text: expense?.notes ?? '');
-    _selectedCategory = expense?.category ?? AppConstants.categories.first.name;
-    _selectedDate = expense?.date ?? DateTime.now();
-    _isGroupExpense = expense != null ? !expense.isPersonal : false;
+    _noteController = TextEditingController(text: expense?.note ?? '');
+    _category = expense?.category ?? AppConstants.categories.first.name;
+    final now = AppClock.now();
+    _spentAt =
+        expense?.spentAt.toLocal() ??
+        DateTime(now.year, now.month, now.day, now.hour, now.minute);
+    _isGroup = expense != null
+        ? expense.isGroup
+        : (ref.read(activeGroupProvider)?.canAddExpenses ?? false);
+    _personalCurrency =
+        expense?.amount.currency ?? ref.read(preferredCurrencyProvider);
+    _initial = _snapshot();
+    for (final c in [_titleController, _amountController, _noteController]) {
+      c.addListener(_onTextChanged);
+    }
+    if (expense == null) {
+      // Groups may still be loading when the sheet opens: default to the
+      // active group once it is known, unless the user already chose.
+      ref.listenManual(activeGroupProvider, (previous, next) {
+        if (_scopeChosen || !mounted) return;
+        final isGroup = next?.canAddExpenses ?? false;
+        if (isGroup == _isGroup) return;
+        final wasDirty = _isDirty;
+        setState(() => _isGroup = isGroup);
+        if (!wasDirty) _initial = _snapshot();
+      });
+    }
   }
 
   @override
   void dispose() {
     _titleController.dispose();
     _amountController.dispose();
-    _notesController.dispose();
+    _noteController.dispose();
     super.dispose();
   }
 
-  Future<void> _pickDate() async {
-    AppHaptics.selection();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _selectedDate,
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-    );
-    if (picked != null && mounted) {
-      final pickedTime = await showTimePicker(
-        context: context,
-        initialTime: TimeOfDay.fromDateTime(_selectedDate),
-      );
-      final finalTime = pickedTime ?? TimeOfDay.fromDateTime(_selectedDate);
-      setState(() {
-        _selectedDate = DateTime(
-          picked.year,
-          picked.month,
-          picked.day,
-          finalTime.hour,
-          finalTime.minute,
-        );
-      });
+  // Rebuild so the unsaved-changes check sees the new text.
+  void _onTextChanged() {
+    if (mounted) setState(() {});
+  }
+
+  _Snapshot _snapshot() => (
+    title: _titleController.text.trim(),
+    amount: _amountController.text.trim(),
+    note: _noteController.text.trim(),
+    category: _category,
+    spentAt: _spentAt,
+    isGroup: _isGroup,
+    personalCurrency: _personalCurrency,
+  );
+
+  bool get _isDirty => _snapshot() != _initial;
+
+  /// The group a group expense belongs to: its own group when editing one,
+  /// otherwise the active group.
+  Group? _targetGroup({bool listen = true}) {
+    final existingGroupId = _existing?.groupId;
+    if (existingGroupId == null) {
+      return listen
+          ? ref.watch(activeGroupProvider)
+          : ref.read(activeGroupProvider);
     }
+    final state = listen
+        ? ref.watch(currentGroupsProvider)
+        : ref.read(currentGroupsProvider);
+    for (final g in state?.groups ?? const <Group>[]) {
+      if (g.id == existingGroupId) return g;
+    }
+    return null;
+  }
+
+  /// Why the user cannot switch scope, or null when they can.
+  String? _scopeUnavailableReason(Group? group, String? userId) {
+    final existing = _existing;
+    if (existing != null && existing.userId != userId) {
+      return friendlyMessageForKey('not_expense_payer');
+    }
+    if (existing != null && existing.isGroup && _locked) {
+      return friendlyMessageForKey('expense_locked_member_left');
+    }
+    if (group == null) return context.l10n.expensesNoGroupHint;
+    if (!group.canAddExpenses) {
+      return friendlyMessageForKey('viewer_cannot_add');
+    }
+    return null;
+  }
+
+  String _currency(Group? group) =>
+      _isGroup && group != null ? group.currency : _personalCurrency;
+
+  void _chooseScope(bool group, String? reason) {
+    if (group == _isGroup) return;
+    // Group needs a group the user can add to; leaving a group (when
+    // editing) needs the payer and an unlocked expense.
+    if (reason != null && (group || _isEditing)) {
+      AppHaptics.error();
+      setState(() => _scopeHint = reason);
+      return;
+    }
+    AppHaptics.selection();
+    setState(() {
+      _isGroup = group;
+      _scopeChosen = true;
+      _scopeHint = null;
+    });
   }
 
   Future<void> _submit() async {
+    if (_isSubmitting) return;
+    setState(() => _formError = null);
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    final amount = CurrencyFormatter.parseAmount(_amountController.text);
-    if (amount == null || amount <= 0) return;
-
-    final authState = ref.read(authNotifierProvider);
-    final expenseState = ref.read(expenseProvider);
-    final currentUserId = authState.user?.id;
-
-    if (_isGroupExpense && !expenseState.canUserAddGroupExpenses(currentUserId)) {
-      setState(() => _isSubmitting = false);
+    final group = _targetGroup(listen: false);
+    final userId = ref.read(currentUserIdProvider);
+    final parsed = MoneyInputField.parse(
+      _amountController.text,
+      currency: _currency(group),
+    );
+    if (parsed is! MoneyParsed) return;
+    final key = widget.listKey ?? ref.read(scopeExpenseKeyProvider);
+    if (key == null || userId == null) {
+      setState(() => _formError = friendlyMessageForKey('group_not_ready'));
+      return;
+    }
+    if (_isGroup && !(group?.canAddExpenses ?? false)) {
       AppHaptics.error();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Pending Admin Review: You have view-only access until the Group Admin approves your membership to record expenses.'),
-          backgroundColor: AppColors.primaryRose,
-        ),
+      setState(
+        () => _formError =
+            _scopeUnavailableReason(group, userId) ??
+            friendlyMessageForKey('viewer_cannot_add'),
       );
       return;
     }
 
+    final existing = _existing;
+    final draft = ExpenseDraft(
+      title: _titleController.text,
+      // A locked expense keeps its amount (the field is read-only).
+      amount: _locked && existing != null ? existing.amount : parsed.value,
+      category: _category,
+      spentAt: _spentAt.toUtc(),
+      groupId: _isGroup ? group?.id : null,
+      note: _noteController.text.trim().isEmpty
+          ? null
+          : _noteController.text.trim(),
+    );
+
     setState(() => _isSubmitting = true);
     AppHaptics.light();
-
-    final expenseNotifier = ref.read(expenseProvider.notifier);
-
-    bool success;
-    if (widget.existingExpense == null) {
-      success = await expenseNotifier.createExpense(
-        title: _titleController.text.trim(),
-        amount: amount,
-        category: _selectedCategory,
-        date: _selectedDate,
-        notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
-        isGroup: _isGroupExpense,
-      );
-    } else {
-      final updated = widget.existingExpense!.copyWith(
-        title: _titleController.text.trim(),
-        amount: amount,
-        category: _selectedCategory,
-        date: _selectedDate,
-        notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
-        groupId: _isGroupExpense ? (widget.existingExpense!.groupId ?? ref.read(authNotifierProvider).profile?.groupId) : null,
-        isPersonal: !_isGroupExpense,
-      );
-      success = await expenseNotifier.updateExpense(updated);
+    final outcome = await saveExpense(
+      ref: ref,
+      context: context,
+      key: key,
+      existing: existing,
+      draft: draft,
+      groupName: group?.name,
+    );
+    if (!mounted) return;
+    final failure = outcome.failure;
+    if (failure != null && !outcome.closed) {
+      final locked = failure.key == 'expense_locked_member_left';
+      setState(() {
+        _isSubmitting = false;
+        _formError = friendlyMessage(failure);
+        if (locked && existing != null) {
+          // Keep only the changes the server still accepts.
+          _lockedByServer = true;
+          _isGroup = existing.isGroup;
+          _amountController.text = MoneyFormat.forInput(existing.amount);
+        }
+      });
+      return;
     }
+    _close(true);
+  }
 
-    if (mounted) {
-      setState(() => _isSubmitting = false);
-      if (success) {
-        Navigator.of(context).pop();
-      }
-    }
+  /// Pops the sheet once (never the page under it).
+  void _close(bool saved) {
+    if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? false)) return;
+    _allowPop = true;
+    Navigator.of(context).pop(saved);
+  }
+
+  Future<void> _confirmDiscard() async {
+    final l10n = context.l10n;
+    final discard = await showConfirmDialog(
+      context,
+      title: l10n.discardChangesTitle,
+      message: _isEditing
+          ? l10n.expensesDiscardEditMessage
+          : l10n.expensesDiscardNewMessage,
+      confirmLabel: l10n.discardChangesConfirm,
+      cancelLabel: l10n.keepEditing,
+      destructive: true,
+    );
+    if (discard) _close(false);
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final auth = ref.watch(authNotifierProvider);
-    final currency = auth.profile?.currency ?? AppConstants.defaultCurrency;
-    final symbol = AppConstants.currencies[currency] ?? '₹';
-    final expenseState = ref.watch(expenseProvider);
-    final hasGroup = expenseState.currentGroup != null;
-    final currentUserId = auth.user?.id;
-    final isViewer = expenseState.isUserViewerOnly(currentUserId);
-    final isEditing = widget.existingExpense != null;
+    final l10n = context.l10n;
+    final userId = ref.watch(currentUserIdProvider);
+    final existing = _existing;
+    final lockKey = existing == null ? null : expenseLockKeyOf(existing);
+    _locked =
+        _lockedByServer ||
+        (lockKey != null &&
+            (ref.watch(expenseLockedProvider(lockKey)).value ?? false));
+    final group = _targetGroup();
+    // Keeps the list this sheet writes to alive while it is open.
+    final listKey = widget.listKey ?? ref.watch(scopeExpenseKeyProvider);
+    if (listKey != null) ref.watch(expenseListProvider(listKey));
+    final currency = _currency(group);
+    final reason = _scopeUnavailableReason(group, userId);
+    final currencyChanged =
+        existing != null &&
+        existing.amount.currency != currency &&
+        _amountController.text.trim().isNotEmpty;
+    final scopeHint =
+        _scopeHint ?? (reason != null && _isGroup && !_locked ? reason : null);
 
-    return Container(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.darkCard : AppColors.lightCard,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        border: Border(
-          top: BorderSide(
-            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-            width: 1.5,
-          ),
-        ),
-      ),
-      child: SafeArea(
-        top: false,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Drag handle
-                Center(
-                  child: Container(
-                    width: 44,
-                    height: 5,
-                    decoration: BoxDecoration(
-                      color: isDark ? Colors.white24 : Colors.black12,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 18),
-
-                // Sheet Header
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      isEditing ? 'Edit Expense' : 'Add Expense',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.5,
-                        color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close_rounded),
-                      onPressed: () => Navigator.of(context).pop(),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 16),
-
-                // Amount Large Numeric Input Card
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(20),
-                    color: isDark
-                        ? AppColors.darkCardElevated.withValues(alpha: 0.8)
-                        : AppColors.lightCardElevated,
-                    border: Border.all(
-                      color: AppColors.primaryCyan.withValues(alpha: 0.3),
-                      width: 1.5,
-                    ),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Text(
-                        symbol,
-                        style: const TextStyle(
-                          fontSize: 32,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.primaryCyan,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _amountController,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          validator: Validators.validateAmount,
-                          style: TextStyle(
-                            fontSize: 34,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -1,
-                            color: isDark ? Colors.white : Colors.black,
-                          ),
-                          decoration: const InputDecoration(
-                            hintText: '0.00',
-                            border: InputBorder.none,
-                            enabledBorder: InputBorder.none,
-                            focusedBorder: InputBorder.none,
-                            contentPadding: EdgeInsets.zero,
-                            filled: false,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 16),
-
-                // Title Input
-                TextFormField(
-                  controller: _titleController,
-                  textCapitalization: TextCapitalization.sentences,
-                  validator: (v) => Validators.validateRequired(v, 'Expense title'),
-                  decoration: const InputDecoration(
-                    labelText: 'Expense Title',
-                    hintText: 'e.g. Whole Foods Organic Groceries',
-                    prefixIcon: Icon(Icons.receipt_long_rounded),
-                  ),
-                ),
-
-                const SizedBox(height: 18),
-
-                // Expense Type Toggle: Personal vs Group
-                Row(
-                  children: [
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () {
-                          AppHaptics.selection();
-                          setState(() => _isGroupExpense = false);
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          decoration: BoxDecoration(
-                            color: !_isGroupExpense
-                                ? AppColors.primaryCyan.withValues(alpha: 0.15)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: !_isGroupExpense
-                                  ? AppColors.primaryCyan
-                                  : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
-                              width: !_isGroupExpense ? 1.5 : 1,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.person_rounded,
-                                size: 18,
-                                color: !_isGroupExpense ? AppColors.primaryCyan : Colors.grey,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Personal',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  color: !_isGroupExpense
-                                      ? AppColors.primaryCyan
-                                      : (isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () {
-                          if (!hasGroup) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Please join or create a Group in Profile first!'),
-                                backgroundColor: AppColors.warning,
-                              ),
-                            );
-                            return;
-                          }
-                          if (isViewer) {
-                            AppHaptics.error();
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('View-Only Access: As an invited member, the Group Admin must review & approve your membership before you can add group expenses.'),
-                                backgroundColor: AppColors.primaryRose,
-                              ),
-                            );
-                            return;
-                          }
-                          AppHaptics.selection();
-                          setState(() => _isGroupExpense = true);
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          decoration: BoxDecoration(
-                            color: _isGroupExpense
-                                ? AppColors.primaryViolet.withValues(alpha: 0.15)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: _isGroupExpense
-                                  ? AppColors.primaryViolet
-                                  : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
-                              width: _isGroupExpense ? 1.5 : 1,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.groups_rounded,
-                                size: 18,
-                                color: _isGroupExpense ? AppColors.primaryViolet : Colors.grey,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Group Expense',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  color: _isGroupExpense
-                                      ? AppColors.primaryViolet
-                                      : (isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-
-                if (isViewer) ...[
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: AppColors.warning.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.warning.withValues(alpha: 0.3)),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.shield_outlined, size: 16, color: AppColors.warning),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'View-Only Member: You can view group expenses. The Group Admin must review & approve your membership before you can record group expenses.',
-                            style: TextStyle(fontSize: 11, color: AppColors.warning, height: 1.3),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-
-                const SizedBox(height: 20),
-
-                // Category Selection Horizontal/Grid Carousel
-                const Text(
-                  'Category',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  height: 80,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: AppConstants.categories.length,
-                    separatorBuilder: (context, index) => const SizedBox(width: 10),
-                    itemBuilder: (context, idx) {
-                      final cat = AppConstants.categories[idx];
-                      final isSelected = _selectedCategory == cat.name;
-                      final catColor = AppColors.getCategoryColor(cat.name);
-
-                      return GestureDetector(
-                        onTap: () {
-                          AppHaptics.selection();
-                          setState(() => _selectedCategory = cat.name);
-                        },
-                        child: Container(
-                          width: 76,
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(16),
-                            color: isSelected
-                                ? catColor.withValues(alpha: 0.18)
-                                : (isDark ? AppColors.darkCardElevated : AppColors.lightCardElevated),
-                            border: Border.all(
-                              color: isSelected ? catColor : Colors.transparent,
-                              width: 1.5,
-                            ),
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                cat.icon,
-                                color: isSelected ? catColor : (isDark ? Colors.white60 : Colors.black54),
-                                size: 24,
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                cat.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                                  color: isSelected ? catColor : (isDark ? Colors.white70 : Colors.black87),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-
-                const SizedBox(height: 18),
-
-                // Date Picker Tile
-                GestureDetector(
-                  onTap: _pickDate,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
-                      color: isDark ? AppColors.darkCardElevated.withValues(alpha: 0.6) : AppColors.lightCardElevated,
-                      border: Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.calendar_month_rounded, color: AppColors.primaryCyan, size: 20),
-                            const SizedBox(width: 12),
-                            Text(
-                              '${DateHelpers.formatDate(_selectedDate)} • ${DateHelpers.formatTime(_selectedDate)}',
-                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-                            ),
-                          ],
-                        ),
-                        const Icon(Icons.edit_calendar_rounded, size: 18, color: Colors.grey),
-                      ],
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 16),
-
-                // Notes Optional
-                TextFormField(
-                  controller: _notesController,
-                  maxLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: 'Notes (Optional)',
-                    hintText: 'Add description, location or tax tag...',
-                    prefixIcon: Icon(Icons.notes_rounded),
-                  ),
-                ),
-
-                const SizedBox(height: 24),
-
-                // Submit Button
-                ElevatedButton(
-                  onPressed: _isSubmitting ? null : _submit,
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  ),
-                  child: _isSubmitting
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(Colors.black)),
-                        )
-                      : Text(
-                          isEditing ? 'Save Changes' : 'Record Expense',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                        ),
-                ),
-              ],
+    // Every dismissal (back, barrier, Close) comes here first, so the
+    // check always sees the latest text. While saving, nothing closes the
+    // sheet; the save closes it.
+    return PopScope<Object?>(
+      canPop: _allowPop,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop || _isSubmitting) return;
+        if (!_isDirty) {
+          _close(false);
+          return;
+        }
+        unawaited(_confirmDiscard());
+      },
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ExpenseSheetHeader(
+              title: _isEditing
+                  ? l10n.expensesEditTitle
+                  : l10n.expensesAddTitle,
             ),
-          ),
+            const SizedBox(height: AppSpacing.md),
+            ExpenseAmountRow(
+              controller: _amountController,
+              currency: currency,
+              currencyFixed: _isGroup && group != null,
+              enabled: !_locked,
+              lockedMessage: _locked
+                  ? '${friendlyMessageForKey('expense_locked_member_left')} '
+                        '${l10n.expensesLockedStillEditable}'
+                  : null,
+              warning: currencyChanged
+                  ? l10n.expensesCurrencyChanged(currency)
+                  : null,
+              onCurrencyChanged: (value) {
+                AppHaptics.selection();
+                setState(() => _personalCurrency = value);
+              },
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            ExpenseTitleField(controller: _titleController),
+            const SizedBox(height: AppSpacing.lg),
+            ExpenseScopeSelector(
+              isGroup: _isGroup,
+              personalLocked: _isEditing && _isGroup && reason != null,
+              groupLocked: !_isGroup && reason != null,
+              onSelected: (group) => _chooseScope(group, reason),
+              hint: scopeHint,
+              caption: _isGroup && group != null
+                  ? l10n.expensesGroupScopeCaption(group.name, group.currency)
+                  : null,
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            ExpenseCategoryPicker(
+              selected: _category,
+              onSelected: (name) {
+                AppHaptics.selection();
+                setState(() => _category = name);
+              },
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            ExpenseDateTimeFields(
+              value: _spentAt,
+              onChanged: (value) => setState(() => _spentAt = value),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            ExpenseNoteField(controller: _noteController),
+            if (_formError != null) ...[
+              const SizedBox(height: AppSpacing.md),
+              InlineNotice(
+                key: const Key('expense-form-error'),
+                kind: NoticeKind.error,
+                message: _formError!,
+              ),
+            ],
+            const SizedBox(height: AppSpacing.lg),
+            LoadingButton(
+              key: const Key('expense-save'),
+              label: _isEditing ? l10n.expensesSaveChanges : l10n.expensesSave,
+              isLoading: _isSubmitting,
+              onPressed: _submit,
+            ),
+          ],
         ),
       ),
     );

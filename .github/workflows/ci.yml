@@ -1,0 +1,187 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: 3.44.8
+
+jobs:
+  flutter:
+    # Job names are the required status checks in branch protection.
+    name: Flutter
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Check formatting
+        run: dart format --output=none --set-exit-if-changed lib test
+
+      - name: Analyze
+        run: flutter analyze
+
+      # Golden tests run here, on Linux, the platform the goldens are generated on.
+      - name: Test
+        run: flutter test
+
+  functions:
+    name: Edge Functions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: supabase/functions
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.9.x
+
+      - name: Check formatting
+        run: deno fmt --check
+
+      - name: Lint
+        run: deno lint
+
+      - name: Test
+        run: deno test -A
+
+  database:
+    name: Database
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: supabase/setup-cli@689adcfb80d947100a1eab127289b97d1fb07b13 # v3.2.0
+        with:
+          version: 3.1.0
+
+      - name: Start the local stack
+        run: supabase start -x studio,imgproxy,logflare,vector,supavisor,storage-api
+
+      - name: Apply every migration from scratch
+        run: supabase db reset
+
+      - name: Run pgTAP tests
+        run: supabase test db
+
+  android:
+    name: Android release bundle
+    needs: flutter
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get --enforce-lockfile
+
+      # A throwaway upload key created for this run only. It proves that release signing works;
+      # the bundle it signs is never published.
+      - name: Create a throwaway signing key
+        run: |
+          set -euo pipefail
+          password="$(openssl rand -hex 24)"
+          echo "::add-mask::${password}"
+          keystore="${RUNNER_TEMP}/ci-upload.jks"
+          keytool -genkeypair -noprompt \
+            -keystore "${keystore}" -storetype PKCS12 \
+            -alias upload -keyalg RSA -keysize 2048 -validity 1 \
+            -storepass "${password}" -keypass "${password}" \
+            -dname "CN=Exevra CI, O=CI, C=IN"
+          {
+            echo "storePassword=${password}"
+            echo "keyPassword=${password}"
+            echo "keyAlias=upload"
+            echo "storeFile=${keystore}"
+          } > android/key.properties
+
+      # Placeholder values only: the build must succeed without any real configuration.
+      - name: Write CI build configuration
+        run: cp config/dev.example.json config/ci.json
+
+      - name: Build app bundle
+        run: >-
+          flutter build appbundle --release
+          --dart-define-from-file=config/ci.json
+          --obfuscate --split-debug-info=build/symbols
+
+      - name: Remove signing material
+        if: always()
+        run: rm -f android/key.properties "${RUNNER_TEMP}/ci-upload.jks"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: app-release-aab
+          path: build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 7
+
+  ios:
+    name: iOS (no codesign)
+    # Disabled until iOS ships. To enable it, delete the `if: false` line below.
+    if: false
+    needs: flutter
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Write CI build configuration
+        run: cp config/dev.example.json config/ci.json
+
+      - name: Build iOS app without code signing
+        run: >-
+          flutter build ios --release --no-codesign
+          --dart-define-from-file=config/ci.json

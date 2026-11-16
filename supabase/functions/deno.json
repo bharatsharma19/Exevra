@@ -1,0 +1,31 @@
+{
+  "lock": true,
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "fmt": {
+    "lineWidth": 100,
+    "indentWidth": 2,
+    "semiColons": true,
+    "singleQuote": false,
+    "proseWrap": "preserve"
+  },
+  "lint": {
+    "rules": {
+      "tags": ["recommended"],
+      "include": [
+        "eqeqeq",
+        "explicit-module-boundary-types",
+        "no-eval",
+        "no-non-null-assertion",
+        "no-throw-literal"
+      ]
+    }
+  },
+  "tasks": {
+    "test": "deno test --no-prompt",
+    "check": "deno fmt --check && deno lint && deno check ai-chat/index.ts send-invite/index.ts delete-account/index.ts && deno test --no-prompt"
+  }
+}

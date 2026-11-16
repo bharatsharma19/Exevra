@@ -1,17 +1,33 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_constants.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/currency_formatter.dart';
+
+import '../../../core/errors/app_failure.dart';
+import '../../../core/errors/failure_messages.dart';
+import '../../../core/theme/app_palette.dart';
+import '../../../core/theme/app_tokens.dart';
 import '../../../core/utils/date_helpers.dart';
 import '../../../core/utils/haptics.dart';
-import '../../../models/expense_model.dart';
+import '../../../core/widgets/widgets.dart';
+import '../../../l10n/l10n.dart';
+import '../../../models/expense.dart';
+import '../../../models/group.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/expense_provider.dart';
+import '../../../providers/failure_reporter.dart';
+import '../../../providers/group_detail_providers.dart';
+import '../../../providers/groups_provider.dart';
+import '../expense_actions.dart';
+import '../expense_date_filter.dart';
+import '../widgets/expense_filter_bar.dart';
+import '../widgets/expense_tile.dart';
+import '../widgets/inline_notice.dart';
 import 'add_edit_expense_sheet.dart';
+import '../../../core/utils/app_clock.dart';
 
+/// The expenses tab: search and filters, the date-grouped list with
+/// pull-to-refresh and paging, and add, edit and delete (with Undo).
 class ExpensesScreen extends ConsumerStatefulWidget {
   const ExpensesScreen({super.key});
 
@@ -21,420 +37,402 @@ class ExpensesScreen extends ConsumerStatefulWidget {
 
 class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
   final _searchController = TextEditingController();
+  Timer? _searchDebounce;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.text = ref.read(expenseFilterProvider).search;
+  }
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
-  void _confirmDelete(Expense expense) {
-    AppHaptics.heavy();
-    final auth = ref.read(authNotifierProvider);
-    final currentUserId = auth.user?.id ?? 'demo-user-id';
-    final isGroupAdmin = ref.read(expenseProvider).currentGroup?.isAdmin(currentUserId) ?? true;
+  /// Searches on the server once typing pauses.
+  void _onSearchChanged(String value) {
+    setState(() {});
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) ref.read(expenseFilterProvider.notifier).setSearch(value);
+    });
+  }
 
-    if (!expense.canDelete(currentUserId, isGroupAdmin) && currentUserId != 'demo-user-id') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            expense.isPersonal
-                ? 'Only the creator can delete personal expenses.'
-                : 'Group expenses can ONLY be deleted by the Group Admin.',
-          ),
-          backgroundColor: AppColors.error,
-        ),
-      );
-      return;
-    }
+  void _clearSearch() {
+    _searchDebounce?.cancel();
+    _searchController.clear();
+    setState(() {});
+    ref.read(expenseFilterProvider.notifier).setSearch('');
+  }
 
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Expense?'),
-        content: Text('Are you sure you want to delete "${expense.title}"? This action cannot be reversed.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              ref.read(expenseProvider.notifier).deleteExpense(expense.id);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Delete'),
-          ),
-        ],
+  void _clearFilters() {
+    _searchDebounce?.cancel();
+    _searchController.clear();
+    ref.read(expenseFilterProvider.notifier).clear();
+    ref.read(expenseDatePresetProvider.notifier).set(ExpenseDatePreset.any);
+  }
+
+  /// Group rules for [expense]: whether it is in the active group, whether
+  /// the user is its admin and whether they can add to it.
+  ({bool admin, bool canAdd}) _rights(Expense expense) {
+    final group = ref.read(activeGroupProvider);
+    final inGroup = group != null && expense.groupId == group.id;
+    return (
+      admin: inGroup && group.isAdmin,
+      canAdd: inGroup && group.canAddExpenses,
+    );
+  }
+
+  bool _canEdit(Expense expense) => expense.canEdit(
+    ref.read(currentUserIdProvider),
+    canAddToGroup: _rights(expense).canAdd,
+  );
+
+  bool _canDelete(Expense expense) {
+    final rights = _rights(expense);
+    return expense.canDelete(
+      ref.read(currentUserIdProvider),
+      isGroupAdmin: rights.admin,
+      canAddToGroup: rights.canAdd,
+    );
+  }
+
+  void _openEditor({Expense? expense}) {
+    AppHaptics.selection();
+    unawaited(
+      AddEditExpenseSheet.show(
+        context,
+        expense: expense,
+        listKey: ref.read(filteredExpenseKeyProvider),
       ),
     );
+  }
+
+  void _onTap(Expense expense) {
+    if (_canEdit(expense)) {
+      _openEditor(expense: expense);
+      return;
+    }
+    AppHaptics.selection();
+    AppSnackbar.showInfo(
+      context.l10n.expensesOnlyPayerCanEdit,
+      messenger: ScaffoldMessenger.maybeOf(context),
+    );
+  }
+
+  void _onAction(Expense expense, ExpenseAction action) {
+    switch (action) {
+      case ExpenseAction.edit:
+        _openEditor(expense: expense);
+      case ExpenseAction.delete:
+        final key = ref.read(filteredExpenseKeyProvider);
+        if (key == null) return;
+        unawaited(
+          deleteExpenseWithUndo(context, ref, expense: expense, key: key),
+        );
+    }
+  }
+
+  String? _payerLabel(Expense expense, List<GroupMember> members, bool mixed) {
+    final l10n = context.l10n;
+    if (expense.isPersonal) return mixed ? l10n.expensesPersonalTag : null;
+    final payer = expense.userId;
+    if (payer == null) return l10n.expensesPaidByFormer;
+    if (payer == ref.read(currentUserIdProvider)) return l10n.expensesPaidByYou;
+    for (final m in members) {
+      if (m.userId == payer) return l10n.expensesPaidBy(m.label);
+    }
+    return l10n.expensesPaidByMember;
   }
 
   @override
   Widget build(BuildContext context) {
-    final expenseState = ref.watch(expenseProvider);
-    final auth = ref.watch(authNotifierProvider);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final currency = auth.profile?.currency ?? AppConstants.defaultCurrency;
-    final filtered = expenseState.filteredExpenses;
+    final l10n = context.l10n;
+    final filter = ref.watch(expenseFilterProvider);
+    final preset = ref.watch(expenseDatePresetProvider);
+    final range = dateRangeOf(preset, AppClock.now());
+    final group = ref.watch(activeGroupProvider);
+    final key = ref.watch(filteredExpenseKeyProvider);
+    final listAsync = key == null
+        ? const AsyncLoading<ExpenseListState>()
+        : ref.watch(expenseListProvider(key));
+    final list = listAsync.value;
+    final members = ref.watch(activeGroupMembersProvider).value ?? const [];
+    final filtered = preset != ExpenseDatePreset.any || filter.isFiltered;
+    final mixed = group != null && filter.type == ExpenseTypeFilter.all;
+
+    Future<void> reload() async {
+      if (key == null) return;
+      final failure = await ref
+          .read(expenseListProvider(key).notifier)
+          .reload();
+      // The first load's failure is the error state; later ones keep the
+      // rows and are shown once by the shell.
+      if (failure != null && list != null && mounted) {
+        ref.read(failureReporterProvider.notifier).report(failure);
+      }
+    }
+
+    final Widget body;
+    if (listAsync.hasError && (list?.items.isEmpty ?? true)) {
+      final error = listAsync.error;
+      body = ErrorState(
+        title: l10n.expensesLoadErrorTitle,
+        message: friendlyMessage(
+          error is AppFailure ? error : const AppFailure.unknown(),
+        ),
+        onRetry: () => unawaited(reload()),
+      );
+    } else if (list == null) {
+      body = const SkeletonList();
+    } else {
+      body = _ExpenseList(
+        list: list,
+        range: range,
+        filtered: filtered,
+        onRefresh: reload,
+        onLoadMore: () =>
+            ref.read(expenseListProvider(key!).notifier).loadMore(),
+        empty: filtered
+            ? EmptyState(
+                key: const Key('expenses-empty-filtered'),
+                icon: Icons.search_off_rounded,
+                title: l10n.expensesEmptyFilteredTitle,
+                message: l10n.expensesEmptyFilteredMessage,
+                actionLabel: l10n.expensesClearFilters,
+                actionIcon: Icons.filter_alt_off_rounded,
+                onAction: _clearFilters,
+              )
+            : EmptyState(
+                key: const Key('expenses-empty-new'),
+                icon: Icons.savings_outlined,
+                title: l10n.expensesEmptyTitle,
+                message: group == null
+                    ? l10n.expensesEmptyMessage
+                    : group.canAddExpenses
+                    ? l10n.expensesEmptyGroupMessage(group.name)
+                    : l10n.expensesEmptyViewerMessage(group.name),
+                actionLabel: l10n.expensesAddFirst,
+                onAction: _openEditor,
+              ),
+        tileOf: (expense) {
+          final canEdit = _canEdit(expense);
+          final canDelete = _canDelete(expense);
+          // Only rows the user can act on check the lock (two reads per
+          // row); the server still refuses a locked change either way.
+          final lockKey = canEdit || canDelete
+              ? expenseLockKeyOf(expense)
+              : null;
+          return Consumer(
+            key: ValueKey('expense-${expense.id}'),
+            builder: (context, ref, _) => ExpenseTile(
+              expense: expense,
+              payerLabel: _payerLabel(expense, members, mixed),
+              canEdit: canEdit,
+              canDelete: canDelete,
+              locked:
+                  lockKey != null &&
+                  (ref.watch(expenseLockedProvider(lockKey)).value ?? false),
+              onTap: () => _onTap(expense),
+              onAction: (action) => _onAction(expense, action),
+            ),
+          );
+        },
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Expenses Tracker'),
+        title: Text(l10n.expensesTitle),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded),
+          AppIconButton(
+            icon: Icons.refresh_rounded,
+            tooltip: l10n.expensesRefresh,
             onPressed: () {
               AppHaptics.light();
-              ref.read(expenseProvider.notifier).loadAll();
+              unawaited(reload());
             },
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // Search & Filter Header
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-            child: TextField(
-              controller: _searchController,
-              onChanged: (val) => ref.read(expenseProvider.notifier).setSearchQuery(val),
-              decoration: InputDecoration(
-                hintText: 'Search by title, category, or note...',
-                prefixIcon: const Icon(Icons.search_rounded, size: 22),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear_rounded, size: 18),
-                        onPressed: () {
-                          _searchController.clear();
-                          ref.read(expenseProvider.notifier).setSearchQuery('');
-                        },
-                      )
-                    : null,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              ),
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            ExpenseFilterBar(
+              searchController: _searchController,
+              onSearchChanged: _onSearchChanged,
+              onSearchCleared: _clearSearch,
+              showTypeFilter: group != null && group.canRead,
+            ),
+            Expanded(child: body),
+          ],
+        ),
+      ),
+      floatingActionButton: SnackbarClearance(
+        child: FloatingActionButton.extended(
+          key: const Key('expenses-add'),
+          // Every tab stays alive in one page route: a shared default hero
+          // tag breaks the transition to sign-in.
+          heroTag: null,
+          onPressed: _openEditor,
+          tooltip: l10n.expensesAdd,
+          icon: const Icon(Icons.add_rounded),
+          label: Text(l10n.expensesAdd),
+        ),
+      ),
+    );
+  }
+}
+
+/// The loaded list: date headers, rows, the paging footer, the result
+/// count while filtering, and the empty state, all under pull-to-refresh.
+class _ExpenseList extends StatelessWidget {
+  const _ExpenseList({
+    required this.list,
+    required this.range,
+    required this.filtered,
+    required this.onRefresh,
+    required this.onLoadMore,
+    required this.empty,
+    required this.tileOf,
+  });
+
+  final ExpenseListState list;
+  final LocalDateRange? range;
+  final bool filtered;
+  final Future<void> Function() onRefresh;
+  final Future<void> Function() onLoadMore;
+  final Widget empty;
+  final Widget Function(Expense expense) tileOf;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final range = this.range;
+    final items = list.items.where((e) => inDateRange(e, range)).toList();
+    // Newest first: once the oldest loaded expense is before the range,
+    // every expense in the range is loaded.
+    final oldest = list.items.isEmpty ? null : list.items.last.spentAt;
+    final needMore =
+        list.hasMore &&
+        (range == null ||
+            oldest == null ||
+            !oldest.toLocal().isBefore(range.start));
+
+    if (items.isEmpty && !needMore) {
+      return RefreshIndicator(
+        onRefresh: onRefresh,
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: empty,
             ),
           ),
+        ),
+      );
+    }
 
-          // Filter Segmented Tabs: All | Personal | Group
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-            child: Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                color: isDark ? AppColors.darkCardElevated : AppColors.lightCardElevated,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                children: [
-                  _buildTypeTab('All', ExpenseTypeFilter.all, expenseState.filter.type),
-                  _buildTypeTab('Personal', ExpenseTypeFilter.personal, expenseState.filter.type),
-                  _buildTypeTab('Group', ExpenseTypeFilter.group, expenseState.filter.type),
-                ],
-              ),
-            ),
-          ),
-
-          // Horizontal Category Chips
-          SizedBox(
-            height: 48,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-              children: [
-                _buildCategoryChip('All', expenseState.filter.category == 'All'),
-                ...AppConstants.categories.map(
-                  (c) => _buildCategoryChip(c.name, expenseState.filter.category == c.name),
+    final header = filtered && !needMore;
+    final offset = header ? 1 : 0;
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.gutter,
+          AppSpacing.xs,
+          AppSpacing.gutter,
+          96,
+        ),
+        itemCount: offset + items.length + (needMore ? 1 : 0),
+        itemBuilder: (context, index) {
+          if (header && index == 0) {
+            return Semantics(
+              liveRegion: true,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+                child: Text(
+                  l10n.expensesResultCount(items.length),
+                  key: const Key('expenses-result-count'),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: context.palette.textSecondary,
+                  ),
                 ),
-              ],
-            ),
-          ),
-
-          // Expense List / Grouped View
-          Expanded(
-            child: (expenseState.isLoading && expenseState.expenses.isEmpty)
-                ? const Center(child: CircularProgressIndicator())
-                : filtered.isEmpty
-                    ? _buildEmptyState()
-                    : RefreshIndicator(
-                        onRefresh: () => ref.read(expenseProvider.notifier).loadAll(),
-                        child: ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(20, 8, 20, 90),
-                          itemCount: filtered.length,
-                          itemBuilder: (context, index) {
-                            final expense = filtered[index];
-                            final showHeader = index == 0 ||
-                                DateHelpers.getDateSectionHeader(expense.date) !=
-                                    DateHelpers.getDateSectionHeader(filtered[index - 1].date);
-
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (showHeader)
-                                  Padding(
-                                    padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
-                                    child: Text(
-                                      DateHelpers.getDateSectionHeader(expense.date),
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        letterSpacing: 0.5,
-                                        color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
-                                      ),
-                                    ),
-                                  ),
-                                _buildExpenseTile(expense, currency, isDark),
-                              ],
-                            );
-                          },
-                        ),
-                      ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          AppHaptics.selection();
-          AddEditExpenseSheet.show(context);
-        },
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Theme.of(context).colorScheme.onPrimary,
-        icon: const Icon(Icons.add_rounded, size: 24),
-        label: const Text('Add Expense', style: TextStyle(fontWeight: FontWeight.w700)),
-      ).animate().scale(delay: 200.ms, curve: Curves.easeOutBack),
-    );
-  }
-
-  Widget _buildTypeTab(String label, ExpenseTypeFilter filterType, ExpenseTypeFilter current) {
-    final isSelected = filterType == current;
-    final primaryColor = Theme.of(context).colorScheme.primary;
-    final onPrimaryColor = Theme.of(context).colorScheme.onPrimary;
-
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => ref.read(expenseProvider.notifier).setTypeFilter(filterType),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(
-            color: isSelected ? primaryColor : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-              color: isSelected ? onPrimaryColor : Colors.grey,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCategoryChip(String categoryName, bool isSelected) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: FilterChip(
-        label: Text(categoryName),
-        selected: isSelected,
-        onSelected: (_) => ref.read(expenseProvider.notifier).setCategoryFilter(categoryName),
-        selectedColor: AppColors.primaryCyan.withValues(alpha: 0.2),
-        checkmarkColor: AppColors.primaryCyan,
-        labelStyle: TextStyle(
-          fontSize: 12,
-          fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-          color: isSelected ? AppColors.primaryCyan : null,
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-          side: BorderSide(
-            color: isSelected ? AppColors.primaryCyan : Colors.transparent,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildExpenseTile(Expense expense, String currency, bool isDark) {
-    final catColor = AppColors.getCategoryColor(expense.category);
-    final catIcon = AppConstants.getCategoryIcon(expense.category);
-    final auth = ref.watch(authNotifierProvider);
-    final currentUserId = auth.user?.id ?? 'demo-user-id';
-    final isGroupAdmin = ref.watch(expenseProvider).currentGroup?.isAdmin(currentUserId) ?? true;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: GlassCard(
-        borderRadius: 18,
-        padding: const EdgeInsets.all(14),
-        onTap: () {
-          AppHaptics.selection();
-          if (expense.canEdit(currentUserId) || currentUserId == 'demo-user-id') {
-            AddEditExpenseSheet.show(context, expense: expense);
-          } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Only the creator can edit this expense.'),
-                duration: Duration(seconds: 2),
               ),
             );
           }
+          final i = index - offset;
+          if (i >= items.length) {
+            return _Footer(list: list, onLoadMore: onLoadMore);
+          }
+          final expense = items[i];
+          final now = AppClock.now();
+          final section = _sectionTitle(l10n, expense.spentAt, now);
+          final showHeader =
+              i == 0 ||
+              section != _sectionTitle(l10n, items[i - 1].spentAt, now);
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (showHeader)
+                SectionHeader(
+                  title: section,
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.xs,
+                    AppSpacing.lg,
+                    AppSpacing.xs,
+                    AppSpacing.sm,
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                child: tileOf(expense),
+              ),
+            ],
+          );
         },
-        child: Row(
-          children: [
-            // Category Icon with glow
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: catColor.withValues(alpha: 0.18),
-                border: Border.all(color: catColor.withValues(alpha: 0.3)),
-              ),
-              child: Icon(catIcon, color: catColor, size: 22),
-            ),
-            const SizedBox(width: 14),
-
-            // Title & Info
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    expense.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Row(
-                    children: [
-                      Text(
-                        '${DateHelpers.formatShortDate(expense.date)} • ${DateHelpers.formatTime(expense.date)}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
-                        ),
-                      ),
-                      if (!expense.isPersonal) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                          decoration: BoxDecoration(
-                            color: AppColors.primaryViolet.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            expense.creatorName ?? 'Group',
-                            style: const TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.primaryViolet,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            // Amount & Action Menu
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  CurrencyFormatter.format(expense.amount, currencyCode: currency),
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-                PopupMenuButton<String>(
-                  padding: EdgeInsets.zero,
-                  icon: const Icon(Icons.more_horiz_rounded, size: 20, color: Colors.grey),
-                  onSelected: (val) {
-                    if (val == 'edit') {
-                      AddEditExpenseSheet.show(context, expense: expense);
-                    } else if (val == 'delete') {
-                      _confirmDelete(expense);
-                    }
-                  },
-                  itemBuilder: (ctx) => [
-                    if (expense.canEdit(currentUserId) || currentUserId == 'demo-user-id')
-                      const PopupMenuItem(
-                        value: 'edit',
-                        child: Row(
-                          children: [
-                            Icon(Icons.edit_outlined, size: 18),
-                            SizedBox(width: 8),
-                            Text('Edit'),
-                          ],
-                        ),
-                      ),
-                    if (expense.canDelete(currentUserId, isGroupAdmin) || currentUserId == 'demo-user-id')
-                      const PopupMenuItem(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            Icon(Icons.delete_outline, size: 18, color: AppColors.error),
-                            SizedBox(width: 8),
-                            Text('Delete', style: TextStyle(color: AppColors.error)),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ],
-        ),
       ),
     );
   }
+}
 
-  Widget _buildEmptyState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.primaryCyan.withValues(alpha: 0.1),
-              ),
-              child: const Icon(Icons.savings_outlined, size: 48, color: AppColors.primaryCyan),
-            ),
-            const SizedBox(height: 18),
-            const Text(
-              'No Expenses Found',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'No expenses match your active filters or search terms.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey, fontSize: 13),
-            ),
-          ],
-        ),
-      ),
-    );
+/// The date header for an expense at [instant]: Today, Yesterday and
+/// Tomorrow from the app's strings, else a weekday or a locale date.
+String _sectionTitle(AppLocalizations l10n, DateTime instant, DateTime now) =>
+    switch (DateHelpers.calendarDaysBetween(instant, now)) {
+      0 => l10n.expensesSectionToday,
+      1 => l10n.expensesSectionYesterday,
+      -1 => l10n.expensesSectionTomorrow,
+      _ => DateHelpers.sectionHeader(instant, now: now),
+    };
+
+/// Loads the next page when it comes into view; Retry when that failed.
+class _Footer extends StatelessWidget {
+  const _Footer({required this.list, required this.onLoadMore});
+
+  final ExpenseListState list;
+  final Future<void> Function() onLoadMore;
+
+  @override
+  Widget build(BuildContext context) {
+    final failure = list.loadMoreFailure;
+    if (failure != null) {
+      return CompactRetry(
+        error: failure,
+        onRetry: () => unawaited(onLoadMore()),
+      );
+    }
+    if (!list.isLoadingMore) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) unawaited(onLoadMore());
+      });
+    }
+    return const SkeletonList(itemCount: 2);
   }
 }

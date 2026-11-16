@@ -44,5 +44,30 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# Environment variables
+# Environment variables and local configuration (never commit secrets)
 .env
+.env.*
+config/*
+!config/dev.example.json
+!config/README.md
+
+# Android signing material
+android/key.properties
+*.jks
+*.keystore
+
+# Gradle reports written outside /build/ and Supabase CLI scratch files
+/android/build/
+supabase/.temp/
+
+# Signing certificates, provisioning profiles and Firebase configs
+*.p8
+*.p12
+*.pem
+*.mobileprovision
+*.cer
+*.der
+AuthKey_*.p8
+google-services.json
+GoogleService-Info.plist
+android/app/upload-keystore*

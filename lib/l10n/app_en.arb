@@ -1,0 +1,1809 @@
+{
+  "@@locale": "en",
+  "appName": "Exevra",
+  "@appName": {
+    "description": "Product name. Not translated."
+  },
+  "appTagline": "Expense & Split Tracker",
+  "@appTagline": {
+    "description": "Subtitle shown under the product name."
+  },
+  "ok": "OK",
+  "cancel": "Cancel",
+  "confirm": "Confirm",
+  "delete": "Delete",
+  "save": "Save",
+  "close": "Close",
+  "dismiss": "Dismiss",
+  "retry": "Retry",
+  "@retry": {
+    "description": "Button that repeats a failed action."
+  },
+  "showPassword": "Show password",
+  "@showPassword": {
+    "description": "Tooltip of the button that reveals a hidden password."
+  },
+  "hidePassword": "Hide password",
+  "@hidePassword": {
+    "description": "Tooltip of the button that hides a revealed password."
+  },
+  "undo": "Undo",
+  "@undo": {
+    "description": "Snackbar action that reverts the last change."
+  },
+  "loading": "Loading…",
+  "@loading": {
+    "description": "Accessibility label and text for a loading indicator."
+  },
+  "errorTitle": "Something went wrong",
+  "genericErrorMessage": "Something went wrong. Please try again.",
+  "discardChangesTitle": "Discard changes?",
+  "discardChangesMessage": "You have unsaved changes. If you leave now, they will be lost.",
+  "discardChangesConfirm": "Discard",
+  "keepEditing": "Keep editing",
+  "offlineTitle": "You're offline",
+  "offlineMessage": "Some actions need an internet connection.",
+  "snackbarSuccessLabel": "Success",
+  "@snackbarSuccessLabel": {
+    "description": "Screen reader prefix for a success message."
+  },
+  "snackbarErrorLabel": "Error",
+  "@snackbarErrorLabel": {
+    "description": "Screen reader prefix for an error message."
+  },
+  "snackbarInfoLabel": "Information",
+  "@snackbarInfoLabel": {
+    "description": "Screen reader prefix for an informational message."
+  },
+  "statusPending": "Pending",
+  "@statusPending": {
+    "description": "Settlement waiting for the payee to confirm."
+  },
+  "statusConfirmed": "Confirmed",
+  "statusVoided": "Voided",
+  "roleAdmin": "Admin",
+  "roleMember": "Member",
+  "roleViewer": "Viewer",
+  "amountPositive": "Plus {amount}",
+  "@amountPositive": {
+    "description": "Screen reader label for money coming in or owed to the user.",
+    "placeholders": {
+      "amount": {
+        "type": "String",
+        "example": "₹1,250.00"
+      }
+    }
+  },
+  "amountNegative": "Minus {amount}",
+  "@amountNegative": {
+    "description": "Screen reader label for money going out or owed by the user.",
+    "placeholders": {
+      "amount": {
+        "type": "String",
+        "example": "₹1,250.00"
+      }
+    }
+  },
+  "linkOpenFailed": "Couldn't open the link. Please try again later.",
+  "@linkOpenFailed": {
+    "description": "Error shown when a web page cannot be opened."
+  },
+  "opensInBrowser": "Opens in your browser",
+  "@opensInBrowser": {
+    "description": "Screen reader hint for a row that opens a web page."
+  },
+  "aboutTitle": "About",
+  "@aboutTitle": {
+    "description": "Title of the About screen."
+  },
+  "aboutVersion": "Version {version} ({build})",
+  "@aboutVersion": {
+    "description": "App version and build number.",
+    "placeholders": {
+      "version": {
+        "type": "String",
+        "example": "1.0.0"
+      },
+      "build": {
+        "type": "String",
+        "example": "1"
+      }
+    }
+  },
+  "aboutCredit": "Designed & developed by Bharat Sharma",
+  "@aboutCredit": {
+    "description": "Credit line on the About screen. Not translated."
+  },
+  "aboutLegalese": "© 2026 Bharat Sharma",
+  "@aboutLegalese": {
+    "description": "Copyright line on the open-source licenses page."
+  },
+  "aboutSupportSection": "Help & legal",
+  "@aboutSupportSection": {
+    "description": "Section title on the About screen."
+  },
+  "aboutPrivacyPolicy": "Privacy policy",
+  "aboutTermsOfUse": "Terms of use",
+  "aboutHelpSupport": "Help & support",
+  "aboutLicenses": "Open-source licenses",
+  "@aboutLicenses": {
+    "description": "Row that opens the list of third-party licenses. US spelling, to match the title of the system licenses page it opens."
+  },
+  "aboutAccountSection": "Account",
+  "@aboutAccountSection": {
+    "description": "Section title on the About screen."
+  },
+  "aboutDeleteAccountInfo": "Account deletion info",
+  "@aboutDeleteAccountInfo": {
+    "description": "Row that opens the web page about deleting an account."
+  },
+  "aboutDeleteAccountInfoSubtitle": "How to delete your account and data, also without the app",
+  "aboutDeleteAccount": "Delete account",
+  "@aboutDeleteAccount": {
+    "description": "Destructive button that starts account deletion."
+  },
+  "supportEmailSubject": "Exevra support",
+  "@supportEmailSubject": {
+    "description": "Subject of the support email."
+  },
+  "supportEmailBody": "App version: {version}",
+  "@supportEmailBody": {
+    "description": "Body of the support email.",
+    "placeholders": {
+      "version": {
+        "type": "String",
+        "example": "1.0.0 (1)"
+      }
+    }
+  },
+  "supportEmailOpenFailed": "Couldn't open an email app. Write to us at {email}.",
+  "@supportEmailOpenFailed": {
+    "description": "Error shown when no email app can be opened.",
+    "placeholders": {
+      "email": {
+        "type": "String",
+        "example": "support@exevra.app"
+      }
+    }
+  },
+  "authEmailLabel": "Email address",
+  "authEmailHint": "name@example.com",
+  "authPasswordLabel": "Password",
+  "authNewPasswordLabel": "New password",
+  "authConfirmPasswordLabel": "Confirm password",
+  "authConfirmNewPasswordLabel": "Confirm new password",
+  "authPasswordRules": "At least 8 characters with upper and lower case letters and a number.",
+  "@authPasswordRules": {"description": "Helper text under a new password field."},
+  "authCodeLabel": "8-digit code",
+  "@authCodeLabel": {"description": "Label of the field for the code from the email."},
+  "authNameLabel": "Your name",
+  "authOr": "or",
+  "@authOr": {"description": "Divider between email sign-in and the Google or Apple buttons."},
+  "authContinueWithGoogle": "Continue with Google",
+  "authContinueWithApple": "Continue with Apple",
+  "authLoginTitle": "Welcome back",
+  "authLoginSubtitle": "Sign in to track your spending and split costs with others.",
+  "authForgotPassword": "Forgot password?",
+  "authSignIn": "Sign in",
+  "authNoAccount": "Don't have an account?",
+  "authSignUp": "Sign up",
+  "authRegisterTitle": "Create your account",
+  "authRegisterSubtitle": "Track your own spending and split costs with others.",
+  "authAgreeTerms": "I'm 18 or older and agree to the Terms and Privacy Policy",
+  "@authAgreeTerms": {"description": "Label of the sign-up checkbox. The two documents open from the links under it."},
+  "authTermsLink": "Terms of Service",
+  "authPrivacyLink": "Privacy Policy",
+  "authCreateAccount": "Create account",
+  "authHaveAccount": "Already have an account?",
+  "authResetPasswordAction": "Reset password",
+  "@authResetPasswordAction": {"description": "Button shown when an account already exists for the email."},
+  "authVerifyTitle": "Verify your email",
+  "authVerifySubtitle": "We sent a confirmation link and an 8-digit code to",
+  "@authVerifySubtitle": {"description": "Followed by the email address on its own line."},
+  "authVerifyCode": "Verify code",
+  "authVerifyConfirmed": "I've confirmed my email",
+  "authResendEmail": "Resend email",
+  "authResendCode": "Resend code",
+  "authResendIn": "You can resend in {time}",
+  "@authResendIn": {"description": "Shown while a new email cannot be sent yet. {time} is a countdown such as 0:42.", "placeholders": {"time": {"type": "String", "example": "0:42"}}},
+  "authResendInSemantics": "Resend available in {seconds, plural, =1{1 second} other{{seconds} seconds}}",
+  "@authResendInSemantics": {"description": "Screen reader label of the disabled resend button.", "placeholders": {"seconds": {"type": "int"}}},
+  "authResendReady": "You can send a new email now.",
+  "@authResendReady": {"description": "Announced to screen readers when the resend countdown ends."},
+  "authEmailResent": "We sent a new email. Check your inbox.",
+  "authEnterPasswordToContinue": "Enter your password to continue.",
+  "authNotConfirmedYet": "Your email isn't confirmed yet. Open the link or enter the code from the email.",
+  "authCheckSpam": "Can't find it? Check your spam folder.",
+  "authUseDifferentEmail": "Use a different email",
+  "authForgotTitle": "Reset your password",
+  "authForgotSubtitle": "Enter your account's email address and we'll send you an 8-digit code.",
+  "authCodeTitle": "Enter the code",
+  "authCodeSubtitle": "Enter the 8-digit code we emailed to {email} and choose a new password.",
+  "@authCodeSubtitle": {"placeholders": {"email": {"type": "String", "example": "name@example.com"}}},
+  "authSendCode": "Send code",
+  "authCodeSent": "If an account exists for this address, we emailed it an 8-digit code.",
+  "authSetNewPassword": "Set new password",
+  "authResetTitle": "Choose a new password",
+  "authResetSubtitle": "Set a new password to finish resetting it.",
+  "authResetSubtitleFor": "Set a new password for {email} to finish resetting it.",
+  "@authResetSubtitleFor": {"placeholders": {"email": {"type": "String", "example": "name@example.com"}}},
+  "authSavePassword": "Save password",
+  "authCancelAndSignOut": "Cancel and sign out",
+  "authBack": "Back",
+  "lockTitle": "Exevra is locked",
+  "lockMessage": "Use your fingerprint, face or device PIN to continue.",
+  "lockUnlock": "Unlock",
+  "lockChecking": "Checking it's you…",
+  "@lockChecking": {"description": "Shown while the fingerprint, face or PIN prompt is open."},
+  "lockTurnOffExplanation": "You just signed in, so you can turn App Lock off on this device. Turn it on again in Profile once the device has a screen lock.",
+  "lockTurnOff": "Turn off App Lock",
+  "lockSignOut": "Sign out",
+  "lockSignOutInstead": "Sign out instead",
+  "lockSignOutConfirm": "Sign out on this device? App Lock stays on for this account when you sign in again.",
+  "lockCoverLabel": "Exevra is hidden while in the background",
+  "@lockCoverLabel": {"description": "Screen reader label of the cover shown in the app switcher."},
+  "profileTitle": "Profile",
+  "@profileTitle": {"description": "Title of the Profile tab."},
+  "profileLoadFailed": "We couldn't load your profile.",
+  "profileEditTooltip": "Edit profile",
+  "profileEditTitle": "Edit profile",
+  "profileNameLabel": "Display name",
+  "profileNameHelper": "Shown to people in your groups.",
+  "profilePhotoLabel": "Photo link (optional)",
+  "profilePhotoHint": "https://…",
+  "profilePhotoHelper": "A link to an image that starts with https://.",
+  "profileSaved": "Profile updated.",
+  "profileFallbackName": "You",
+  "@profileFallbackName": {"description": "Shown when the account has no name yet."},
+  "profileAvatarLabel": "Profile photo of {name}",
+  "@profileAvatarLabel": {"placeholders": {"name": {"type": "String", "example": "Priya"}}},
+  "settingsSection": "Settings",
+  "settingsAppearance": "Appearance",
+  "settingsThemeSystem": "System",
+  "settingsThemeLight": "Light",
+  "settingsThemeDark": "Dark",
+  "settingsThemeHint": "System follows your device setting.",
+  "settingsThemeSelected": "Selected",
+  "@settingsThemeSelected": {"description": "Read after the chosen theme in the large-text theme list."},
+  "settingsCurrency": "Default currency",
+  "settingsCurrencySubtitle": "{code} · {name}. Used for new personal expenses; groups keep their own currency.",
+  "@settingsCurrencySubtitle": {"placeholders": {"code": {"type": "String", "example": "INR"}, "name": {"type": "String", "example": "Indian Rupee"}}},
+  "settingsCurrencyPickerTitle": "Choose a currency",
+  "settingsCurrencySearch": "Search currencies",
+  "settingsCurrencyNoMatch": "No currency matches \"{query}\".",
+  "@settingsCurrencyNoMatch": {"placeholders": {"query": {"type": "String", "example": "xyz"}}},
+  "settingsCurrencySelected": "Selected",
+  "settingsCurrencySaved": "Default currency set to {code}.",
+  "@settingsCurrencySaved": {"placeholders": {"code": {"type": "String", "example": "EUR"}}},
+  "settingsAppLock": "App Lock",
+  "settingsAppLockOn": "On. Exevra asks for your fingerprint, face or device PIN when it opens.",
+  "settingsAppLockOff": "Ask for your fingerprint, face or device PIN when Exevra opens.",
+  "settingsAppLockChecking": "Checking it's you…",
+  "settingsAppLockTurnedOn": "App Lock is on.",
+  "settingsAppLockTurnedOff": "App Lock is off.",
+  "settingsHaptics": "Vibration feedback",
+  "settingsHapticsSubtitle": "A light vibration when you tap buttons and switches.",
+  "settingsAssistant": "AI assistant",
+  "settingsAssistantOn": "On. The assistant can use a summary of your spending to answer your questions.",
+  "settingsAssistantOff": "Off. Turn it on to ask questions about your spending.",
+  "settingsSaveFailed": "We couldn't save that setting. {reason}",
+  "@settingsSaveFailed": {"description": "A setting failed to save. {reason} is the friendly error.", "placeholders": {"reason": {"type": "String", "example": "Check your connection."}}},
+  "settingsAccountSection": "Account",
+  "settingsSignOut": "Sign out",
+  "settingsSignOutTitle": "Sign out?",
+  "settingsSignOutMessage": "Your data stays in your account. To come back, sign in again with your email and password or Google. App Lock is turned off on this device.",
+  "settingsDeleteAccount": "Delete account",
+  "settingsDeleteAccountSubtitle": "Permanently delete your account and personal data.",
+  "settingsDeleteTitle": "Delete your account?",
+  "settingsDeleteMessage": "This permanently deletes your profile, your personal expenses, your settings and your AI assistant history.\n\nExpenses you added to shared groups stay with those groups so the other members' balances remain correct; they will show as \"Former member\". If you are a group admin, the longest-standing member becomes admin; groups with no other members are deleted. Payments still waiting for confirmation are cancelled.\n\nThis can't be undone.",
+  "settingsDeleting": "Deleting your account…",
+  "settingsDeleted": "Your account was deleted.",
+  "settingsReauthTitle": "Confirm it's you",
+  "settingsReauthPassword": "For your security, enter your password to delete your account.",
+  "settingsReauthPasswordMissing": "Enter your password",
+  "@settingsReauthPasswordMissing": {
+    "description": "Inline error when Continue is tapped with an empty password."
+  },
+  "settingsReauthProvider": "For your security, sign in with {provider} again to delete your account.",
+  "@settingsReauthProvider": {"placeholders": {"provider": {"type": "String", "example": "Google"}}},
+  "settingsReauthContinueWith": "Continue with {provider}",
+  "@settingsReauthContinueWith": {"placeholders": {"provider": {"type": "String", "example": "Google"}}},
+  "settingsReauthContinue": "Continue",
+  "settingsReauthChecking": "Checking it's you…",
+  "inviteTitle": "Group invitation",
+  "inviteClose": "Close",
+  "inviteLoading": "Checking the invitation…",
+  "inviteProblemTitle": "This invitation can't be opened",
+  "inviteSignedInAs": "You're signed in as {email}.",
+  "@inviteSignedInAs": {"placeholders": {"email": {"type": "String", "example": "priya@example.com"}}},
+  "inviteWrongEmailHelp": "Sign out and sign in with the address the invitation was sent to, or ask the group admin to invite {email} instead.",
+  "@inviteWrongEmailHelp": {"placeholders": {"email": {"type": "String", "example": "priya@example.com"}}},
+  "inviteSwitchAccount": "Sign out and use the invited address",
+  "inviteBack": "Back",
+  "inviteGoHome": "Go to Home",
+  "inviteSignedOutTitle": "You've been invited to a group",
+  "inviteSignedOutMessage": "Sign in or create an account with the invited email address to see the invitation and join.",
+  "inviteSignIn": "Sign in to see it",
+  "inviteCreateAccount": "Create an account",
+  "invitePendingTitle": "You're invited to {group}",
+  "@invitePendingTitle": {"placeholders": {"group": {"type": "String", "example": "Flatmates"}}},
+  "invitePendingMessage": "{inviter} invited you to share expenses in this group.",
+  "@invitePendingMessage": {"placeholders": {"inviter": {"type": "String", "example": "Priya"}}},
+  "inviteSomeone": "A group admin",
+  "@inviteSomeone": {"description": "Used when the inviter has no name."},
+  "inviteAcceptedTitle": "You're already in {group}",
+  "@inviteAcceptedTitle": {"placeholders": {"group": {"type": "String", "example": "Flatmates"}}},
+  "inviteAcceptedMessage": "You are already a member of this group.",
+  "inviteExpiredTitle": "This invitation has expired",
+  "inviteExpiredMessage": "Ask someone in the group to send you a new invitation.",
+  "inviteCancelledTitle": "This invitation is no longer active",
+  "inviteCancelledMessage": "It was cancelled or declined. Ask the group admin for a new one if you still want to join.",
+  "inviteGroupLabel": "Group",
+  "inviteInvitedBy": "Invited by",
+  "inviteRoleLabel": "Your role",
+  "inviteValidUntil": "Valid until",
+  "inviteExpiredOn": "Expired on",
+  "inviteAccept": "Join group",
+  "inviteDecline": "Decline",
+  "inviteDeclineTitle": "Decline this invitation?",
+  "inviteDeclineMessage": "You won't join {group}. Someone in the group can invite you again later.",
+  "@inviteDeclineMessage": {"placeholders": {"group": {"type": "String", "example": "Flatmates"}}},
+  "inviteDeclined": "Invitation declined.",
+  "inviteJoined": "You joined {group}.",
+  "@inviteJoined": {"placeholders": {"group": {"type": "String", "example": "Flatmates"}}},
+  "inviteOpenGroup": "Open the group",
+  "onboardingSkip": "Skip",
+  "@onboardingSkip": {
+    "description": "Button that leaves the introduction."
+  },
+  "onboardingSkipTooltip": "Skip the introduction",
+  "onboardingNext": "Next",
+  "onboardingGetStarted": "Get started",
+  "@onboardingGetStarted": {
+    "description": "Button on the last introduction page."
+  },
+  "onboardingPageIndicator": "Page {current} of {total}",
+  "@onboardingPageIndicator": {
+    "description": "Screen reader label of the introduction page indicator.",
+    "placeholders": {
+      "current": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "onboardingPageAnnouncement": "Page {current} of {total}: {title}",
+  "@onboardingPageAnnouncement": {
+    "description": "Screen reader label of the introduction page indicator, announced when the page changes. {title} is the title of the page.",
+    "placeholders": {
+      "current": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      },
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "onboardingTrackTitle": "Track every expense",
+  "onboardingTrackBody": "Log personal and shared spending in your own currency and see where your money goes.",
+  "onboardingSplitTitle": "Split and settle up",
+  "onboardingSplitBody": "Share costs with a group and see who owes whom. When you settle up, the payment counts once the person who receives it confirms it.",
+  "onboardingAssistantTitle": "Ask about your spending",
+  "onboardingAssistantBody": "Ask the assistant questions about your spending. It's optional and respects your privacy: it only sees your spending totals if you allow it, and you can turn it off in Settings.",
+  "firstExpenseNudgeTitle": "Add your first expense",
+  "firstExpenseNudgeMessage": "Record a purchase to start seeing where your money goes.",
+  "firstExpenseNudgeAction": "Add expense",
+  "firstExpenseNudgeDismiss": "Dismiss tip",
+  "@firstExpenseNudgeDismiss": {
+    "description": "Tooltip of the button that hides the first-expense tip for good."
+  },
+  "shellNavHome": "Home",
+  "@shellNavHome": {
+    "description": "Bottom navigation tab with the spending summary."
+  },
+  "shellNavExpenses": "Expenses",
+  "shellNavInsights": "Insights",
+  "shellNavAssistant": "Assistant",
+  "@shellNavAssistant": {
+    "description": "Bottom navigation tab of the AI assistant."
+  },
+  "shellNavProfile": "Profile",
+  "shellOfflineMessage": "Changes can't be saved until you reconnect.",
+  "@shellOfflineMessage": {
+    "description": "Second line of the offline banner shown above every tab."
+  },
+  "dashboardGreetingMorning": "Good morning",
+  "dashboardGreetingAfternoon": "Good afternoon",
+  "dashboardGreetingEvening": "Good evening",
+  "dashboardScopePersonal": "Personal",
+  "@dashboardScopePersonal": {
+    "description": "Name of the personal (no group) view."
+  },
+  "dashboardScopeButtonLabel": "Showing {scope}. Change view",
+  "@dashboardScopeButtonLabel": {
+    "description": "Screen reader label of the button that switches between personal and group views.",
+    "placeholders": {
+      "scope": {
+        "type": "String",
+        "example": "Personal"
+      }
+    }
+  },
+  "dashboardScopeButtonTooltip": "Change view",
+  "dashboardSwitcherTitle": "Show spending for",
+  "dashboardSwitcherPersonalSubtitle": "Your expenses and your share of group expenses",
+  "dashboardSwitcherGroupSubtitle": "Everything spent in this group",
+  "dashboardSwitcherSelected": "Selected",
+  "@dashboardSwitcherSelected": {
+    "description": "Screen reader suffix for the view that is currently shown."
+  },
+  "dashboardSwitcherManageGroups": "Manage groups",
+  "dashboardYourSpending": "Your spending",
+  "@dashboardYourSpending": {
+    "description": "Title of the summary card in personal view."
+  },
+  "dashboardGroupTotal": "Group total",
+  "@dashboardGroupTotal": {
+    "description": "Title of the summary card in group view: what everyone in the group spent."
+  },
+  "dashboardPersonalScopeNote": "Your personal expenses plus your share of group expenses",
+  "dashboardGroupScopeNote": "Everything spent in {group}, by everyone",
+  "@dashboardGroupScopeNote": {
+    "placeholders": {
+      "group": {
+        "type": "String",
+        "example": "Goa trip"
+      }
+    }
+  },
+  "dashboardTotalUnavailable": "Not available",
+  "@dashboardTotalUnavailable": {
+    "description": "Screen reader text for a total that could not be loaded."
+  },
+  "dashboardSummaryLabel": "{title}, {period}: {amount}",
+  "@dashboardSummaryLabel": {
+    "description": "Screen reader label of the summary total.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Your spending"
+      },
+      "period": {
+        "type": "String",
+        "example": "Last 30 days"
+      },
+      "amount": {
+        "type": "String",
+        "example": "₹1,250.00"
+      }
+    }
+  },
+  "dashboardDailyAverage": "Daily average",
+  "dashboardExpenseCountLabel": "Expenses",
+  "dashboardOtherCurrencies": "Also spent in other currencies: {amounts}. Not included in this total.",
+  "@dashboardOtherCurrencies": {
+    "placeholders": {
+      "amounts": {
+        "type": "String",
+        "example": "$25.00, €10.00"
+      }
+    }
+  },
+  "dashboardBalanceTitle": "Your balance in this group",
+  "dashboardBalanceYouOwe": "You owe {amount}",
+  "@dashboardBalanceYouOwe": {
+    "placeholders": {
+      "amount": {
+        "type": "String",
+        "example": "₹250.00"
+      }
+    }
+  },
+  "dashboardBalanceOwesYou": "The group owes you {amount}",
+  "@dashboardBalanceOwesYou": {
+    "placeholders": {
+      "amount": {
+        "type": "String",
+        "example": "₹250.00"
+      }
+    }
+  },
+  "dashboardBalanceSettled": "You're all settled up",
+  "dashboardAskAssistant": "Ask the assistant",
+  "dashboardAskAssistantSubtitle": "Questions about your spending, budgets or saving",
+  "dashboardSettleUpTitle": "Who owes whom",
+  "dashboardSettleUpAction": "Settle up",
+  "dashboardYouOwePerson": "You owe {name}",
+  "@dashboardYouOwePerson": {
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Priya"
+      }
+    }
+  },
+  "dashboardPersonOwesYou": "{name} owes you",
+  "@dashboardPersonOwesYou": {
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Priya"
+      }
+    }
+  },
+  "dashboardPersonOwesPerson": "{from} owes {to}",
+  "@dashboardPersonOwesPerson": {
+    "placeholders": {
+      "from": {
+        "type": "String",
+        "example": "Priya"
+      },
+      "to": {
+        "type": "String",
+        "example": "Arjun"
+      }
+    }
+  },
+  "dashboardMemberFallback": "A member",
+  "@dashboardMemberFallback": {
+    "description": "Name used when a group member's name is not known."
+  },
+  "dashboardHighlightsTitle": "Highlights",
+  "dashboardSeeInsights": "See insights",
+  "dashboardTopCategory": "Top category",
+  "dashboardBiggestExpense": "Biggest expense",
+  "dashboardNoneYet": "None yet",
+  "dashboardHighlightFailed": "Couldn't load",
+  "@dashboardHighlightFailed": {
+    "description": "Shown in a Home highlight card when the insights failed to load."
+  },
+  "dashboardRecentPersonal": "Recent personal expenses",
+  "dashboardRecentGroup": "Recent in {group}",
+  "@dashboardRecentGroup": {
+    "placeholders": {
+      "group": {
+        "type": "String",
+        "example": "Goa trip"
+      }
+    }
+  },
+  "dashboardSeeAll": "See all",
+  "dashboardEmptyPersonalTitle": "No expenses yet",
+  "dashboardEmptyPersonalMessage": "Add an expense to start seeing where your money goes.",
+  "dashboardEmptyGroupTitle": "No group expenses yet",
+  "dashboardEmptyGroupMessage": "Expenses added to {group} will show up here.",
+  "@dashboardEmptyGroupMessage": {
+    "placeholders": {
+      "group": {
+        "type": "String",
+        "example": "Goa trip"
+      }
+    }
+  },
+  "dashboardAddExpense": "Add expense",
+  "@dashboardAddExpense": {
+    "description": "Floating button and empty-state button that open the new expense form."
+  },
+  "dashboardExpenseSubtitle": "{category} · {date}",
+  "@dashboardExpenseSubtitle": {
+    "placeholders": {
+      "category": {
+        "type": "String",
+        "example": "Food"
+      },
+      "date": {
+        "type": "String",
+        "example": "12 Nov, 7:30 PM"
+      }
+    }
+  },
+  "insightsTitle": "Insights",
+  "insightsRefreshTooltip": "Refresh insights",
+  "insightsTimeframeLabel": "Time range",
+  "insightsTimeframeWeek": "Week",
+  "insightsTimeframeMonth": "Month",
+  "insightsTimeframeYear": "Year",
+  "insightsPeriodWeek": "Last 7 days",
+  "insightsPeriodMonth": "Last 30 days",
+  "insightsPeriodYear": "Last 12 months",
+  "insightsScopePersonal": "Your personal expenses plus your share of group expenses",
+  "insightsScopeGroup": "Everything spent in {group}",
+  "@insightsScopeGroup": {
+    "placeholders": {
+      "group": {
+        "type": "String",
+        "example": "Goa trip"
+      }
+    }
+  },
+  "insightsScopeGroupFallback": "this group",
+  "insightsTotalSpent": "Total spent",
+  "insightsTotalLabel": "Total spent, {period}: {amount}",
+  "@insightsTotalLabel": {
+    "description": "Screen reader label of the insights total.",
+    "placeholders": {
+      "period": {
+        "type": "String",
+        "example": "Last 30 days"
+      },
+      "amount": {
+        "type": "String",
+        "example": "₹1,200.00"
+      }
+    }
+  },
+  "insightsExpenseCount": "{count, plural, =0{No expenses} =1{1 expense} other{{count} expenses}}",
+  "@insightsExpenseCount": {
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "insightsDailyAverage": "Daily average",
+  "insightsBiggestExpense": "Biggest expense",
+  "insightsNone": "None",
+  "insightsOtherCurrencies": "Also spent: {amounts}",
+  "@insightsOtherCurrencies": {
+    "placeholders": {
+      "amounts": {
+        "type": "String",
+        "example": "$25.00, €10.00"
+      }
+    }
+  },
+  "insightsOtherCurrenciesNote": "Other currencies aren't included in the totals or charts.",
+  "insightsTrendTitle": "Spending over time",
+  "insightsTrendSummary": "Bar chart of spending, {period}. Highest: {date}, {amount}. {activeCount} of {bucketCount} with spending.",
+  "@insightsTrendSummary": {
+    "description": "Screen reader summary of the spending chart.",
+    "placeholders": {
+      "period": {
+        "type": "String",
+        "example": "last 30 days"
+      },
+      "date": {
+        "type": "String",
+        "example": "12 Nov"
+      },
+      "amount": {
+        "type": "String",
+        "example": "₹1,200.00"
+      },
+      "activeCount": {
+        "type": "int",
+        "format": "decimalPattern"
+      },
+      "bucketCount": {
+        "type": "String",
+        "example": "30 days"
+      }
+    }
+  },
+  "insightsDays": "{count, plural, =1{1 day} other{{count} days}}",
+  "@insightsDays": {
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "insightsMonths": "{count, plural, =1{1 month} other{{count} months}}",
+  "@insightsMonths": {
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "insightsBarTooltip": "{date}\n{amount}",
+  "@insightsBarTooltip": {
+    "placeholders": {
+      "date": {
+        "type": "String",
+        "example": "12 Nov"
+      },
+      "amount": {
+        "type": "String",
+        "example": "₹1,200.00"
+      }
+    }
+  },
+  "insightsCategoriesTitle": "Spending by category",
+  "insightsCategoriesSummary": "Donut chart of spending by category. {details}",
+  "@insightsCategoriesSummary": {
+    "placeholders": {
+      "details": {
+        "type": "String",
+        "example": "Food 45%, Transport 30%"
+      }
+    }
+  },
+  "insightsCategoryRowLabel": "{category}: {amount}, {percent} of spending, {count}",
+  "@insightsCategoryRowLabel": {
+    "placeholders": {
+      "category": {
+        "type": "String",
+        "example": "Food"
+      },
+      "amount": {
+        "type": "String",
+        "example": "₹1,200.00"
+      },
+      "percent": {
+        "type": "String",
+        "example": "45%"
+      },
+      "count": {
+        "type": "String",
+        "example": "3 expenses"
+      }
+    }
+  },
+  "insightsEmptyTitle": "No spending in this period",
+  "insightsEmptyPersonal": "Add an expense, or choose a longer time range.",
+  "insightsEmptyGroup": "Expenses added to this group will show up here.",
+  "insightsAddExpense": "Add expense",
+  "insightsErrorTitle": "Couldn't load your insights",
+  "insightsExpenseDetail": "{category} · {date}",
+  "@insightsExpenseDetail": {
+    "placeholders": {
+      "category": {
+        "type": "String",
+        "example": "Food"
+      },
+      "date": {
+        "type": "String",
+        "example": "12 Nov 2026"
+      }
+    }
+  },
+  "chatAssistantName": "Exevra Assistant",
+  "@chatAssistantName": {
+    "description": "Name of the AI assistant. 'Exevra' is not translated."
+  },
+  "chatAnswersBy": "Answers by {provider}",
+  "@chatAnswersBy": {
+    "placeholders": {
+      "provider": {
+        "type": "String",
+        "example": "Claude"
+      }
+    }
+  },
+  "chatAuthorLine": "{name} · {provider}",
+  "@chatAuthorLine": {
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Exevra Assistant"
+      },
+      "provider": {
+        "type": "String",
+        "example": "Claude"
+      }
+    }
+  },
+  "chatDisclaimer": "Exevra Assistant can make mistakes. Not financial advice.",
+  "chatInterrupted": "Response interrupted. Tap Retry.",
+  "chatStopped": "Stopped.",
+  "@chatStopped": {
+    "description": "Note under an answer the user stopped."
+  },
+  "chatTruncated": "This answer reached its length limit and may be incomplete.",
+  "chatResponding": "Assistant is responding",
+  "chatAnnounceComplete": "Response complete",
+  "chatAnnounceTruncated": "Response complete, but it may be cut short",
+  "chatAnnounceFailed": "The assistant couldn't answer. {message}",
+  "@chatAnnounceFailed": {
+    "placeholders": {
+      "message": {
+        "type": "String",
+        "example": "Please try again."
+      }
+    }
+  },
+  "chatAnnounceDeclined": "The assistant can't help with that question",
+  "chatAnnounceStopped": "Response stopped",
+  "chatAnnounceInterrupted": "Response interrupted",
+  "chatDeclinedFallback": "I can't help with that. Try asking about your spending, budgets or ways to save.",
+  "chatEmptyTitle": "Ask about your money",
+  "chatEmptyBody": "Ask about your spending, budgets or ways to save, or tap a question below to get started.",
+  "chatPromptsLabel": "Suggested questions",
+  "chatPromptTopCategories": "What are my top spending categories this month?",
+  "chatPromptCompareWeek": "Am I spending more than last week?",
+  "chatPromptTips": "Give me 3 simple ways to spend less",
+  "chatPromptBudgetRule": "Explain the 50/30/20 budgeting rule",
+  "chatPromptGroupFood": "How much did my group spend on food recently?",
+  "chatErrorNetwork": "Couldn't reach the assistant. Check your connection and try again.",
+  "chatErrorTimeout": "The assistant took too long to respond. Please try again.",
+  "chatErrorUnauthorized": "Your session has expired. Please sign in again.",
+  "chatErrorConsent": "Allow the assistant to use your spending summary to continue.",
+  "chatErrorRateLimited": "You're sending messages quickly. Try again in a minute.",
+  "@chatErrorRateLimited": {
+    "description": "Short-term (per minute) limit. Different from the daily limit."
+  },
+  "chatErrorQuota": "You've reached today's assistant limit. It resets at {time}.",
+  "@chatErrorQuota": {
+    "description": "Daily limit. Different from the per-minute limit. time is the local reset time, e.g. 5:30 AM.",
+    "placeholders": {
+      "time": {
+        "type": "String",
+        "example": "5:30 AM"
+      }
+    }
+  },
+  "chatErrorTooLong": "That conversation is too long. Clear the chat and try again.",
+  "chatErrorUnavailable": "The assistant is unavailable right now. Please try again shortly.",
+  "chatErrorGeneric": "Something went wrong. Please try again.",
+  "chatClearTooltip": "Clear conversation",
+  "chatClearTitle": "Clear conversation?",
+  "chatClearMessage": "This deletes the conversation from this device. It can't be undone.",
+  "chatClearConfirm": "Clear",
+  "chatJumpToLatest": "Jump to latest",
+  "chatInputHint": "Ask about your spending…",
+  "chatInputLabel": "Message to the assistant",
+  "chatSend": "Send message",
+  "chatStop": "Stop response",
+  "chatCharacterCount": "{current}/{max}",
+  "@chatCharacterCount": {
+    "placeholders": {
+      "current": {
+        "type": "int"
+      },
+      "max": {
+        "type": "int"
+      }
+    }
+  },
+  "chatThinking": "Thinking…",
+  "chatYouSaid": "You said",
+  "@chatYouSaid": {
+    "description": "Screen reader prefix of the user's own message."
+  },
+  "chatCopyTooltip": "Copy message",
+  "chatCopied": "Message copied",
+  "chatReportTooltip": "Report response",
+  "chatOffTitle": "The assistant is off",
+  "chatOffBody": "You can keep using Exevra without it, and turn it on whenever you like.",
+  "chatOffAction": "Turn on the assistant",
+  "chatConsentTitle": "Before you use {name}",
+  "@chatConsentTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Exevra Assistant"
+      }
+    }
+  },
+  "chatConsentWhatTitle": "What is sent",
+  "chatConsentWhatBody": "Your spending totals by category and month, your 15 most recent expenses (title, category, amount and date; for group expenses only your share), the names of your groups, your currency, time zone, language and today's date, and the messages you write, including earlier messages in this chat.",
+  "chatConsentWhoTitle": "Who receives it",
+  "chatConsentWhoBody": "Anthropic's Claude answers your questions. If it is unavailable, Google's Gemini is used as a backup.",
+  "chatConsentWhyTitle": "Why",
+  "chatConsentWhyBody": "So the assistant can answer questions about your own spending, budgets and ways to save.",
+  "chatConsentOptionalTitle": "It's optional",
+  "chatConsentOptionalBody": "You can use Exevra without the assistant and turn it off at any time in Settings. Turning it off also deletes this conversation from this device.",
+  "chatConsentPrivacy": "Read the privacy policy",
+  "chatConsentPrivacyFailed": "Couldn't open the privacy policy. Please try again later.",
+  "chatConsentAllow": "Allow and continue",
+  "chatConsentNotNow": "Not now",
+  "chatReportTitle": "Report response",
+  "chatReportBody": "Tell us what was wrong. The answer text is sent with your report so we can review it.",
+  "chatReportReasonOffensive": "Offensive",
+  "chatReportReasonHarmful": "Harmful or unsafe",
+  "chatReportReasonInaccurate": "Inaccurate",
+  "chatReportReasonOther": "Something else",
+  "chatReportNote": "Add a note (optional)",
+  "chatReportSend": "Send report",
+  "chatReportSent": "Thanks. Your report was sent.",
+  "chatLinkOpenTitle": "Open this link?",
+  "chatLinkBlockedTitle": "This link can't be opened",
+  "chatLinkOpenBody": "It will open outside Exevra. Check the address first:",
+  "chatLinkBlockedBody": "Only secure (https) links can be opened. The address is:",
+  "chatLinkCopy": "Copy link",
+  "chatLinkOpen": "Open",
+  "chatLinkOpenFailed": "Couldn't open the link.",
+  "chatLinkCopied": "Link copied",
+  "expensesTitle": "Expenses",
+  "@expensesTitle": {
+    "description": "Title of the expenses tab."
+  },
+  "expensesRefresh": "Refresh expenses",
+  "@expensesRefresh": {
+    "description": "Tooltip of the refresh button on the expenses tab."
+  },
+  "expensesAdd": "Add expense",
+  "@expensesAdd": {
+    "description": "Button that opens the form for a new expense."
+  },
+  "expensesAddFirst": "Add your first expense",
+  "expensesEmptyTitle": "No expenses yet",
+  "expensesEmptyMessage": "Add what you spend to see where your money goes.",
+  "expensesEmptyGroupMessage": "Nobody has added an expense to {group} yet. Add the first one to start splitting costs.",
+  "@expensesEmptyGroupMessage": {
+    "placeholders": {
+      "group": {
+        "type": "String"
+      }
+    }
+  },
+  "expensesEmptyViewerMessage": "Nobody has added an expense to {group} yet. You can still add your own personal expenses.",
+  "@expensesEmptyViewerMessage": {
+    "placeholders": {
+      "group": {
+        "type": "String"
+      }
+    }
+  },
+  "expensesEmptyFilteredTitle": "No matching expenses",
+  "expensesEmptyFilteredMessage": "Try a different search, category or date range.",
+  "expensesClearFilters": "Clear filters",
+  "expensesLoadErrorTitle": "Couldn't load your expenses",
+  "expensesResultCount": "{count, plural, =1{1 expense found} other{{count} expenses found}}",
+  "@expensesResultCount": {
+    "description": "Announced while a search or filter is active.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "expensesSectionToday": "Today",
+  "expensesSectionYesterday": "Yesterday",
+  "expensesSectionTomorrow": "Tomorrow",
+  "expensesOnlyPayerCanEdit": "Only the person who paid can edit this expense.",
+  "expensesPersonalTag": "Personal",
+  "@expensesPersonalTag": {
+    "description": "Shown on a personal expense in a list that also has group expenses."
+  },
+  "expensesPaidByYou": "You paid",
+  "expensesPaidBy": "{name} paid",
+  "@expensesPaidBy": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "expensesPaidByFormer": "Paid by a former member",
+  "expensesPaidByMember": "Paid by a group member",
+  "expensesActionsTooltip": "Actions for {title}",
+  "@expensesActionsTooltip": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "expensesEdit": "Edit",
+  "expensesSearchLabel": "Search expenses",
+  "expensesSearchHint": "Search by title",
+  "expensesClearSearch": "Clear search",
+  "expensesTypeAll": "All",
+  "expensesTypePersonal": "Personal",
+  "expensesTypeGroup": "Group",
+  "expensesDateFilterTooltip": "Filter by date",
+  "expensesDateFilterTitle": "Show expenses from",
+  "expensesDateAny": "Any date",
+  "expensesDateLast7Days": "Last 7 days",
+  "expensesDateThisMonth": "This month",
+  "expensesDateLastMonth": "Last month",
+  "expensesDateLast3Months": "Last 3 months",
+  "expensesDateThisYear": "This year",
+  "expensesAllCategories": "All categories",
+  "expensesCategoryFood": "Food",
+  "expensesCategoryTransport": "Transport",
+  "expensesCategoryHousing": "Housing",
+  "expensesCategoryEntertainment": "Entertainment",
+  "expensesCategoryHealthcare": "Healthcare",
+  "expensesCategoryUtilities": "Utilities",
+  "expensesCategoryShopping": "Shopping",
+  "expensesCategoryPersonal": "Personal",
+  "expensesCategoryEducation": "Education",
+  "expensesCategoryOther": "Other",
+  "expensesLockedTitle": "This expense is locked",
+  "expensesLockedRow": "Locked: someone in it left the group",
+  "expensesDeleteTitle": "Delete expense?",
+  "expensesDeleteMessage": "\"{title}\" ({amount}) will be deleted.",
+  "@expensesDeleteMessage": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      },
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "expensesDeleteGroupMessage": "\"{title}\" ({amount}) will be deleted for everyone in the group, and the balances will change.",
+  "@expensesDeleteGroupMessage": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      },
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "expensesDeleteNoUndo": "You didn't pay for it, so this can't be undone.",
+  "expensesDeleted": "Deleted \"{title}\"",
+  "@expensesDeleted": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "expensesRestored": "Restored \"{title}\"",
+  "@expensesRestored": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "expensesAddTitle": "Add expense",
+  "@expensesAddTitle": {
+    "description": "Title of the form for a new expense."
+  },
+  "expensesEditTitle": "Edit expense",
+  "expensesDiscardEditMessage": "Your changes to this expense will be lost.",
+  "expensesDiscardNewMessage": "This expense won't be saved.",
+  "expensesAmountLabel": "Amount",
+  "expensesCurrencyLabel": "Currency",
+  "expensesGroupCurrencyTooltip": "Group expenses use the group currency, {currency}",
+  "@expensesGroupCurrencyTooltip": {
+    "placeholders": {
+      "currency": {
+        "type": "String"
+      }
+    }
+  },
+  "expensesLockedStillEditable": "You can still change the title, category, date and note.",
+  "expensesCurrencyChanged": "The amount is now in {currency}. Check it before saving.",
+  "@expensesCurrencyChanged": {
+    "placeholders": {
+      "currency": {
+        "type": "String"
+      }
+    }
+  },
+  "expensesTitleLabel": "Title",
+  "expensesTitleHint": "e.g. Weekly groceries",
+  "expensesTitleRequired": "Enter a title.",
+  "expensesScopeLabel": "Personal or group expense",
+  "expensesScopePersonal": "Personal",
+  "expensesScopeGroup": "Group",
+  "expensesScopeUnavailable": "Not available for this expense",
+  "expensesNoGroupHint": "To share costs, create or join a group in Profile.",
+  "expensesGroupScopeCaption": "Shared with everyone in {group}, in {currency}.",
+  "@expensesGroupScopeCaption": {
+    "placeholders": {
+      "group": {
+        "type": "String"
+      },
+      "currency": {
+        "type": "String"
+      }
+    }
+  },
+  "expensesCategoryLabel": "Category",
+  "expensesChangeDate": "Change date",
+  "expensesChangeTime": "Change time",
+  "expensesNoteLabel": "Note (optional)",
+  "expensesNoteHint": "Add a description or location",
+  "expensesClearNote": "Clear note",
+  "expensesSave": "Save expense",
+  "expensesSaveChanges": "Save changes",
+  "expensesMovedToGroup": "Moved \"{title}\" to {group}",
+  "@expensesMovedToGroup": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      },
+      "group": {
+        "type": "String"
+      }
+    }
+  },
+  "expensesMovedToPersonal": "Moved \"{title}\" to your personal expenses",
+  "@expensesMovedToPersonal": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "expensesMovedNotSaved": "Moved \"{title}\", but your other changes weren't saved. {reason}",
+  "@expensesMovedNotSaved": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      },
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "expensesMoveUndone": "\"{title}\" is back as it was",
+  "@expensesMoveUndone": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsTitle": "Groups",
+  "@groupsTitle": {
+    "description": "Title of the groups area on the Profile tab."
+  },
+  "groupsMyGroups": "My groups ({count})",
+  "@groupsMyGroups": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "groupsCreateTooltip": "Create a group",
+  "groupsJoinTooltip": "Join with a code",
+  "groupsPersonalScope": "Personal (no group)",
+  "@groupsPersonalScope": {
+    "description": "Choice that shows only the user's own expenses."
+  },
+  "groupsPendingChip": "{name} (waiting for approval)",
+  "@groupsPendingChip": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsPendingChipLabel": "{name}, waiting for approval. Opens once the admin approves you.",
+  "@groupsPendingChipLabel": {
+    "description": "Screen reader label of a group the user asked to join.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsPendingNote": "Groups waiting for approval open once their admin approves you.",
+  "groupsNoGroupsTitle": "Share costs with a group",
+  "groupsNoGroupsMessage": "Create a group for flatmates, a trip or a team, or join one with an invite code.",
+  "groupsScopeSwitched": "Showing expenses from {name}",
+  "@groupsScopeSwitched": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsScopePersonal": "Showing your personal expenses",
+  "groupsCreateTitle": "Create a group",
+  "groupsNameLabel": "Group name",
+  "groupsNameHint": "e.g. Flatmates",
+  "groupsCurrencyLabel": "Group currency",
+  "groupsCurrencyHelper": "Every group expense uses it. It can't be changed later.",
+  "groupsCreateAction": "Create",
+  "groupsCreated": "\"{name}\" created. It is now your active group.",
+  "@groupsCreated": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsCreatedNotOpened": "\"{name}\" was created, but we couldn't open it yet. Refresh your groups to see it.",
+  "@groupsCreatedNotOpened": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsJoinTitle": "Join with a code",
+  "groupsInviteCodeLabel": "Invite code",
+  "groupsInviteCodeHint": "XXXX-XXXX-XXXX-XXXX",
+  "@groupsInviteCodeHint": {
+    "description": "Shape of an invite code: four groups of four letters or digits. Keep the Latin X placeholders."
+  },
+  "groupsJoinHelper": "The group admin approves new members.",
+  "groupsJoinAction": "Send request",
+  "groupsJoinRequested": "Request sent to {group}. You can open the group once an admin approves you.",
+  "@groupsJoinRequested": {
+    "placeholders": {
+      "group": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsInviteTitle": "Invite by email",
+  "groupsInviteIntro": "We email an invitation to {group}. The link only works for this address.",
+  "@groupsInviteIntro": {
+    "placeholders": {
+      "group": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsInviteEmailLabel": "Email address",
+  "groupsInviteRoleLabel": "Role",
+  "groupsRoleMemberLong": "Member (adds and shares expenses)",
+  "groupsRoleViewerLong": "Viewer (read only)",
+  "groupsInviteSend": "Send invitation",
+  "groupsInviteEmailSent": "Email sent to {email}.",
+  "@groupsInviteEmailSent": {
+    "placeholders": {
+      "email": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsInviteNotEmailed": "The invitation for {email} was created, but we couldn't email it. Ask them to join with the invite code instead.",
+  "@groupsInviteNotEmailed": {
+    "placeholders": {
+      "email": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsInviteShareTitle": "Couldn't send the email",
+  "groupsInviteShareMessage": "Share this link instead. It only works for {email} and expires in 7 days.",
+  "@groupsInviteShareMessage": {
+    "placeholders": {
+      "email": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsInviteLinkCopied": "Invite link copied.",
+  "groupsCopyLink": "Copy link",
+  "groupsInviteShareText": "You're invited to a group on Exevra: {link}",
+  "@groupsInviteShareText": {
+    "placeholders": {
+      "link": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsInviteShareSubject": "Exevra group invitation",
+  "groupsShareFallbackCopied": "Couldn't open the share sheet, so the link was copied.",
+  "groupsShare": "Share",
+  "groupsInviteCodeShareText": "Join my group \"{group}\" on Exevra with the invite code {code}. The admin approves new members.",
+  "@groupsInviteCodeShareText": {
+    "placeholders": {
+      "group": {
+        "type": "String"
+      },
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsInviteCodeShareSubject": "Join {group} on Exevra",
+  "@groupsInviteCodeShareSubject": {
+    "placeholders": {
+      "group": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsInviteCodeCopied": "Invite code copied.",
+  "groupsSummary": "{count, plural, =1{Currency {currency} · 1 member} other{Currency {currency} · {count} members}}",
+  "@groupsSummary": {
+    "placeholders": {
+      "currency": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "groupsViewerNote": "You can see this group but not add expenses. Ask the admin to make you a member.",
+  "groupsInviteByEmail": "Invite by email",
+  "groupsNewCode": "New code",
+  "groupsNewCodeTitle": "Issue a new invite code?",
+  "groupsNewCodeMessage": "The current code stops working. People who have it can no longer ask to join.",
+  "groupsNewCodeReady": "New invite code: {code}",
+  "@groupsNewCodeReady": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsNoInviteCode": "No invite code yet. Tap New code to create one.",
+  "groupsCopyCodeTooltip": "Copy invite code",
+  "groupsInviteCodeApproval": "People who join with the code wait for your approval.",
+  "groupsInviteCodeExpires": "Expires {date}. People who join with it wait for your approval.",
+  "@groupsInviteCodeExpires": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsPendingInvitations": "Pending invitations ({count})",
+  "@groupsPendingInvitations": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "groupsWaitingForApproval": "Waiting for approval ({count})",
+  "@groupsWaitingForApproval": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "groupsMembers": "Members ({count})",
+  "@groupsMembers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "groupsLeave": "Leave group",
+  "groupsLeaveTitle": "Leave {group}?",
+  "@groupsLeaveTitle": {
+    "placeholders": {
+      "group": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsLeaveLastMessage": "You're the only member, so leaving deletes {group} and all its expenses and payments.",
+  "@groupsLeaveLastMessage": {
+    "placeholders": {
+      "group": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsLeaveAdminMessage": "You're the admin. {name}, the longest-standing member, becomes the admin when you leave. You can choose someone else first with \"Make admin\". You need to be settled up to leave.",
+  "@groupsLeaveAdminMessage": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsLeaveMessage": "You'll no longer see {group}'s expenses and balances. Your past expenses stay in the group. You need to be settled up to leave.",
+  "@groupsLeaveMessage": {
+    "placeholders": {
+      "group": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsDelete": "Delete group",
+  "groupsDeleteTitle": "Delete {group}?",
+  "@groupsDeleteTitle": {
+    "placeholders": {
+      "group": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsDeleteMessage": "This permanently deletes the group with all its expenses and payments. It can't be undone.",
+  "groupsDeleteHasMembers": "Remove the other members or make someone else admin before deleting this group.",
+  "groupsInvitationStatus": "{role} · expires {date}",
+  "@groupsInvitationStatus": {
+    "placeholders": {
+      "role": {
+        "type": "String"
+      },
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsRevokeTooltip": "Revoke invitation",
+  "groupsRevokeTitle": "Revoke this invitation?",
+  "groupsRevokeMessage": "The link sent to {email} stops working.",
+  "@groupsRevokeMessage": {
+    "placeholders": {
+      "email": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsRevokeAction": "Revoke",
+  "groupsRevoked": "Invitation for {email} revoked.",
+  "@groupsRevoked": {
+    "placeholders": {
+      "email": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsRequestPending": "Wants to join",
+  "groupsApproveTooltip": "Approve {name}",
+  "@groupsApproveTooltip": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsApproveAsMember": "Approve as member",
+  "groupsApproveAsViewer": "Approve as viewer (read only)",
+  "groupsApprovedMember": "{name} can now add expenses.",
+  "@groupsApprovedMember": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsApprovedViewer": "{name} can now see the group.",
+  "@groupsApprovedViewer": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsDenyTooltip": "Deny {name}",
+  "@groupsDenyTooltip": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsDenyTitle": "Deny {name}?",
+  "@groupsDenyTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsDenyMessage": "They won't join the group and can't ask again with this code. You can still invite them by email later.",
+  "groupsDenyAction": "Deny",
+  "groupsMemberYou": "{name} (you)",
+  "@groupsMemberYou": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsManageTooltip": "Manage {name}",
+  "@groupsManageTooltip": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsMakeMember": "Make member (can add expenses)",
+  "groupsMakeViewer": "Make viewer (read only)",
+  "groupsMakeViewerTitle": "Make {name} a viewer?",
+  "@groupsMakeViewerTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsMakeViewerMessage": "{name} will only be able to see the group, not add expenses. You can make them a member again later.",
+  "@groupsMakeViewerMessage": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsMakeViewerAction": "Make viewer",
+  "groupsNowViewer": "{name} can now only view the group.",
+  "@groupsNowViewer": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsMakeAdmin": "Make admin",
+  "groupsMakeAdminTitle": "Make {name} the admin?",
+  "@groupsMakeAdminTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsMakeAdminMessage": "A group has one admin. You become a member, and your pending email invitations are cancelled.",
+  "groupsNowAdmin": "{name} is now the admin.",
+  "@groupsNowAdmin": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsRemoveMember": "Remove from group",
+  "groupsRemoveTitle": "Remove {name}?",
+  "@groupsRemoveTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsRemoveMessage": "They lose access to {group} and can't rejoin with the invite code. Their past expenses stay in the group.",
+  "@groupsRemoveMessage": {
+    "placeholders": {
+      "group": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsRemoveAction": "Remove",
+  "groupsRemoved": "{name} was removed from the group.",
+  "@groupsRemoved": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsNotSettledTitle": "{name} is not settled up",
+  "@groupsNotSettledTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsNotSettledMessage": "They still have an open balance or a payment waiting for confirmation. If you remove them anyway, their balance stays in the group's balances but can't be settled in the app.",
+  "groupsRemoveAnyway": "Remove anyway",
+  "settleTitle": "Balances & payments",
+  "settleRecordPayment": "Record payment",
+  "settleBalancesHeader": "Balances ({currency})",
+  "@settleBalancesHeader": {
+    "placeholders": {
+      "currency": {
+        "type": "String"
+      }
+    }
+  },
+  "settleSuggestionsHeader": "Suggested payments",
+  "settlePaymentsHeader": "Payments",
+  "settleEveryoneSettled": "Everyone is settled up.",
+  "settleNoPayments": "No payments recorded yet.",
+  "settleShowOlder": "Show older payments",
+  "settleYou": "You",
+  "@settleYou": {
+    "description": "Stands for the signed-in user in balances and payments."
+  },
+  "settleFormerMember": "Former member",
+  "settleYouOwe": "You owe {amount}",
+  "@settleYouOwe": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "settleYouAreOwed": "You're owed {amount}",
+  "@settleYouAreOwed": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "settleYouAreSettled": "You're settled up",
+  "settleMemberOwes": "{name} owes {amount}",
+  "@settleMemberOwes": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "settleMemberIsOwed": "{name} is owed {amount}",
+  "@settleMemberIsOwed": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "settleMemberSettled": "{name} is settled up",
+  "@settleMemberSettled": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "settleSuggestYouOwe": "You owe {name} {amount}",
+  "@settleSuggestYouOwe": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "settleSuggestOwesYou": "{name} owes you {amount}",
+  "@settleSuggestOwesYou": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "settleSuggestOther": "{from} owes {to} {amount}",
+  "@settleSuggestOther": {
+    "placeholders": {
+      "from": {
+        "type": "String"
+      },
+      "to": {
+        "type": "String"
+      },
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "settlePay": "Pay",
+  "settlePayTooltip": "Record paying {name} {amount}",
+  "@settlePayTooltip": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "settlePaidRow": "{from} paid {to}",
+  "@settlePaidRow": {
+    "placeholders": {
+      "from": {
+        "type": "String"
+      },
+      "to": {
+        "type": "String"
+      }
+    }
+  },
+  "settlePendingFor": "Waiting for {name} to confirm",
+  "@settlePendingFor": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "settlePendingForYou": "Waiting for you to confirm",
+  "settleVoidReason": "Reason: {reason}",
+  "@settleVoidReason": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "settleConfirm": "Confirm",
+  "settleVoid": "Void",
+  "settleConfirmTitle": "Confirm this payment?",
+  "settleConfirmMessage": "Confirm only if you received {amount} from {name}. It then counts in the balances.",
+  "@settleConfirmMessage": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "settleConfirmAction": "I received it",
+  "settleConfirmed": "Payment confirmed.",
+  "settleNoOneToPay": "There is no one else in this group to pay.",
+  "settleRecordTitle": "Record a payment",
+  "settleRecordIntro": "Record money you paid to a group member. It counts once they confirm they received it.",
+  "settlePaidTo": "Paid to",
+  "settleAmountLabel": "Amount ({currency})",
+  "@settleAmountLabel": {
+    "placeholders": {
+      "currency": {
+        "type": "String"
+      }
+    }
+  },
+  "settleLimitHelper": "You owe {name} up to {amount}.",
+  "@settleLimitHelper": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "settleOverLimit": "That's more than you owe {name} (up to {amount}).",
+  "@settleOverLimit": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "settleNothingOwed": "You don't owe {name} anything right now.",
+  "@settleNothingOwed": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "settleNoteLabel": "Note (optional)",
+  "settleNoteHint": "e.g. UPI, cash, bank transfer",
+  "settleRecorded": "Payment recorded. It counts once {name} confirms it.",
+  "@settleRecorded": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "settleVoidTitle": "Void this payment?",
+  "settleVoidMessage": "{from} paid {to} {amount}. A voided payment no longer counts in the balances.",
+  "@settleVoidMessage": {
+    "placeholders": {
+      "from": {
+        "type": "String"
+      },
+      "to": {
+        "type": "String"
+      },
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "settleVoidReasonLabel": "Reason (optional)",
+  "settleVoidReasonHint": "e.g. Entered twice",
+  "settleKeep": "Keep it",
+  "settleVoidAction": "Void payment",
+  "settleVoided": "Payment voided."
+}

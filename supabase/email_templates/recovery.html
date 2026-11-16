@@ -1,0 +1,49 @@
+<!--
+  Exevra auth email: Reset your Exevra password
+  Local stack: wired through supabase/config.toml.
+  Hosted project: paste this file into Authentication > Emails > Templates.
+  Keep the copy factual. Template variables: https://supabase.com/docs/guides/auth/auth-email-templates
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reset your Exevra password</title>
+</head>
+<body style="margin:0;padding:0;background-color:#F1F5F9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0F172A;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F1F5F9;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background-color:#FFFFFF;border-radius:16px;padding:32px 28px;">
+          <tr>
+            <td style="font-size:22px;font-weight:700;color:#0E7490;padding-bottom:8px;">Exevra</td>
+          </tr>
+          <tr>
+            <td style="font-size:16px;line-height:24px;padding-bottom:16px;">
+              We received a request to reset the password for {{ .Email }}.
+            </td>
+          </tr>
+          <tr>
+            <td style="font-size:16px;line-height:24px;padding-bottom:12px;">Enter this code in the Exevra app to choose a new password:</td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:8px 0 20px 0;">
+              <div style="display:inline-block;font-size:30px;font-weight:700;letter-spacing:8px;color:#0F172A;background-color:#F1F5F9;border-radius:12px;padding:14px 22px;">{{ .Token }}</div>
+            </td>
+          </tr>
+          <tr>
+            <td style="font-size:14px;line-height:22px;color:#475569;padding-bottom:8px;">The code expires in 15 minutes and can be used once. Never share it with anyone.</td>
+          </tr>
+          <tr>
+            <td style="font-size:13px;line-height:20px;color:#64748B;padding-top:24px;border-top:1px solid #E2E8F0;">
+              If you did not request this, you can ignore this email. Your account stays unchanged.<br>
+              Exevra &middot; Expense &amp; Split Tracker
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

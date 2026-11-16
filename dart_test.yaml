@@ -1,0 +1,3 @@
+# Test tags. `golden` marks Alchemist golden tests (test/design_system).
+tags:
+  golden:
