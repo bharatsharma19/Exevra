@@ -4,7 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/errors/app_failure.dart';
 import '../../../core/errors/failure_messages.dart';
 import '../../../data/repositories/ai_report_repository.dart';
+import '../../../core/widgets/app_snackbar.dart';
+import '../../../core/widgets/loading_button.dart';
+import '../../../l10n/l10n.dart';
 import '../../../providers/auth_provider.dart';
+import '../../dashboard/widgets/feature_snackbar.dart';
 import '../models/chat_message.dart';
 
 /// Asks why [message] is being reported and sends the report. Shows a
@@ -17,11 +21,22 @@ Future<void> showReportSheet(BuildContext context, ChatMessage message) async {
     builder: (context) => _ReportSheet(message: message),
   );
   if (sent == true && context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Thanks. Your report was sent.')),
+    showFeatureSnackbar(
+      context,
+      context.l10n.chatReportSent,
+      kind: AppSnackbarKind.success,
     );
   }
 }
+
+/// The reason as the user reads it.
+String reportReasonLabel(AppLocalizations l10n, AiReportReason reason) =>
+    switch (reason) {
+      AiReportReason.offensive => l10n.chatReportReasonOffensive,
+      AiReportReason.harmful => l10n.chatReportReasonHarmful,
+      AiReportReason.inaccurate => l10n.chatReportReasonInaccurate,
+      AiReportReason.other => l10n.chatReportReasonOther,
+    };
 
 class _ReportSheet extends ConsumerStatefulWidget {
   const _ReportSheet({required this.message});
@@ -85,6 +100,7 @@ class _ReportSheetState extends ConsumerState<_ReportSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final l10n = context.l10n;
     return Padding(
       padding: EdgeInsets.only(
         left: 16,
@@ -96,11 +112,16 @@ class _ReportSheetState extends ConsumerState<_ReportSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Report response', style: theme.textTheme.titleLarge),
+            Semantics(
+              header: true,
+              child: Text(
+                l10n.chatReportTitle,
+                style: theme.textTheme.titleLarge,
+              ),
+            ),
             const SizedBox(height: 4),
             Text(
-              'Tell us what was wrong. The answer text is sent with your '
-              'report so we can review it.',
+              l10n.chatReportBody,
               style: TextStyle(color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 8),
@@ -114,7 +135,7 @@ class _ReportSheetState extends ConsumerState<_ReportSheet> {
                   for (final reason in AiReportReason.values)
                     RadioListTile<AiReportReason>(
                       value: reason,
-                      title: Text(reason.label),
+                      title: Text(reportReasonLabel(l10n, reason)),
                       contentPadding: EdgeInsets.zero,
                     ),
                 ],
@@ -126,14 +147,17 @@ class _ReportSheetState extends ConsumerState<_ReportSheet> {
               maxLength: AiReport.maxNoteLength,
               minLines: 1,
               maxLines: 4,
-              decoration: const InputDecoration(
-                labelText: 'Add a note (optional)',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: l10n.chatReportNote,
+                border: const OutlineInputBorder(),
               ),
             ),
             if (_error != null) ...[
               const SizedBox(height: 8),
-              Text(_error!, style: TextStyle(color: scheme.error)),
+              Semantics(
+                liveRegion: true,
+                child: Text(_error!, style: TextStyle(color: scheme.error)),
+              ),
             ],
             const SizedBox(height: 12),
             OverflowBar(
@@ -146,16 +170,13 @@ class _ReportSheetState extends ConsumerState<_ReportSheet> {
                   onPressed: _sending
                       ? null
                       : () => Navigator.of(context).pop(false),
-                  child: const Text('Cancel'),
+                  child: Text(l10n.cancel),
                 ),
-                FilledButton(
-                  onPressed: _reason == null || _sending ? null : _submit,
-                  child: _sending
-                      ? const SizedBox.square(
-                          dimension: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Send report'),
+                LoadingButton(
+                  label: l10n.chatReportSend,
+                  expand: false,
+                  isLoading: _sending,
+                  onPressed: _reason == null ? null : _submit,
                 ),
               ],
             ),

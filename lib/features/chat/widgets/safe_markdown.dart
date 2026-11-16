@@ -5,6 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/widgets/app_snackbar.dart';
+import '../../../l10n/l10n.dart';
+import '../../dashboard/widgets/feature_snackbar.dart';
+
 /// Opens a URL outside the app. Overridden in tests.
 final externalLinkLauncherProvider = Provider<Future<bool> Function(Uri)>(
   (ref) =>
@@ -114,17 +118,18 @@ Future<void> confirmAndOpenLink(
     context: context,
     builder: (context) {
       final scheme = Theme.of(context).colorScheme;
+      final l10n = context.l10n;
       return AlertDialog(
         scrollable: true,
-        title: Text(canOpen ? 'Open this link?' : "This link can't be opened"),
+        title: Text(
+          canOpen ? l10n.chatLinkOpenTitle : l10n.chatLinkBlockedTitle,
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              canOpen
-                  ? 'It will open outside Exevra. Check the address first:'
-                  : 'Only secure (https) links can be opened. The address is:',
+              canOpen ? l10n.chatLinkOpenBody : l10n.chatLinkBlockedBody,
               style: TextStyle(color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 12),
@@ -134,16 +139,16 @@ Future<void> confirmAndOpenLink(
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(_LinkChoice.copy),
-            child: const Text('Copy link'),
+            child: Text(l10n.chatLinkCopy),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(_LinkChoice.cancel),
-            child: const Text('Cancel'),
+            child: Text(l10n.cancel),
           ),
           if (canOpen)
             FilledButton(
               onPressed: () => Navigator.of(context).pop(_LinkChoice.open),
-              child: const Text('Open'),
+              child: Text(l10n.chatLinkOpen),
             ),
         ],
       );
@@ -154,16 +159,20 @@ Future<void> confirmAndOpenLink(
     case _LinkChoice.open:
       final opened = await launch(uri!).catchError((Object _) => false);
       if (!opened && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Couldn't open the link.")),
+        showFeatureSnackbar(
+          context,
+          context.l10n.chatLinkOpenFailed,
+          kind: AppSnackbarKind.error,
         );
       }
     case _LinkChoice.copy:
       await Clipboard.setData(ClipboardData(text: url));
       if (context.mounted) {
-        ScaffoldMessenger.of(
+        showFeatureSnackbar(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Link copied')));
+          context.l10n.chatLinkCopied,
+          kind: AppSnackbarKind.success,
+        );
       }
     case _LinkChoice.cancel || null:
       break;

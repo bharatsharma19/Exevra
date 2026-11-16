@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../chat_copy.dart';
+import '../../../l10n/l10n.dart';
 import '../widgets/consent_view.dart';
 
 /// The assistant's consent disclosure as a full screen, for turning the
@@ -24,7 +24,7 @@ class AiConsentScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text(ChatCopy.assistantName)),
+      appBar: AppBar(title: Text(context.l10n.chatAssistantName)),
       body: ChatConsentView(
         onNotNow: () => Navigator.of(context).pop(false),
         onAllowed: () => Navigator.of(context).pop(true),

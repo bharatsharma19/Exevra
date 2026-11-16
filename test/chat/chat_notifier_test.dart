@@ -1,18 +1,22 @@
 import 'dart:convert';
 
-import 'package:expense_manager/core/constants/app_constants.dart';
 import 'package:expense_manager/core/storage/preferences.dart';
 import 'package:expense_manager/data/ai/ai_chat_models.dart';
-import 'package:expense_manager/features/chat/chat_copy.dart';
+import 'package:expense_manager/features/chat/chat_error_copy.dart';
+import 'package:expense_manager/features/chat/widgets/chat_empty_view.dart';
+import 'package:expense_manager/l10n/l10n.dart';
 import 'package:expense_manager/providers/auth_provider.dart';
 import 'package:expense_manager/providers/chat_provider.dart';
 import 'package:expense_manager/providers/profile_provider.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../support/fakes.dart';
 import 'chat_test_support.dart';
+
+final AppLocalizations l10n = lookupAppLocalizations(const Locale('en'));
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -183,7 +187,7 @@ void main() {
     expect(last().text, 'Half an');
     expect(last().status, ChatMessageStatus.interrupted);
     expect(last().canRetry, isTrue);
-    expect(ChatCopy.interrupted, 'Response interrupted. Tap Retry.');
+    expect(l10n.chatInterrupted, 'Response interrupted. Tap Retry.');
   });
 
   test('declined with discard_partial replaces the partial text', () async {
@@ -231,7 +235,7 @@ void main() {
         await sending.done;
         expect(last().status, ChatMessageStatus.error);
         expect(last().errorCode, code);
-        expect(ChatCopy.error(last().errorCode), copy);
+        expect(chatErrorText(l10n, last().errorCode), copy);
         expect(chat().consentRequired, isFalse);
       });
     }
@@ -245,7 +249,11 @@ void main() {
       await sending.done;
       expect(last().errorCode, AiErrorCode.unavailable);
       expect(
-        ChatCopy.error(last().errorCode, serverMessage: last().serverMessage),
+        chatErrorText(
+          l10n,
+          last().errorCode,
+          serverMessage: last().serverMessage,
+        ),
         busy,
       );
     });
@@ -255,7 +263,11 @@ void main() {
       await api.last.finish([const AiStreamError(AiErrorCode.rateLimited)]);
       await sending.done;
       expect(
-        ChatCopy.error(last().errorCode, serverMessage: last().serverMessage),
+        chatErrorText(
+          l10n,
+          last().errorCode,
+          serverMessage: last().serverMessage,
+        ),
         isNot(contains('quickly')),
       );
     });
@@ -275,7 +287,11 @@ void main() {
       await sending.done;
       expect(last().errorCode, AiErrorCode.quotaExceeded);
       expect(
-        ChatCopy.error(last().errorCode, serverMessage: last().serverMessage),
+        chatErrorText(
+          l10n,
+          last().errorCode,
+          serverMessage: last().serverMessage,
+        ),
         copy,
       );
       final restored = ChatMessage.fromJson(last().toJson())!;
@@ -284,18 +300,22 @@ void main() {
 
     test('server copy is not used for local-only codes or when huge', () {
       expect(
-        ChatCopy.error(AiErrorCode.invalidRequest, serverMessage: 'bad tz'),
+        chatErrorText(
+          l10n,
+          AiErrorCode.invalidRequest,
+          serverMessage: 'bad tz',
+        ),
         isNot('bad tz'),
       );
       expect(
-        ChatCopy.error(AiErrorCode.unavailable, serverMessage: 'x' * 400),
-        ChatCopy.error(AiErrorCode.unavailable),
+        chatErrorText(l10n, AiErrorCode.unavailable, serverMessage: 'x' * 400),
+        chatErrorText(l10n, AiErrorCode.unavailable),
       );
     });
 
     test('every code has copy and none is raw', () {
       for (final code in AiErrorCode.values) {
-        final copy = ChatCopy.error(code);
+        final copy = chatErrorText(l10n, code);
         expect(copy, isNotEmpty);
         expect(copy, isNot(contains('Exception')));
       }
@@ -436,13 +456,13 @@ void main() {
   });
 
   test('every quick prompt is sent to the server unchanged', () async {
-    for (final prompt in AppConstants.aiQuickPrompts) {
+    for (final prompt in chatPrompts(l10n)) {
       final sending = await send(prompt);
       expect(api.last.turns.last, AiTurn.user(prompt));
       await api.last.finish([const AiDelta('ok'), const AiDone()]);
       await sending.done;
     }
-    expect(api.calls, hasLength(AppConstants.aiQuickPrompts.length));
+    expect(api.calls, hasLength(chatPrompts(l10n).length));
   });
 
   group('persistence', () {
