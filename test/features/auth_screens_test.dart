@@ -87,6 +87,7 @@ void main() {
         initialLocation: initialLocation,
         routes: [
           GoRoute(path: '/', builder: (_, _) => const Text('home')),
+          GoRoute(path: '/other', builder: (_, _) => const Text('other')),
           GoRoute(
             path: '/child',
             builder: (context, _) => TextButton(
@@ -116,14 +117,17 @@ void main() {
     });
 
     testWidgets('popOrGo pops when there is a screen below', (tester) async {
-      final router = await pumpRouter(tester, initialLocation: '/');
+      // The screen below ('/other') differs from the fallback ('/'), so a
+      // real pop and a fallback navigation land on different screens.
+      final router = await pumpRouter(tester, initialLocation: '/other');
       unawaited(router.push('/child'));
       await tester.pumpAndSettle();
       expect(router.canPop(), isTrue);
 
       await tester.tap(find.text('back'));
       await tester.pumpAndSettle();
-      expect(find.text('home'), findsOneWidget);
+      expect(find.text('other'), findsOneWidget);
+      expect(find.text('home'), findsNothing);
       expect(router.canPop(), isFalse);
     });
 

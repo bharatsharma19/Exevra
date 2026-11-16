@@ -7,6 +7,7 @@ import 'package:expense_manager/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:expense_manager/core/widgets/app_snackbar.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fakes.dart';
@@ -90,6 +91,15 @@ void main() {
       await _frames(tester, 5);
       expect(backend.profiles.updates, hasLength(1));
       expect(find.text(_success), findsNothing);
+      // The error snack bar has an action, so it stays until dismissed; a
+      // wrongly queued success message would only appear after it.
+      // Check every frame: a 2 s message could otherwise come and go
+      // between two checks.
+      rootScaffoldMessengerKey.currentState?.hideCurrentSnackBar();
+      for (var i = 0; i < 40; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(find.text(_success), findsNothing);
+      }
     });
   });
 }
