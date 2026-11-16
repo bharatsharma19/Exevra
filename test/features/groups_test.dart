@@ -334,6 +334,27 @@ void main() {
       expect(find.text('Pending invitations (1)'), findsOneWidget);
     });
 
+    testWidgets('Done on the keyboard sends the invitation', (tester) async {
+      final (backend, _) = await _pump(
+        tester,
+        group: _adminGroup(),
+        members: _members(),
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Invite by email'));
+      await tester.pumpAndSettle();
+      final field = find.byKey(const Key('invite-email'));
+      expect(
+        tester.widget<TextField>(field).textInputAction,
+        TextInputAction.done,
+      );
+      await tester.enterText(field, 'friend@example.com');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(backend.invitations!.sentTo, ['friend@example.com']);
+      expect(find.text('Email sent to friend@example.com.'), findsOneWidget);
+    });
+
     testWidgets('offers the link to share when the email failed', (
       tester,
     ) async {

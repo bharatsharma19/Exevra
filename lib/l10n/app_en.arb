@@ -1210,6 +1210,10 @@
   },
   "groupsJoinTitle": "Join with a code",
   "groupsInviteCodeLabel": "Invite code",
+  "groupsInviteCodeHint": "XXXX-XXXX-XXXX-XXXX",
+  "@groupsInviteCodeHint": {
+    "description": "Shape of an invite code: four groups of four letters or digits. Keep the Latin X placeholders."
+  },
   "groupsJoinHelper": "The group admin approves new members.",
   "groupsJoinAction": "Send request",
   "groupsJoinRequested": "Request sent to {group}. You can open the group once an admin approves you.",

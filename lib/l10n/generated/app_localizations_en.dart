@@ -1778,6 +1778,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get groupsInviteCodeLabel => 'Invite code';
 
   @override
+  String get groupsInviteCodeHint => 'XXXX-XXXX-XXXX-XXXX';
+
+  @override
   String get groupsJoinHelper => 'The group admin approves new members.';
 
   @override

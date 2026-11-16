@@ -243,7 +243,7 @@ Future<void> showJoinGroupDialog(BuildContext context, WidgetRef ref) {
                 onSubmitted: (_) => submit(),
                 decoration: InputDecoration(
                   labelText: l10n.groupsInviteCodeLabel,
-                  hintText: 'XXXX-XXXX-XXXX-XXXX',
+                  hintText: l10n.groupsInviteCodeHint,
                   helperText: l10n.groupsJoinHelper,
                   helperMaxLines: 3,
                   prefixIcon: const Icon(Icons.vpn_key_rounded),

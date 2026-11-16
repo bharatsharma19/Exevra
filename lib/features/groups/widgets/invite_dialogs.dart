@@ -80,9 +80,13 @@ Future<void> showInviteByEmailDialog(
                   autofillHints: const [AutofillHints.email],
                   autocorrect: false,
                   textInputAction: TextInputAction.done,
+                  // Done on the keyboard sends, like the Send button.
+                  onSubmitted: (_) {
+                    if (!busy) unawaited(submit());
+                  },
                   decoration: InputDecoration(
                     labelText: l10n.groupsInviteEmailLabel,
-                    hintText: 'name@example.com',
+                    hintText: l10n.authEmailHint,
                     prefixIcon: const Icon(Icons.alternate_email_rounded),
                     errorText: fieldError,
                     errorMaxLines: 3,

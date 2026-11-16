@@ -3069,6 +3069,12 @@ abstract class AppLocalizations {
   /// **'Invite code'**
   String get groupsInviteCodeLabel;
 
+  /// Shape of an invite code: four groups of four letters or digits. Keep the Latin X placeholders.
+  ///
+  /// In en, this message translates to:
+  /// **'XXXX-XXXX-XXXX-XXXX'**
+  String get groupsInviteCodeHint;
+
   /// No description provided for @groupsJoinHelper.
   ///
   /// In en, this message translates to:
