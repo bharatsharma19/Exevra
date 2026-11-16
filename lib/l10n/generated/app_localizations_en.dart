@@ -446,6 +446,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsThemeHint => 'System follows your device setting.';
 
   @override
+  String get settingsThemeSelected => 'Selected';
+
+  @override
   String get settingsCurrency => 'Default currency';
 
   @override

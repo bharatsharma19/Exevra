@@ -140,6 +140,25 @@ void main() {
     expect(c.read(themePreferenceProvider), ThemePreference.dark);
   });
 
+  testWidgets('a failed theme save says so', (tester) async {
+    final (backend, _) = await _pump(tester);
+    backend.profiles.failUpdates = const AppFailure.network();
+    await _tap(tester, find.text('Dark'));
+    await tester.runAsync(settle);
+    await _frames(tester);
+    expect(
+      find.textContaining("We couldn't save that setting."),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('the large-text theme list labels the choice', (tester) async {
+    final handle = tester.ensureSemantics();
+    await _pump(tester, size: const Size(320, 6000), textScale: 2);
+    expect(find.bySemanticsLabel(RegExp(r'^System, Selected')), findsOneWidget);
+    handle.dispose();
+  });
+
   testWidgets('the currency picker searches and saves', (tester) async {
     final (backend, _) = await _pump(tester);
     await _tap(tester, find.byKey(const Key('settings-currency')));

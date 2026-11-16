@@ -190,6 +190,8 @@
   "settingsThemeLight": "Light",
   "settingsThemeDark": "Dark",
   "settingsThemeHint": "System follows your device setting.",
+  "settingsThemeSelected": "Selected",
+  "@settingsThemeSelected": {"description": "Read after the chosen theme in the large-text theme list."},
   "settingsCurrency": "Default currency",
   "settingsCurrencySubtitle": "{code} · {name}. Used for new personal expenses; groups keep their own currency.",
   "@settingsCurrencySubtitle": {"placeholders": {"code": {"type": "String", "example": "INR"}, "name": {"type": "String", "example": "Indian Rupee"}}},

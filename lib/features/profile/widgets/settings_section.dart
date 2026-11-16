@@ -213,10 +213,13 @@ class _ThemeModeRow extends ConsumerWidget {
     // choices does.
     final compact =
         MediaQuery.textScalerOf(context).scale(1) >= AppListTile.largeTextScale;
-    void select(ThemePreference value) {
+    Future<void> select(ThemePreference value) async {
       if (value == mode) return;
       AppHaptics.selection();
-      unawaited(ref.read(profileProvider.notifier).setThemeMode(value));
+      final failure = await ref
+          .read(profileProvider.notifier)
+          .setThemeMode(value);
+      if (context.mounted) SettingsSection._report(context, failure);
     }
 
     return Padding(
@@ -248,12 +251,12 @@ class _ThemeModeRow extends ConsumerWidget {
                 title: label,
                 selected: value == mode,
                 semanticLabel: value == mode
-                    ? '$label, ${l10n.settingsCurrencySelected}'
+                    ? '$label, ${l10n.settingsThemeSelected}'
                     : label,
                 trailing: value == mode
                     ? Icon(Icons.check_rounded, color: palette.accent)
                     : null,
-                onTap: () => select(value),
+                onTap: () => unawaited(select(value)),
               )
           else
             SegmentedButton<ThemePreference>(
@@ -268,7 +271,8 @@ class _ThemeModeRow extends ConsumerWidget {
                   ),
               ],
               selected: {mode},
-              onSelectionChanged: (selection) => select(selection.single),
+              onSelectionChanged: (selection) =>
+                  unawaited(select(selection.single)),
             ),
           const SizedBox(height: AppSpacing.sm),
           Text(

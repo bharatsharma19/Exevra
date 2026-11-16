@@ -886,6 +886,12 @@ abstract class AppLocalizations {
   /// **'System follows your device setting.'**
   String get settingsThemeHint;
 
+  /// Read after the chosen theme in the large-text theme list.
+  ///
+  /// In en, this message translates to:
+  /// **'Selected'**
+  String get settingsThemeSelected;
+
   /// No description provided for @settingsCurrency.
   ///
   /// In en, this message translates to:
