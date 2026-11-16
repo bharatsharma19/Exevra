@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/constants/app_colors.dart';
 import '../../core/errors/app_failure.dart';
 import '../../core/errors/failure_messages.dart';
+import '../../core/theme/app_tokens.dart';
 import '../../core/utils/haptics.dart';
+import '../../core/widgets/widgets.dart';
+import '../../l10n/l10n.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/auth_service.dart';
 
@@ -19,56 +21,27 @@ import '../../services/auth_service.dart';
 /// in again (password, Google or Apple) and the deletion runs once more.
 void confirmAndDeleteAccount(BuildContext context, WidgetRef ref) {
   AppHaptics.heavy();
-  unawaited(
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text(
-          'Delete your account?',
-          style: TextStyle(color: AppColors.error),
-        ),
-        content: const SingleChildScrollView(
-          child: Text(
-            'This permanently deletes your profile, your personal expenses, '
-            'your settings and your AI assistant history.\n\n'
-            'Expenses you added to shared groups stay with those groups so '
-            "the other members' balances remain correct; they will show as "
-            '"Former member". If you are a group admin, the longest-standing '
-            'member becomes admin; groups with no other members are '
-            'deleted. Payments still waiting for confirmation are '
-            'cancelled.\n\n'
-            "This can't be undone.",
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              unawaited(_deleteAccount(context, ref));
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Delete account'),
-          ),
-        ],
-      ),
-    ),
-  );
+  final l10n = context.l10n;
+  unawaited(() async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: l10n.settingsDeleteTitle,
+      message: l10n.settingsDeleteMessage,
+      confirmLabel: l10n.settingsDeleteAccount,
+      destructive: true,
+    );
+    if (confirmed && context.mounted) await _deleteAccount(context, ref);
+  }());
 }
 
 Future<void> _deleteAccount(BuildContext context, WidgetRef ref) async {
   if (!context.mounted) return;
   final auth = ref.read(authControllerProvider.notifier);
   final messenger = ScaffoldMessenger.of(context);
+  final l10n = context.l10n;
   var failure = await _withProgress(
     context,
-    'Deleting your account...',
+    l10n.settingsDeleting,
     auth.deleteAccount,
   );
   // The server wants a sign-in from the last few minutes: confirm it is
@@ -78,20 +51,16 @@ Future<void> _deleteAccount(BuildContext context, WidgetRef ref) async {
     if (failure == null && context.mounted) {
       failure = await _withProgress(
         context,
-        'Deleting your account...',
+        l10n.settingsDeleting,
         auth.deleteAccount,
       );
     }
   }
-  messenger.showSnackBar(
-    SnackBar(
-      content: Text(
-        failure == null
-            ? 'Your account was deleted.'
-            : friendlyMessage(failure),
-      ),
-    ),
-  );
+  if (failure == null) {
+    AppSnackbar.showSuccess(l10n.settingsDeleted, messenger: messenger);
+  } else {
+    AppSnackbar.showError(friendlyMessage(failure), messenger: messenger);
+  }
 }
 
 /// Asks the user to sign in again (password, Google or Apple). Returns the
@@ -112,23 +81,22 @@ Future<AppFailure?> _reauthenticate(
     if (password == null) return cancelled;
   } else {
     final provider = method == ReauthMethod.google ? 'Google' : 'Apple';
+    final l10n = context.l10n;
     final go = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Confirm it's you"),
-        content: Text(
-          'For your security, sign in with $provider again to delete your '
-          'account.',
-        ),
+        scrollable: true,
+        title: Text(l10n.settingsReauthTitle),
+        content: Text(l10n.settingsReauthProvider(provider)),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
+            child: Text(l10n.cancel),
           ),
-          ElevatedButton(
+          FilledButton(
             key: const Key('reauth-continue'),
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text('Continue with $provider'),
+            child: Text(l10n.settingsReauthContinueWith(provider)),
           ),
         ],
       ),
@@ -138,7 +106,7 @@ Future<AppFailure?> _reauthenticate(
   if (!context.mounted) return cancelled;
   return _withProgress(
     context,
-    "Checking it's you...",
+    context.l10n.settingsReauthChecking,
     () => auth.reauthenticate(password: password),
   );
 }
@@ -159,16 +127,18 @@ Future<AppFailure?> _withProgress(
     builder: (_) => PopScope(
       canPop: false,
       child: AlertDialog(
-        content: Row(
-          children: [
-            const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            const SizedBox(width: 16),
-            Expanded(child: Text(label)),
-          ],
+        content: Semantics(
+          liveRegion: true,
+          child: Row(
+            children: [
+              const SizedBox.square(
+                dimension: AppSizes.buttonSpinner,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: AppSpacing.lg),
+              Expanded(child: Text(label)),
+            ],
+          ),
         ),
       ),
     ),
@@ -203,40 +173,40 @@ class _PasswordDialogState extends State<_PasswordDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text("Confirm it's you"),
-    content: SingleChildScrollView(
-      child: Column(
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return AlertDialog(
+      scrollable: true,
+      title: Text(l10n.settingsReauthTitle),
+      content: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
-            'For your security, enter your password to delete your account.',
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            key: const Key('reauth-password'),
-            controller: _controller,
-            autofocus: true,
-            obscureText: true,
-            autofillHints: const [AutofillHints.password],
-            textInputAction: TextInputAction.done,
-            decoration: const InputDecoration(labelText: 'Password'),
-            onSubmitted: (_) => _submit(),
+          Text(l10n.settingsReauthPassword),
+          const SizedBox(height: AppSpacing.lg),
+          AutofillGroup(
+            child: AppPasswordField(
+              key: const Key('reauth-password'),
+              controller: _controller,
+              autofocus: true,
+              label: l10n.authPasswordLabel,
+              textInputAction: TextInputAction.done,
+              onFieldSubmitted: (_) => _submit(),
+            ),
           ),
         ],
       ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(),
-        child: const Text('Cancel'),
-      ),
-      ElevatedButton(
-        key: const Key('reauth-continue'),
-        onPressed: _submit,
-        child: const Text('Continue'),
-      ),
-    ],
-  );
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(l10n.cancel),
+        ),
+        FilledButton(
+          key: const Key('reauth-continue'),
+          onPressed: _submit,
+          child: Text(l10n.settingsReauthContinue),
+        ),
+      ],
+    );
+  }
 }

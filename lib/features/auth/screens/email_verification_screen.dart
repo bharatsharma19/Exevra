@@ -5,7 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/errors/app_failure.dart';
 import '../../../core/errors/failure_messages.dart';
+import '../../../core/theme/app_palette.dart';
+import '../../../core/theme/app_tokens.dart';
 import '../../../core/utils/validators.dart';
+import '../../../l10n/l10n.dart';
 import '../../../providers/auth_provider.dart';
 import '../widgets/auth_widgets.dart';
 
@@ -26,7 +29,6 @@ class _EmailVerificationScreenState
   final _codeFormKey = GlobalKey<FormState>();
   final _code = TextEditingController();
   final _password = TextEditingController();
-  Timer? _ticker;
   AppFailure? _failure;
   String? _notice;
   bool _needsPassword = false;
@@ -35,19 +37,11 @@ class _EmailVerificationScreenState
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Redraws the resend countdown.
-    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-      final at = ref.read(authControllerProvider).resendAvailableAt;
-      if (mounted && at != null && !DateTime.now().isAfter(at)) {
-        setState(() {});
-      }
-    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _ticker?.cancel();
     _code.dispose();
     _password.dispose();
     super.dispose();
@@ -72,9 +66,10 @@ class _EmailVerificationScreenState
   Future<void> _resend() async {
     _show();
     final failure = await _controller.resendVerification();
+    if (!mounted) return;
     _show(
       failure: failure,
-      notice: failure == null ? 'We sent a new email. Check your inbox.' : null,
+      notice: failure == null ? context.l10n.authEmailResent : null,
     );
   }
 
@@ -98,14 +93,11 @@ class _EmailVerificationScreenState
         _show(); // The router moves on.
       case VerificationCheck.needsPassword:
         setState(() => _needsPassword = true);
-        _show(notice: 'Enter your password to continue.');
+        _show(notice: context.l10n.authEnterPasswordToContinue);
       case VerificationCheck.notYet:
         _show(
           failure: failure,
-          notice: failure == null
-              ? "Your email isn't confirmed yet. Open the link or enter the "
-                    'code from the email.'
-              : null,
+          notice: failure == null ? context.l10n.authNotConfirmedYet : null,
         );
     }
   }
@@ -114,30 +106,29 @@ class _EmailVerificationScreenState
   Widget build(BuildContext context) {
     final auth = ref.watch(authControllerProvider);
     final email = auth.verificationEmail ?? '';
-    final scheme = Theme.of(context).colorScheme;
-    final at = auth.resendAvailableAt;
-    final wait = at == null ? 0 : at.difference(DateTime.now()).inSeconds + 1;
-    final canResend = !auth.isLoading && (at == null || wait <= 0);
+    final l10n = context.l10n;
+    final palette = context.palette;
 
     return AuthScaffold(
-      title: 'Verify your email',
-      subtitle: 'We sent a confirmation link and a 6-digit code to',
+      title: l10n.authVerifyTitle,
+      subtitle: l10n.authVerifySubtitle,
       icon: Icons.mark_email_unread_outlined,
       content: [
         Text(
           email,
           textAlign: TextAlign.center,
-          style: Theme.of(
-            context,
-          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+            color: palette.textPrimary,
+          ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpacing.lg),
         if (_failure != null) ...[
           AuthMessage(friendlyMessage(_failure!)),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpacing.lg),
         ] else if (_notice != null) ...[
           AuthMessage(_notice!, isError: false),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpacing.lg),
         ],
         Form(
           key: _codeFormKey,
@@ -147,44 +138,52 @@ class _EmailVerificationScreenState
             onSubmitted: (_) => unawaited(_verifyCode()),
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: AppSpacing.md),
         AuthPrimaryButton(
-          label: 'Verify code',
+          key: const Key('verify-code'),
+          label: l10n.authVerifyCode,
           busy: auth.isLoading,
           onPressed: () => unawaited(_verifyCode()),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: AppSpacing.xl),
         if (_needsPassword) ...[
           AutofillGroup(
             child: PasswordField(
               controller: _password,
+              autofocus: true,
               onSubmitted: (_) => unawaited(_check()),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.md),
         ],
         OutlinedButton(
+          key: const Key('verify-confirmed'),
           onPressed: auth.isLoading ? null : () => unawaited(_check()),
-          child: const Text("I've confirmed my email"),
+          child: Text(l10n.authVerifyConfirmed),
         ),
-        const SizedBox(height: 8),
-        TextButton(
-          onPressed: canResend ? () => unawaited(_resend()) : null,
-          child: Text(canResend ? 'Resend email' : 'Resend email in ${wait}s'),
+        const SizedBox(height: AppSpacing.sm),
+        ResendCooldownButton(
+          key: const Key('verify-resend'),
+          label: l10n.authResendEmail,
+          availableAt: auth.resendAvailableAt,
+          busy: auth.isLoading,
+          onResend: () => unawaited(_resend()),
         ),
       ],
       footer: [
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpacing.lg),
         Text(
-          "Can't find it? Check your spam folder.",
+          l10n.authCheckSpam,
           textAlign: TextAlign.center,
-          style: TextStyle(color: scheme.onSurfaceVariant),
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(color: palette.textSecondary),
         ),
         TextButton(
           onPressed: auth.isLoading
               ? null
               : () => unawaited(_controller.cancelVerification()),
-          child: const Text('Use a different email'),
+          child: Text(l10n.authUseDifferentEmail),
         ),
       ],
     );

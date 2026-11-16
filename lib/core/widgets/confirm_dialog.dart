@@ -88,6 +88,9 @@ class ConfirmDialog extends StatelessWidget {
               ? FilledButton.styleFrom(
                   backgroundColor: palette.danger,
                   foregroundColor: palette.onDanger,
+                  // Keeps the label at 4.5:1 while hovered, focused or
+                  // pressed (see LoadingButton).
+                  overlayColor: palette.onDangerContainer,
                 )
               : null,
           child: Text(confirmLabel),

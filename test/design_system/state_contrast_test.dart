@@ -7,10 +7,19 @@
 // icon, and the background is the stack Flutter paints under it (Materials,
 // an Ink decoration, a navigation indicator, then the ink highlight and
 // splash of that state), blended over each page colour.
+//
+// Besides single states it covers combined ones, where Flutter stacks one
+// ink highlight per state: hover then press with a mouse, hover over a
+// focused control, and keyboard activation (Enter on a focused control,
+// which adds the pressed highlight and a splash for 100ms). The kit widgets
+// that set their own button styles are measured too, and so is the hint and
+// label of a hovered text field.
 import 'package:expense_manager/core/theme/app_palette.dart';
 import 'package:expense_manager/core/theme/app_theme.dart';
+import 'package:expense_manager/core/widgets/widgets.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'contrast.dart';
@@ -32,6 +41,21 @@ const _highlightable = {
   WidgetState.hovered,
   WidgetState.pressed,
 };
+
+/// Combined states, in the order they are driven.
+enum _Combo {
+  hoverThenPress('hover + press', [WidgetState.hovered, WidgetState.pressed]),
+  focusThenHover('focus + hover', [WidgetState.focused, WidgetState.hovered]),
+  keyboardActivation('keyboard activation', [
+    WidgetState.focused,
+    WidgetState.pressed,
+  ]);
+
+  const _Combo(this.label, this.states);
+
+  final String label;
+  final List<WidgetState> states;
+}
 
 enum _Kind {
   text(4.5),
@@ -260,6 +284,56 @@ List<_Case> _cases() => [
       ),
       targets: const [_textTarget, _iconTarget, (_Kind.text, _subtitleText)],
     ),
+  // Kit widgets with their own button styles.
+  for (final variant in LoadingButtonVariant.values)
+    _Case(
+      'LoadingButton (${variant.name})',
+      () => LoadingButton(
+        label: _label,
+        icon: _icon,
+        variant: variant,
+        expand: false,
+        onPressed: _noop,
+      ),
+      targets: const [_textTarget, _iconTarget],
+    ),
+  for (final destructive in [false, true])
+    _Case(
+      'ConfirmDialog confirm (destructive: $destructive)',
+      () => ConfirmDialog(
+        title: 'Title',
+        message: 'Message',
+        confirmLabel: _label,
+        destructive: destructive,
+      ),
+    ),
+  _Case(
+    'AppListTile',
+    () => const AppListTile(
+      title: _label,
+      subtitle: _subtitle,
+      leading: _iconWidget,
+      onTap: _noop,
+    ),
+    targets: const [_textTarget, _iconTarget, (_Kind.text, _subtitleText)],
+  ),
+  _Case(
+    'AppIconButton',
+    () => const AppIconButton(icon: _icon, tooltip: 'Tip', onPressed: _noop),
+    targets: const [_iconTarget],
+  ),
+  _Case(
+    'AppCard (tappable)',
+    () => const AppCard(onTap: _noop, child: _labelWidget),
+  ),
+  _Case(
+    'SectionHeader action',
+    () => const SectionHeader(
+      title: 'Section',
+      actionLabel: _label,
+      onAction: _noop,
+    ),
+  ),
 ];
 
 /// Long enough for state colour transitions (Material animates its text
@@ -301,6 +375,38 @@ Future<TestGesture?> _drive(
   }
 }
 
+/// Puts the control under [target] into the states of [combo]. Returns the
+/// gestures to release afterwards.
+Future<List<TestGesture>> _driveCombo(
+  WidgetTester tester,
+  Finder target,
+  _Combo combo,
+) async {
+  final center = tester.getCenter(target);
+  switch (combo) {
+    case _Combo.hoverThenPress:
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: center);
+      await _settleState(tester);
+      await mouse.down(center);
+      await _settleState(tester);
+      return [mouse];
+    case _Combo.focusThenHover:
+      await _drive(tester, target, WidgetState.focused);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: center);
+      await _settleState(tester);
+      return [mouse];
+    case _Combo.keyboardActivation:
+      await _drive(tester, target, WidgetState.focused);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
+      // Inside the 100ms the activation keeps the control pressed.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      return const [];
+  }
+}
+
 Color? _materialColor(Material m, ThemeData theme) {
   if (m.type == MaterialType.transparency) return null;
   return m.color ??
@@ -317,7 +423,7 @@ Color? _decorationColor(Decoration? d) => switch (d) {
 List<Color> _layers(
   WidgetTester tester,
   Finder target,
-  WidgetState? state,
+  Set<WidgetState> active,
   ThemeData theme,
 ) {
   final layers = <Color>[];
@@ -369,22 +475,36 @@ List<Color> _layers(
       layers.add(indicator.color ?? theme.colorScheme.secondaryContainer);
     }
   }
-  if (state != null && inked) {
+  if (active.isNotEmpty && inked) {
     final ink = tester.widget<InkResponse>(inkFinder);
     final rest = (ink.statesController?.value ?? const <WidgetState>{})
         .difference(_highlightable);
     Color? overlay(WidgetState s) => ink.overlayColor?.resolve({...rest, s});
-    switch (state) {
-      case WidgetState.focused:
-        layers.add(overlay(state) ?? ink.focusColor ?? theme.focusColor);
-      case WidgetState.hovered:
-        layers.add(overlay(state) ?? ink.hoverColor ?? theme.hoverColor);
-      case WidgetState.pressed:
-        // The pressed highlight, then the splash on top of it.
-        layers
-          ..add(overlay(state) ?? ink.highlightColor ?? theme.highlightColor)
-          ..add(overlay(state) ?? ink.splashColor ?? theme.splashColor);
-      default:
+    // InkResponse keeps one highlight per state (each resolved with only
+    // its own state) and paints them in this order; a press adds a splash
+    // resolved with every active state on top.
+    if (active.contains(WidgetState.hovered)) {
+      layers.add(
+        overlay(WidgetState.hovered) ?? ink.hoverColor ?? theme.hoverColor,
+      );
+    }
+    if (active.contains(WidgetState.focused)) {
+      layers.add(
+        overlay(WidgetState.focused) ?? ink.focusColor ?? theme.focusColor,
+      );
+    }
+    if (active.contains(WidgetState.pressed)) {
+      layers
+        ..add(
+          overlay(WidgetState.pressed) ??
+              ink.highlightColor ??
+              theme.highlightColor,
+        )
+        ..add(
+          ink.overlayColor?.resolve({...rest, ...active}) ??
+              ink.splashColor ??
+              theme.splashColor,
+        );
     }
   }
   return layers;
@@ -409,6 +529,54 @@ Color _foreground(WidgetTester tester, _Kind kind, Finder finder) {
 Color _over(List<Color> layers, Color page) =>
     layers.fold(page, (below, layer) => Color.alphaBlend(layer, below));
 
+Future<void> _pump(WidgetTester tester, ThemeData theme, Widget child) async {
+  FocusManager.instance.highlightStrategy =
+      FocusHighlightStrategy.alwaysTraditional;
+  addTearDown(
+    () => FocusManager.instance.highlightStrategy =
+        FocusHighlightStrategy.automatic,
+  );
+  await tester.pumpWidget(
+    MaterialApp(
+      theme: theme,
+      home: Scaffold(
+        body: Material(
+          type: MaterialType.transparency,
+          child: Center(child: child),
+        ),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+/// Measures every target of [c] in the [active] states over every page.
+List<String> _measure(
+  WidgetTester tester,
+  _Case c,
+  Set<WidgetState> active,
+  ThemeData theme,
+  Map<String, Color> pages,
+) {
+  final failures = <String>[];
+  for (final (kind, finder) in c.targets) {
+    final fg = _foreground(tester, kind, finder());
+    final layers = _layers(tester, finder(), active, theme);
+    for (final page in pages.entries) {
+      final bg = _over(layers, page.value);
+      final ratio = contrastRatio(fg, bg);
+      if (ratio < kind.minimum) {
+        failures.add(
+          '${kind.name} on ${page.key}: ${hex(fg)} vs ${hex(bg)} '
+          'is ${ratio.toStringAsFixed(2)}:1 '
+          '(needs ${kind.minimum}:1)',
+        );
+      }
+    }
+  }
+  return failures;
+}
+
 void main() {
   for (final (name, theme, p) in [
     ('light', AppTheme.light(), AppPalette.light),
@@ -424,44 +592,12 @@ void main() {
       for (final c in _cases()) {
         for (final state in c.interactive ? _states : const [null]) {
           testWidgets('${c.name} ${state?.name ?? 'resting'}', (tester) async {
-            FocusManager.instance.highlightStrategy =
-                FocusHighlightStrategy.alwaysTraditional;
-            addTearDown(
-              () => FocusManager.instance.highlightStrategy =
-                  FocusHighlightStrategy.automatic,
-            );
-            await tester.pumpWidget(
-              MaterialApp(
-                theme: theme,
-                home: Scaffold(
-                  body: Material(
-                    type: MaterialType.transparency,
-                    child: Center(child: c.build()),
-                  ),
-                ),
-              ),
-            );
-            await tester.pumpAndSettle();
+            await _pump(tester, theme, c.build());
             final gesture = state == null
                 ? null
                 : await _drive(tester, c.targets.first.$2(), state);
 
-            final failures = <String>[];
-            for (final (kind, finder) in c.targets) {
-              final fg = _foreground(tester, kind, finder());
-              final layers = _layers(tester, finder(), state, theme);
-              for (final page in pages.entries) {
-                final bg = _over(layers, page.value);
-                final ratio = contrastRatio(fg, bg);
-                if (ratio < kind.minimum) {
-                  failures.add(
-                    '${kind.name} on ${page.key}: ${hex(fg)} vs ${hex(bg)} '
-                    'is ${ratio.toStringAsFixed(2)}:1 '
-                    '(needs ${kind.minimum}:1)',
-                  );
-                }
-              }
-            }
+            final failures = _measure(tester, c, {?state}, theme, pages);
 
             if (state == WidgetState.pressed) await gesture!.up();
             if (state == WidgetState.hovered) await gesture!.removePointer();
@@ -469,6 +605,114 @@ void main() {
             expect(failures, isEmpty);
           });
         }
+        if (!c.interactive) continue;
+        for (final combo in _Combo.values) {
+          testWidgets('${c.name} ${combo.label}', (tester) async {
+            await _pump(tester, theme, c.build());
+            final gestures = await _driveCombo(
+              tester,
+              c.targets.first.$2(),
+              combo,
+            );
+
+            final failures = _measure(
+              tester,
+              c,
+              combo.states.toSet(),
+              theme,
+              pages,
+            );
+
+            if (combo == _Combo.keyboardActivation) {
+              await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
+            }
+            for (final gesture in gestures) {
+              if (combo == _Combo.hoverThenPress) await gesture.up();
+              await gesture.removePointer();
+            }
+            await tester.pumpAndSettle();
+            expect(failures, isEmpty);
+          });
+        }
+      }
+    });
+
+    group('$name theme text field contrast:', () {
+      for (final state in [null, WidgetState.hovered, WidgetState.focused]) {
+        testWidgets('hint and label ${state?.name ?? 'resting'}', (
+          tester,
+        ) async {
+          await _pump(
+            tester,
+            theme,
+            const SizedBox(
+              width: 280,
+              child: TextField(
+                decoration: InputDecoration(
+                  labelText: _label,
+                  hintText: _subtitle,
+                  prefixIcon: _iconWidget,
+                ),
+              ),
+            ),
+          );
+          final field = find.byType(TextField);
+          TestGesture? mouse;
+          if (state == WidgetState.hovered) {
+            mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+            await mouse.addPointer(location: tester.getCenter(field));
+            await _settleState(tester);
+          } else if (state == WidgetState.focused) {
+            await tester.showKeyboard(field);
+            await _settleState(tester);
+          }
+
+          final decorator = tester.widget<InputDecorator>(
+            find.byType(InputDecorator),
+          );
+          final decoration = decorator.decoration.applyDefaults(
+            theme.inputDecorationTheme,
+          );
+          expect(decorator.isHovering, state == WidgetState.hovered);
+          final fill = decoration.fillColor!;
+          final hover = decoration.hoverColor ?? theme.hoverColor;
+          final failures = <String>[];
+          void check(String what, Color fg, double minimum) {
+            for (final page in pages.entries) {
+              var bg = Color.alphaBlend(fill, page.value);
+              if (state == WidgetState.hovered) {
+                bg = Color.alphaBlend(hover, bg);
+              }
+              final ratio = contrastRatio(fg, bg);
+              if (ratio < minimum) {
+                failures.add(
+                  '$what on ${page.key}: ${hex(fg)} vs ${hex(bg)} is '
+                  '${ratio.toStringAsFixed(2)}:1 (needs $minimum:1)',
+                );
+              }
+            }
+          }
+
+          // The label floats when focused; the hint shows only then.
+          final label = find.text(_label);
+          check('label', _foreground(tester, _Kind.text, label), 4.5);
+          if (state == WidgetState.focused) {
+            check(
+              'hint',
+              _foreground(tester, _Kind.text, find.text(_subtitle)),
+              4.5,
+            );
+          } else {
+            // Unfocused, Material keeps the hint transparent behind the
+            // label; measure its themed colour instead.
+            check('hint', decoration.hintStyle!.color!, 4.5);
+          }
+          check('icon', _foreground(tester, _Kind.icon, _iconFinder()), 3);
+
+          await mouse?.removePointer();
+          await tester.pumpAndSettle();
+          expect(failures, isEmpty);
+        });
       }
     });
   }
