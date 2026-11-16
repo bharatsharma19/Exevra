@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/errors/app_failure.dart';
 import '../../core/errors/failure_messages.dart';
 import '../../core/theme/app_tokens.dart';
+import '../../core/ui/root_messenger.dart';
 import '../../core/utils/haptics.dart';
 import '../../core/widgets/widgets.dart';
 import '../../l10n/l10n.dart';
@@ -57,7 +58,8 @@ Future<void> _deleteAccount(BuildContext context, WidgetRef ref) async {
     }
   }
   if (failure == null) {
-    AppSnackbar.showSuccess(l10n.settingsDeleted, messenger: messenger);
+    // The session's messages are cleared as the sign-in screen comes in.
+    showOnSignIn(l10n.settingsDeleted, kind: AppSnackbarKind.success);
   } else {
     AppSnackbar.showError(friendlyMessage(failure), messenger: messenger);
   }

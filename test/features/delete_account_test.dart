@@ -177,4 +177,19 @@ void main() {
     expect(path(), '/login');
     expect(find.text('Your account was deleted.'), findsOneWidget);
   });
+
+  testWidgets('the sign-in screen says the account was deleted', (
+    tester,
+  ) async {
+    await openDeletion(tester);
+
+    // The usual case: the sign-out is quick, so the sign-in screen comes in
+    // (and the session's messages are cleared) right after the deletion.
+    await tester.tap(_confirm);
+    await _frames(tester, 20);
+
+    expect(accounts.calls, 1);
+    expect(find.byType(LoginScreen), findsOneWidget);
+    expect(find.text('Your account was deleted.'), findsOneWidget);
+  });
 }

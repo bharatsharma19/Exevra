@@ -19,7 +19,7 @@ import 'core/theme/app_theme.dart';
 import 'core/theme/system_ui.dart';
 import 'core/ui/root_messenger.dart';
 import 'core/utils/app_locale.dart';
-import 'core/widgets/app_snackbar.dart' show SnackbarHost;
+import 'core/widgets/app_snackbar.dart' show AppSnackbar, SnackbarHost;
 import 'features/auth/screens/app_lock_screen.dart';
 import 'features/startup/service_unavailable_app.dart';
 import 'l10n/l10n.dart';
@@ -115,11 +115,13 @@ class _ExevraAppState extends ConsumerState<ExevraApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    signInNotice.addListener(_showSignInNotice);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    signInNotice.removeListener(_showSignInNotice);
     _router?.routerDelegate.removeListener(_onRouteChanged);
     _loginShown?.cancel();
     super.dispose();
@@ -128,6 +130,10 @@ class _ExevraAppState extends ConsumerState<ExevraApp>
   GoRouter? _router;
   String? _path;
   Timer? _loginShown;
+
+  /// Whether the login page has come in and the old session's messages
+  /// are gone, so a [signInNotice] can show.
+  bool _loginReady = false;
 
   void _watchRoutes(GoRouter router) {
     if (identical(router, _router)) return;
@@ -140,15 +146,27 @@ class _ExevraAppState extends ConsumerState<ExevraApp>
   /// main shell stays on screen while the login page comes in, and a
   /// screen of the ended session could still show one meanwhile. They are
   /// cleared again when the login route is entered and once its transition
-  /// has finished.
+  /// has finished; a [signInNotice] shows after that.
   void _onRouteChanged() {
     final path = _router?.routerDelegate.currentConfiguration.uri.path;
     final entered = path == AppRoutes.login && _path != AppRoutes.login;
     _path = path;
+    if (path != AppRoutes.login) _loginReady = false;
     if (!entered) return;
     clearRootMessages();
     _loginShown?.cancel();
-    _loginShown = Timer(pageTransitionDuration, clearRootMessages);
+    _loginShown = Timer(pageTransitionDuration, () {
+      clearRootMessages();
+      _loginReady = true;
+      _showSignInNotice();
+    });
+  }
+
+  void _showSignInNotice() {
+    final notice = signInNotice.value;
+    if (notice == null || !_loginReady) return;
+    signInNotice.value = null;
+    AppSnackbar.show(notice.message, kind: notice.kind);
   }
 
   @override
@@ -182,6 +200,8 @@ class _ExevraAppState extends ConsumerState<ExevraApp>
     ref
       ..listen<String?>(currentUserIdProvider, (previous, next) {
         if (previous != next) clearRootMessages();
+        // A notice for the sign-in screen is stale once someone signs in.
+        if (next != null) signInNotice.value = null;
       })
       ..listen<bool>(appLockProvider.select((lock) => lock.showLockScreen), (
         previous,
