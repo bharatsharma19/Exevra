@@ -175,6 +175,220 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get authEmailLabel => 'Email address';
+
+  @override
+  String get authEmailHint => 'name@example.com';
+
+  @override
+  String get authPasswordLabel => 'Password';
+
+  @override
+  String get authNewPasswordLabel => 'New password';
+
+  @override
+  String get authConfirmPasswordLabel => 'Confirm password';
+
+  @override
+  String get authConfirmNewPasswordLabel => 'Confirm new password';
+
+  @override
+  String get authPasswordRules =>
+      'At least 8 characters with upper and lower case letters and a number.';
+
+  @override
+  String get authCodeLabel => '6-digit code';
+
+  @override
+  String get authNameLabel => 'Your name';
+
+  @override
+  String get authOr => 'or';
+
+  @override
+  String get authContinueWithGoogle => 'Continue with Google';
+
+  @override
+  String get authContinueWithApple => 'Continue with Apple';
+
+  @override
+  String get authLoginTitle => 'Welcome back';
+
+  @override
+  String get authLoginSubtitle =>
+      'Sign in to track your spending and split costs with others.';
+
+  @override
+  String get authForgotPassword => 'Forgot password?';
+
+  @override
+  String get authSignIn => 'Sign in';
+
+  @override
+  String get authNoAccount => 'Don\'t have an account?';
+
+  @override
+  String get authSignUp => 'Sign up';
+
+  @override
+  String get authRegisterTitle => 'Create your account';
+
+  @override
+  String get authRegisterSubtitle =>
+      'Track your own spending and split costs with others.';
+
+  @override
+  String get authAgreeTerms =>
+      'I agree to the Terms of Service and the Privacy Policy.';
+
+  @override
+  String get authTermsLink => 'Terms of Service';
+
+  @override
+  String get authPrivacyLink => 'Privacy Policy';
+
+  @override
+  String get authCreateAccount => 'Create account';
+
+  @override
+  String get authHaveAccount => 'Already have an account?';
+
+  @override
+  String get authResetPasswordAction => 'Reset password';
+
+  @override
+  String get authVerifyTitle => 'Verify your email';
+
+  @override
+  String get authVerifySubtitle =>
+      'We sent a confirmation link and a 6-digit code to';
+
+  @override
+  String get authVerifyCode => 'Verify code';
+
+  @override
+  String get authVerifyConfirmed => 'I\'ve confirmed my email';
+
+  @override
+  String get authResendEmail => 'Resend email';
+
+  @override
+  String get authResendCode => 'Resend code';
+
+  @override
+  String authResendIn(String time) {
+    return 'You can resend in $time';
+  }
+
+  @override
+  String authResendInSemantics(int seconds) {
+    String _temp0 = intl.Intl.pluralLogic(
+      seconds,
+      locale: localeName,
+      other: '$seconds seconds',
+      one: '1 second',
+    );
+    return 'Resend available in $_temp0';
+  }
+
+  @override
+  String get authResendReady => 'You can send a new email now.';
+
+  @override
+  String get authEmailResent => 'We sent a new email. Check your inbox.';
+
+  @override
+  String get authEnterPasswordToContinue => 'Enter your password to continue.';
+
+  @override
+  String get authNotConfirmedYet =>
+      'Your email isn\'t confirmed yet. Open the link or enter the code from the email.';
+
+  @override
+  String get authCheckSpam => 'Can\'t find it? Check your spam folder.';
+
+  @override
+  String get authUseDifferentEmail => 'Use a different email';
+
+  @override
+  String get authForgotTitle => 'Reset your password';
+
+  @override
+  String get authForgotSubtitle =>
+      'Enter your account\'s email address and we\'ll send you a 6-digit code.';
+
+  @override
+  String get authCodeTitle => 'Enter the code';
+
+  @override
+  String authCodeSubtitle(String email) {
+    return 'Enter the 6-digit code we emailed to $email and choose a new password.';
+  }
+
+  @override
+  String get authSendCode => 'Send code';
+
+  @override
+  String get authCodeSent =>
+      'If an account exists for this address, we emailed it a 6-digit code.';
+
+  @override
+  String get authSetNewPassword => 'Set new password';
+
+  @override
+  String get authResetTitle => 'Choose a new password';
+
+  @override
+  String get authResetSubtitle => 'Set a new password to finish resetting it.';
+
+  @override
+  String authResetSubtitleFor(String email) {
+    return 'Set a new password for $email to finish resetting it.';
+  }
+
+  @override
+  String get authSavePassword => 'Save password';
+
+  @override
+  String get authCancelAndSignOut => 'Cancel and sign out';
+
+  @override
+  String get authBack => 'Back';
+
+  @override
+  String get lockTitle => 'Exevra is locked';
+
+  @override
+  String get lockMessage =>
+      'Use your fingerprint, face or device PIN to continue.';
+
+  @override
+  String get lockUnlock => 'Unlock';
+
+  @override
+  String get lockChecking => 'Checking it\'s you…';
+
+  @override
+  String get lockTurnOffExplanation =>
+      'You just signed in, so you can turn App Lock off on this device. Turn it on again in Profile once the device has a screen lock.';
+
+  @override
+  String get lockTurnOff => 'Turn off App Lock';
+
+  @override
+  String get lockSignOut => 'Sign out';
+
+  @override
+  String get lockSignOutInstead => 'Sign out instead';
+
+  @override
+  String get lockSignOutConfirm =>
+      'Sign out on this device? App Lock stays on for this account when you sign in again.';
+
+  @override
+  String get lockCoverLabel => 'Exevra is hidden while in the background';
+
+  @override
   String get onboardingSkip => 'Skip';
 
   @override

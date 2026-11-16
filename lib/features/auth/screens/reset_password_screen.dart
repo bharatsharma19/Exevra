@@ -6,7 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/errors/app_failure.dart';
 import '../../../core/errors/failure_messages.dart';
+import '../../../core/theme/app_tokens.dart';
 import '../../../core/utils/validators.dart';
+import '../../../l10n/l10n.dart';
 import '../../../providers/auth_provider.dart';
 import '../widgets/auth_widgets.dart';
 
@@ -52,19 +54,20 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
   Widget build(BuildContext context) {
     final auth = ref.watch(authControllerProvider);
     final email = auth.user?.email;
+    final l10n = context.l10n;
 
     return PopScope(
       canPop: false,
       child: AuthScaffold(
-        title: 'Choose a new password',
+        title: l10n.authResetTitle,
         subtitle: email == null
-            ? 'Set a new password to finish resetting it.'
-            : 'Set a new password for $email to finish resetting it.',
+            ? l10n.authResetSubtitle
+            : l10n.authResetSubtitleFor(email),
         icon: Icons.password_rounded,
         content: [
           if (_failure != null) ...[
             AuthMessage(friendlyMessage(_failure!)),
-            const SizedBox(height: 16),
+            const SizedBox(height: AppSpacing.lg),
           ],
           AutofillGroup(
             child: Form(
@@ -74,18 +77,16 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                 children: [
                   PasswordField(
                     controller: _password,
-                    label: 'New password',
+                    label: l10n.authNewPasswordLabel,
                     isNewPassword: true,
                     textInputAction: TextInputAction.next,
                     validator: Validators.validateNewPassword,
-                    helperText:
-                        'At least 8 characters with upper and lower case '
-                        'letters and a number.',
+                    helperText: l10n.authPasswordRules,
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: AppSpacing.lg),
                   PasswordField(
                     controller: _confirm,
-                    label: 'Confirm new password',
+                    label: l10n.authConfirmNewPasswordLabel,
                     isNewPassword: true,
                     validator: Validators.confirmPassword(() => _password.text),
                     onSubmitted: (_) => unawaited(_submit()),
@@ -94,20 +95,21 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: AppSpacing.xl),
           AuthPrimaryButton(
-            label: 'Save password',
+            key: const Key('reset-save'),
+            label: l10n.authSavePassword,
             busy: auth.isLoading,
             onPressed: () => unawaited(_submit()),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           TextButton(
             onPressed: auth.isLoading
                 ? null
                 : () => unawaited(
                     ref.read(authControllerProvider.notifier).cancelRecovery(),
                   ),
-            child: const Text('Cancel and sign out'),
+            child: Text(l10n.authCancelAndSignOut),
           ),
         ],
       ),

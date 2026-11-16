@@ -11,11 +11,14 @@ import '../../../core/config/app_config.dart';
 import '../../../core/errors/app_failure.dart';
 import '../../../core/errors/failure_messages.dart';
 import '../../../core/router/app_routes.dart';
+import '../../../core/theme/app_palette.dart';
+import '../../../core/theme/app_tokens.dart';
 import '../../../core/utils/haptics.dart';
 import '../../../core/utils/validators.dart';
 import '../../../l10n/l10n.dart';
 import '../../../providers/auth_provider.dart';
 import '../widgets/auth_widgets.dart';
+import '../widgets/google_sign_in_button.dart';
 
 /// Sign in with Apple is offered on iOS only (App Store guideline 4.8 and
 /// the native flow); Android users have Google and email.
@@ -83,17 +86,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final busy = ref.watch(authControllerProvider.select((s) => s.isLoading));
-    final scheme = Theme.of(context).colorScheme;
+    final l10n = context.l10n;
     final controller = ref.read(authControllerProvider.notifier);
     final googleConfigured = AppConfig.environment.isGoogleSignInConfigured;
 
     return AuthScaffold(
-      title: 'Welcome back',
-      subtitle: 'Sign in to manage personal and shared expenses',
+      title: l10n.authLoginTitle,
+      subtitle: l10n.authLoginSubtitle,
+      showBrand: true,
       content: [
         if (_failure != null) ...[
           AuthMessage(friendlyMessage(_failure!)),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpacing.lg),
         ],
         AutofillGroup(
           child: Form(
@@ -106,7 +110,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   validator: Validators.validateEmail,
                   onChanged: (_) => _clearFailure(),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: AppSpacing.lg),
                 PasswordField(
                   controller: _password,
                   validator: Validators.validateLoginPassword,
@@ -118,8 +122,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           ),
         ),
         Align(
-          alignment: Alignment.centerRight,
+          alignment: AlignmentDirectional.centerEnd,
           child: TextButton(
+            key: const Key('login-forgot'),
             onPressed: () {
               final email = _email.text.trim();
               unawaited(
@@ -130,75 +135,51 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 ),
               );
             },
-            child: const Text('Forgot password?'),
+            child: Text(l10n.authForgotPassword),
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: AppSpacing.sm),
         AuthPrimaryButton(
-          label: 'Sign in',
+          key: const Key('login-submit'),
+          label: l10n.authSignIn,
           busy: busy,
           onPressed: () => unawaited(_signIn()),
         ),
-        if (googleConfigured || showAppleSignIn) ...[
-          const SizedBox(height: 24),
-          Row(
-            children: [
-              const Expanded(child: Divider()),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text(
-                  'or',
-                  style: TextStyle(color: scheme.onSurfaceVariant),
-                ),
-              ),
-              const Expanded(child: Divider()),
-            ],
-          ),
-          const SizedBox(height: 16),
-        ],
+        if (googleConfigured || showAppleSignIn) const AuthDivider(),
         if (googleConfigured)
-          OutlinedButton(
+          GoogleSignInButton(
+            key: const Key('login-google'),
             onPressed: busy
                 ? null
                 : () => unawaited(_act(controller.signInWithGoogle)),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
-            child: const Text('Continue with Google'),
           ),
         if (showAppleSignIn) ...[
-          const SizedBox(height: 12),
+          if (googleConfigured) const SizedBox(height: AppSpacing.md),
           SignInWithAppleButton(
+            text: l10n.authContinueWithApple,
+            height: AppSizes.minTapTarget,
+            borderRadius: AppRadius.pillAll,
             onPressed: () {
               if (!busy) unawaited(_act(controller.signInWithApple));
             },
-            style: Theme.of(context).brightness == Brightness.dark
+            style: context.palette.isDark
                 ? SignInWithAppleButtonStyle.white
                 : SignInWithAppleButtonStyle.black,
           ),
         ],
       ],
       footer: [
-        const SizedBox(height: 20),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              "Don't have an account?",
-              style: TextStyle(color: scheme.onSurfaceVariant),
-            ),
-            TextButton(
-              onPressed: () =>
-                  unawaited(context.push(_withReturnTo(AppRoutes.register))),
-              child: const Text('Sign up'),
-            ),
-          ],
+        AuthSwitchPrompt(
+          prompt: l10n.authNoAccount,
+          action: l10n.authSignUp,
+          onPressed: () =>
+              unawaited(context.push(_withReturnTo(AppRoutes.register))),
         ),
         Center(
           child: TextButton(
             key: const Key('login-about'),
             onPressed: () => unawaited(context.push(AppRoutes.about)),
-            child: Text(context.l10n.aboutTitle),
+            child: Text(l10n.aboutTitle),
           ),
         ),
       ],

@@ -8,7 +8,9 @@ import '../../../core/errors/app_failure.dart';
 import '../../../core/errors/failure_messages.dart';
 import '../../../core/router/app_routes.dart';
 import '../../../core/router/navigation.dart';
+import '../../../core/theme/app_tokens.dart';
 import '../../../core/utils/validators.dart';
+import '../../../l10n/l10n.dart';
 import '../../../providers/auth_provider.dart';
 import '../widgets/auth_widgets.dart';
 
@@ -41,13 +43,11 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   final _confirm = TextEditingController();
   bool _codeSent = false;
   DateTime? _resendAt;
-  Timer? _ticker;
   AppFailure? _failure;
   String? _notice;
 
   @override
   void dispose() {
-    _ticker?.cancel();
     _email.dispose();
     _code.dispose();
     _password.dispose();
@@ -71,16 +71,8 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
       _failure = failure;
       if (failure == null) {
         _codeSent = true;
-        _notice =
-            'If an account exists for this address, we emailed it a '
-            '6-digit code.';
+        _notice = context.l10n.authCodeSent;
         _resendAt = DateTime.now().add(_resendCooldown);
-        _ticker?.cancel();
-        _ticker = Timer.periodic(const Duration(seconds: 1), (timer) {
-          if (!mounted) return;
-          setState(() {});
-          if (DateTime.now().isAfter(_resendAt!)) timer.cancel();
-        });
       }
     });
   }
@@ -120,28 +112,22 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   @override
   Widget build(BuildContext context) {
     final busy = ref.watch(authControllerProvider.select((s) => s.isLoading));
-    final resendAt = _resendAt;
-    final wait = resendAt == null
-        ? 0
-        : resendAt.difference(DateTime.now()).inSeconds + 1;
-    final canResend = !busy && wait <= 0;
+    final l10n = context.l10n;
 
     return AuthScaffold(
-      title: _codeSent ? 'Enter the code' : 'Reset your password',
+      title: _codeSent ? l10n.authCodeTitle : l10n.authForgotTitle,
       subtitle: _codeSent
-          ? 'Enter the 6-digit code we emailed to ${_email.text.trim()} and '
-                'choose a new password.'
-          : "Enter your account's email address and we'll send you a "
-                '6-digit code.',
+          ? l10n.authCodeSubtitle(_email.text.trim())
+          : l10n.authForgotSubtitle,
       icon: Icons.lock_reset_rounded,
       onBack: _back,
       content: [
         if (_failure != null) ...[
           AuthMessage(friendlyMessage(_failure!)),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpacing.lg),
         ] else if (_notice != null) ...[
           AuthMessage(_notice!, isError: false),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpacing.lg),
         ],
         if (!_codeSent) ...[
           AutofillGroup(
@@ -151,12 +137,14 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                 controller: _email,
                 textInputAction: TextInputAction.done,
                 validator: Validators.validateEmail,
+                onSubmitted: (_) => unawaited(_sendCode()),
               ),
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: AppSpacing.xl),
           AuthPrimaryButton(
-            label: 'Send code',
+            key: const Key('forgot-send'),
+            label: l10n.authSendCode,
             busy: busy,
             onPressed: () => unawaited(_sendCode()),
           ),
@@ -172,21 +160,19 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                     textInputAction: TextInputAction.next,
                     validator: Validators.validateOtp,
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: AppSpacing.lg),
                   PasswordField(
                     controller: _password,
-                    label: 'New password',
+                    label: l10n.authNewPasswordLabel,
                     isNewPassword: true,
                     textInputAction: TextInputAction.next,
                     validator: Validators.validateNewPassword,
-                    helperText:
-                        'At least 8 characters with upper and lower case '
-                        'letters and a number.',
+                    helperText: l10n.authPasswordRules,
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: AppSpacing.lg),
                   PasswordField(
                     controller: _confirm,
-                    label: 'Confirm new password',
+                    label: l10n.authConfirmNewPasswordLabel,
                     isNewPassword: true,
                     validator: Validators.confirmPassword(() => _password.text),
                     onSubmitted: (_) => unawaited(_reset()),
@@ -195,16 +181,20 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: AppSpacing.xl),
           AuthPrimaryButton(
-            label: 'Set new password',
+            key: const Key('forgot-reset'),
+            label: l10n.authSetNewPassword,
             busy: busy,
             onPressed: () => unawaited(_reset()),
           ),
-          const SizedBox(height: 8),
-          TextButton(
-            onPressed: canResend ? () => unawaited(_sendCode()) : null,
-            child: Text(canResend ? 'Resend code' : 'Resend code in ${wait}s'),
+          const SizedBox(height: AppSpacing.sm),
+          ResendCooldownButton(
+            key: const Key('forgot-resend'),
+            label: l10n.authResendCode,
+            availableAt: _resendAt,
+            busy: busy,
+            onResend: () => unawaited(_sendCode()),
           ),
         ],
       ],

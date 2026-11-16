@@ -1,10 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/app_palette.dart';
+import '../../../core/theme/app_tokens.dart';
+import '../../../core/widgets/widgets.dart';
+import '../../../l10n/l10n.dart';
 
-/// Shared frame of the auth screens: brand mark, title, subtitle and a
-/// card with the form. Visual polish comes with the design system.
+export 'resend_cooldown.dart';
+
+/// Shared frame of the auth screens: a round icon (or the brand mark), the
+/// title, a subtitle and a card with the form.
+///
+/// The page scrolls, so the form stays reachable with the keyboard open,
+/// on a 320 dp screen and with 200% text. The keyboard closes when the
+/// page is dragged.
 class AuthScaffold extends StatelessWidget {
   const AuthScaffold({
     super.key,
@@ -14,6 +23,7 @@ class AuthScaffold extends StatelessWidget {
     this.footer = const [],
     this.onBack,
     this.icon = Icons.auto_graph_rounded,
+    this.showBrand = false,
   });
 
   final String title;
@@ -23,44 +33,44 @@ class AuthScaffold extends StatelessWidget {
 
   /// Shows a back button when set.
   final VoidCallback? onBack;
+
+  /// Round icon above the title (unless [showBrand]).
   final IconData icon;
+
+  /// Shows the Exevra logo instead of [icon].
+  final bool showBrand;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final palette = context.palette;
     final text = Theme.of(context).textTheme;
     return Scaffold(
       appBar: onBack == null
           ? null
           : AppBar(
-              backgroundColor: scheme.surface.withValues(alpha: 0),
-              elevation: 0,
               leading: BackButton(onPressed: onBack),
+              automaticallyImplyLeading: false,
             ),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: const EdgeInsets.all(AppSpacing.xl),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 480),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Center(
-                    child: Semantics(
-                      excludeSemantics: true,
-                      child: CircleAvatar(
-                        radius: 36,
-                        backgroundColor: scheme.primaryContainer,
-                        child: Icon(
-                          icon,
-                          size: 36,
-                          color: scheme.onPrimaryContainer,
-                        ),
-                      ),
-                    ),
+                    child: showBrand
+                        ? const BrandMark(size: 30)
+                        : StateIcon(
+                            icon: icon,
+                            background: palette.accentContainer,
+                            foreground: palette.onAccentContainer,
+                          ),
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: AppSpacing.xl),
                   Semantics(
                     header: true,
                     child: Text(
@@ -68,23 +78,23 @@ class AuthScaffold extends StatelessWidget {
                       textAlign: TextAlign.center,
                       style: text.headlineSmall?.copyWith(
                         fontWeight: FontWeight.w800,
+                        color: palette.textPrimary,
                       ),
                     ),
                   ),
                   if (subtitle != null) ...[
-                    const SizedBox(height: 8),
+                    const SizedBox(height: AppSpacing.sm),
                     Text(
                       subtitle!,
                       textAlign: TextAlign.center,
                       style: text.bodyMedium?.copyWith(
-                        color: scheme.onSurfaceVariant,
+                        color: palette.textSecondary,
                       ),
                     ),
                   ],
-                  const SizedBox(height: 28),
-                  GlassCard(
-                    borderRadius: 24,
-                    padding: const EdgeInsets.all(22),
+                  const SizedBox(height: AppSpacing.xl),
+                  AppCard(
+                    padding: const EdgeInsets.all(AppSpacing.xl),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: content,
@@ -101,7 +111,10 @@ class AuthScaffold extends StatelessWidget {
   }
 }
 
-/// One inline error, announced to screen readers.
+/// One inline message above the form (an error, or a notice such as "We
+/// sent a new email"). It is a live region, so screen readers read it when
+/// it appears; the icon and the text carry the meaning, not only the
+/// colour.
 class AuthMessage extends StatelessWidget {
   const AuthMessage(this.message, {super.key, this.isError = true});
 
@@ -110,33 +123,42 @@ class AuthMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final palette = context.palette;
     final background = isError
-        ? scheme.errorContainer
-        : scheme.secondaryContainer;
+        ? palette.dangerContainer
+        : palette.infoContainer;
     final foreground = isError
-        ? scheme.onErrorContainer
-        : scheme.onSecondaryContainer;
+        ? palette.onDangerContainer
+        : palette.onInfoContainer;
     return Semantics(
       liveRegion: true,
-      child: Container(
-        padding: const EdgeInsets.all(12),
+      container: true,
+      child: DecoratedBox(
         decoration: BoxDecoration(
           color: background,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: AppRadius.mdAll,
         ),
-        child: Row(
-          children: [
-            Icon(
-              isError ? Icons.error_outline_rounded : Icons.info_outline,
-              color: foreground,
-              size: 20,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(message, style: TextStyle(color: foreground)),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                isError ? Icons.error_outline_rounded : Icons.info_outline,
+                color: foreground,
+                size: AppSizes.iconSm + 2,
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Text(
+                  message,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: foreground),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -150,6 +172,7 @@ class EmailField extends StatelessWidget {
     required this.controller,
     this.validator,
     this.onChanged,
+    this.onSubmitted,
     this.textInputAction = TextInputAction.next,
     this.enabled = true,
   });
@@ -157,11 +180,13 @@ class EmailField extends StatelessWidget {
   final TextEditingController controller;
   final FormFieldValidator<String>? validator;
   final ValueChanged<String>? onChanged;
+  final ValueChanged<String>? onSubmitted;
   final TextInputAction textInputAction;
   final bool enabled;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return TextFormField(
       controller: controller,
       enabled: enabled,
@@ -172,31 +197,36 @@ class EmailField extends StatelessWidget {
       autofillHints: const [AutofillHints.email],
       validator: validator,
       onChanged: onChanged,
-      decoration: const InputDecoration(
-        labelText: 'Email address',
-        hintText: 'name@example.com',
-        prefixIcon: Icon(Icons.alternate_email_rounded),
+      onFieldSubmitted: onSubmitted,
+      decoration: InputDecoration(
+        labelText: l10n.authEmailLabel,
+        hintText: l10n.authEmailHint,
+        prefixIcon: const Icon(Icons.alternate_email_rounded),
       ),
     );
   }
 }
 
-/// Password field with a show/hide toggle and autofill.
-class PasswordField extends StatefulWidget {
+/// Password field with a show/hide toggle (with a tooltip) and autofill:
+/// the kit's [AppPasswordField] with the auth screens' defaults.
+class PasswordField extends StatelessWidget {
   const PasswordField({
     super.key,
     required this.controller,
-    this.label = 'Password',
+    this.label,
     this.isNewPassword = false,
     this.validator,
     this.onChanged,
     this.onSubmitted,
     this.textInputAction = TextInputAction.done,
     this.helperText,
+    this.autofocus = false,
   });
 
   final TextEditingController controller;
-  final String label;
+
+  /// Defaults to "Password".
+  final String? label;
 
   /// Uses the `newPassword` autofill hint (password managers offer to
   /// generate and save one).
@@ -206,47 +236,20 @@ class PasswordField extends StatefulWidget {
   final ValueChanged<String>? onSubmitted;
   final TextInputAction textInputAction;
   final String? helperText;
+  final bool autofocus;
 
   @override
-  State<PasswordField> createState() => _PasswordFieldState();
-}
-
-class _PasswordFieldState extends State<PasswordField> {
-  bool _obscure = true;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextFormField(
-      controller: widget.controller,
-      obscureText: _obscure,
-      autocorrect: false,
-      enableSuggestions: false,
-      textInputAction: widget.textInputAction,
-      autofillHints: [
-        widget.isNewPassword
-            ? AutofillHints.newPassword
-            : AutofillHints.password,
-      ],
-      validator: widget.validator,
-      onChanged: widget.onChanged,
-      onFieldSubmitted: widget.onSubmitted,
-      decoration: InputDecoration(
-        labelText: widget.label,
-        helperText: widget.helperText,
-        helperMaxLines: 2,
-        prefixIcon: const Icon(Icons.lock_outline_rounded),
-        suffixIcon: IconButton(
-          tooltip: _obscure ? 'Show password' : 'Hide password',
-          icon: Icon(
-            _obscure
-                ? Icons.visibility_outlined
-                : Icons.visibility_off_outlined,
-          ),
-          onPressed: () => setState(() => _obscure = !_obscure),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => AppPasswordField(
+    controller: controller,
+    label: label ?? context.l10n.authPasswordLabel,
+    isNewPassword: isNewPassword,
+    validator: validator,
+    onChanged: onChanged,
+    onFieldSubmitted: onSubmitted,
+    textInputAction: textInputAction,
+    helperText: helperText,
+    autofocus: autofocus,
+  );
 }
 
 /// 6-digit code field (one-time-code autofill).
@@ -277,15 +280,16 @@ class OtpField extends StatelessWidget {
       ],
       validator: validator,
       onFieldSubmitted: onSubmitted,
-      decoration: const InputDecoration(
-        labelText: '6-digit code',
-        prefixIcon: Icon(Icons.pin_outlined),
+      decoration: InputDecoration(
+        labelText: context.l10n.authCodeLabel,
+        prefixIcon: const Icon(Icons.pin_outlined),
       ),
     );
   }
 }
 
-/// Full-width primary button with a busy state.
+/// Full-width primary button with a busy state (the kit's
+/// [LoadingButton]).
 class AuthPrimaryButton extends StatelessWidget {
   const AuthPrimaryButton({
     super.key,
@@ -299,27 +303,71 @@ class AuthPrimaryButton extends StatelessWidget {
   final bool busy;
 
   @override
+  Widget build(BuildContext context) =>
+      LoadingButton(label: label, onPressed: onPressed, isLoading: busy);
+}
+
+/// "or" between the email form and the Google / Apple buttons.
+class AuthDivider extends StatelessWidget {
+  const AuthDivider({super.key});
+
+  @override
   Widget build(BuildContext context) {
-    return FilledButton(
-      onPressed: busy ? null : onPressed,
-      style: FilledButton.styleFrom(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      ),
-      child: busy
-          ? SizedBox(
-              height: 20,
-              width: 20,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                semanticsLabel: 'Please wait',
-                color: Theme.of(context).colorScheme.onPrimary,
-              ),
-            )
-          : Text(
-              label,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+    final palette = context.palette;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+      child: Row(
+        children: [
+          const Expanded(child: Divider()),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            child: Text(
+              context.l10n.authOr,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: palette.textSecondary),
             ),
+          ),
+          const Expanded(child: Divider()),
+        ],
+      ),
+    );
+  }
+}
+
+/// "Don't have an account? Sign up": a prompt and a text button that wrap
+/// onto two lines when they do not fit.
+class AuthSwitchPrompt extends StatelessWidget {
+  const AuthSwitchPrompt({
+    super.key,
+    required this.prompt,
+    required this.action,
+    required this.onPressed,
+  });
+
+  final String prompt;
+  final String action;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.lg),
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(
+            prompt,
+            textAlign: TextAlign.center,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: palette.textSecondary),
+          ),
+          TextButton(onPressed: onPressed, child: Text(action)),
+        ],
+      ),
     );
   }
 }
