@@ -11,6 +11,7 @@ import 'package:expense_manager/providers/profile_provider.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../support/fakes.dart';
@@ -221,8 +222,6 @@ void main() {
     const expected = {
       AiErrorCode.rateLimited:
           "You're sending messages quickly. Try again in a minute.",
-      AiErrorCode.quotaExceeded:
-          "You've reached today's assistant limit. It resets at midnight UTC.",
       AiErrorCode.unavailable:
           'The assistant is unavailable right now. Please try again shortly.',
       AiErrorCode.offline:
@@ -272,31 +271,52 @@ void main() {
       );
     });
 
-    test('429 quota_exceeded shows the server copy and keeps it', () async {
-      const copy =
-          "You've used today's assistant messages. It resets at "
-          'midnight UTC.';
-      final sending = await send('q');
-      await api.last.failWith(
-        const AiChatException(
-          AiErrorCode.quotaExceeded,
-          serverMessage: copy,
-          retryAfter: Duration(hours: 3),
-        ),
-      );
-      await sending.done;
-      expect(last().errorCode, AiErrorCode.quotaExceeded);
+    test('the daily limit says when it resets in local time', () {
+      // 18:30 UTC on 15 Nov: the quota resets at 00:00 UTC on 16 Nov.
+      final now = DateTime.utc(2026, 11, 15, 18, 30);
+      final reset = chatQuotaResetsAt(now);
+      expect(reset.isUtc, isFalse);
+      expect(reset.toUtc(), DateTime.utc(2026, 11, 16));
+      final copy = chatErrorText(l10n, AiErrorCode.quotaExceeded, now: now);
+      expect(copy, l10n.chatErrorQuota(DateFormat.jm().format(reset)));
+      expect(copy, contains("today's assistant limit"));
+      expect(copy, isNot(contains('UTC')));
+      expect(copy, isNot(contains('quickly')));
+      // Exactly at midnight the next reset is a full day away.
       expect(
-        chatErrorText(
-          l10n,
-          last().errorCode,
-          serverMessage: last().serverMessage,
-        ),
-        copy,
+        chatQuotaResetsAt(DateTime.utc(2026, 11, 16)).toUtc(),
+        DateTime.utc(2026, 11, 17),
       );
-      final restored = ChatMessage.fromJson(last().toJson())!;
-      expect(restored.serverMessage, copy);
     });
+
+    test(
+      '429 quota_exceeded keeps the server copy but shows local text',
+      () async {
+        const copy =
+            "You've used today's assistant messages. It resets at "
+            'midnight UTC.';
+        final sending = await send('q');
+        await api.last.failWith(
+          const AiChatException(
+            AiErrorCode.quotaExceeded,
+            serverMessage: copy,
+            retryAfter: Duration(hours: 3),
+          ),
+        );
+        await sending.done;
+        expect(last().errorCode, AiErrorCode.quotaExceeded);
+        expect(
+          chatErrorText(
+            l10n,
+            last().errorCode,
+            serverMessage: last().serverMessage,
+          ),
+          chatErrorText(l10n, AiErrorCode.quotaExceeded),
+        );
+        final restored = ChatMessage.fromJson(last().toJson())!;
+        expect(restored.serverMessage, copy);
+      },
+    );
 
     test('server copy is not used for local-only codes or when huge', () {
       expect(

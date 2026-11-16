@@ -672,8 +672,9 @@ class AppLocalizationsEn extends AppLocalizations {
       'You\'re sending messages quickly. Try again in a minute.';
 
   @override
-  String get chatErrorQuota =>
-      'You\'ve reached today\'s assistant limit. It resets at midnight UTC.';
+  String chatErrorQuota(String time) {
+    return 'You\'ve reached today\'s assistant limit. It resets at $time.';
+  }
 
   @override
   String get chatErrorTooLong =>

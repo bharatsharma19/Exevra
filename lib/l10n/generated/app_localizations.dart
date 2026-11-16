@@ -1185,11 +1185,11 @@ abstract class AppLocalizations {
   /// **'You\'re sending messages quickly. Try again in a minute.'**
   String get chatErrorRateLimited;
 
-  /// Daily limit. Different from the per-minute limit.
+  /// Daily limit. Different from the per-minute limit. time is the local reset time, e.g. 5:30 AM.
   ///
   /// In en, this message translates to:
-  /// **'You\'ve reached today\'s assistant limit. It resets at midnight UTC.'**
-  String get chatErrorQuota;
+  /// **'You\'ve reached today\'s assistant limit. It resets at {time}.'**
+  String chatErrorQuota(String time);
 
   /// No description provided for @chatErrorTooLong.
   ///

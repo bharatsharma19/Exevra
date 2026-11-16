@@ -307,9 +307,11 @@ void main() {
       await env.api.last.fail(AiErrorCode.quotaExceeded);
       await tester.pump();
       await tester.pump();
-      expect(find.text(l10n.chatErrorQuota), findsOneWidget);
+      final quota = chatErrorText(l10n, AiErrorCode.quotaExceeded);
+      expect(find.text(quota), findsOneWidget);
       expect(find.text(l10n.chatErrorRateLimited), findsNothing);
-      expect(l10n.chatErrorQuota, contains('today'));
+      expect(quota, contains('today'));
+      expect(quota, isNot(contains('UTC')));
       expect(l10n.chatErrorRateLimited, contains('quickly'));
     });
 
