@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_palette.dart';
 import '../../../core/theme/app_tokens.dart';
@@ -125,7 +126,7 @@ class SpendingSummaryCard extends StatelessWidget {
                   _Metric(
                     icon: Icons.receipt_long_rounded,
                     label: l10n.dashboardExpenseCountLabel,
-                    value: '${data.count}',
+                    value: NumberFormat.decimalPattern().format(data.count),
                   ),
                 ],
               ),

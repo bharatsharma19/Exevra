@@ -9,6 +9,7 @@ import '../../../core/router/app_routes.dart';
 import '../../../core/router/navigation.dart';
 import '../../../core/theme/app_palette.dart';
 import '../../../core/theme/app_tokens.dart';
+import '../../../core/theme/system_ui.dart';
 import '../../../core/utils/haptics.dart';
 import '../../../core/widgets/widgets.dart';
 import '../../../l10n/l10n.dart';
@@ -231,46 +232,50 @@ class DashboardScreen extends ConsumerWidget {
       ),
     ];
 
-    return Scaffold(
-      body: DecoratedBox(
-        // A soft accent wash at the top gives the frosted summary card
-        // something to blur; text sits on cards or the plain background.
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            stops: const [0, 0.35],
-            colors: [
-              palette.accentContainer.withValues(alpha: 0.55),
-              palette.background,
-            ],
+    // No app bar here, so the region keeps the bar icons readable on the
+    // accent wash and follows theme changes.
+    return SystemUiRegion(
+      child: Scaffold(
+        body: DecoratedBox(
+          // A soft accent wash at the top gives the frosted summary card
+          // something to blur; text sits on cards or the plain background.
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: const [0, 0.35],
+              colors: [
+                palette.accentContainer.withValues(alpha: 0.55),
+                palette.background,
+              ],
+            ),
           ),
-        ),
-        child: SafeArea(
-          bottom: false,
-          child: RefreshIndicator(
-            onRefresh: refreshAll,
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.gutter,
-                AppSpacing.lg,
-                AppSpacing.gutter,
-                // Room for the floating button over the last row.
-                96,
+          child: SafeArea(
+            bottom: false,
+            child: RefreshIndicator(
+              onRefresh: refreshAll,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.gutter,
+                  AppSpacing.lg,
+                  AppSpacing.gutter,
+                  // Room for the floating button over the last row.
+                  96,
+                ),
+                children: children,
               ),
-              children: children,
             ),
           ),
         ),
+        floatingActionButton: canAdd
+            ? FloatingActionButton(
+                tooltip: l10n.dashboardAddExpense,
+                onPressed: addExpense,
+                child: const Icon(Icons.add_rounded),
+              )
+            : null,
       ),
-      floatingActionButton: canAdd
-          ? FloatingActionButton(
-              tooltip: l10n.dashboardAddExpense,
-              onPressed: addExpense,
-              child: const Icon(Icons.add_rounded),
-            )
-          : null,
     );
   }
 }

@@ -18,8 +18,10 @@ import 'package:expense_manager/models/insights.dart';
 import 'package:expense_manager/models/money.dart';
 import 'package:expense_manager/providers/failure_reporter.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
 
 import '../support/fakes.dart';
 
@@ -29,12 +31,13 @@ ExpenseInsights _insights(
   int totalMinor, {
   InsightScope? scope,
   List<Money> others = const [],
+  int count = 2,
 }) => ExpenseInsights(
   scope: scope ?? InsightScope.group,
   timeframe: InsightTimeframe.month,
   currency: 'INR',
   total: Money(totalMinor, 'INR'),
-  count: 2,
+  count: count,
   categories: [
     CategoryTotal(
       category: 'Food',
@@ -125,6 +128,25 @@ void main() {
         await expectLater(tester, meetsGuideline(textContrastGuideline));
         await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
         await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      });
+
+      testWidgets('status and navigation bar icons match the theme', (
+        tester,
+      ) async {
+        await _pump(tester, theme: theme, setUp: _richGroup);
+        final region = tester.widget<AnnotatedRegion<SystemUiOverlayStyle>>(
+          find
+              .ancestor(
+                of: find.byType(Scaffold).first,
+                matching: find.byType(AnnotatedRegion<SystemUiOverlayStyle>),
+              )
+              .first,
+        );
+        final icons = theme.brightness == Brightness.dark
+            ? Brightness.light
+            : Brightness.dark;
+        expect(region.value.statusBarIconBrightness, icons);
+        expect(region.value.systemNavigationBarIconBrightness, icons);
       });
 
       testWidgets('empty personal view meets the guidelines', (tester) async {
@@ -218,6 +240,15 @@ void main() {
     expect(find.text('Solo lunch'), findsOneWidget);
     expect(find.text('Team dinner'), findsWidgets); // the biggest expense
     expect(find.byKey(const Key('dashboard-my-balance')), findsNothing);
+  });
+
+  testWidgets('the expense count uses locale digit grouping', (tester) async {
+    await _pump(
+      tester,
+      setUp: (b) => b.insights.byGroup['g1'] = _insights(50000, count: 1234),
+    );
+    expect(find.text(NumberFormat.decimalPattern().format(1234)), findsOne);
+    expect(find.text('1,234'), findsOneWidget);
   });
 
   testWidgets('the view switcher changes scope', (tester) async {
