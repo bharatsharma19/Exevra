@@ -16,6 +16,7 @@ import 'core/router/deep_links.dart';
 import 'core/storage/preferences.dart';
 import 'core/storage/secure_session_storage.dart';
 import 'core/theme/app_theme.dart';
+import 'core/theme/system_ui.dart';
 import 'core/ui/root_messenger.dart';
 import 'core/utils/app_locale.dart';
 import 'core/widgets/app_snackbar.dart' show SnackbarHost;
@@ -40,15 +41,8 @@ Future<void> _bootstrap() async {
     DeviceOrientation.portraitDown,
   ]);
 
-  // 2. Configure Transparent Immersive System Navigation
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-      systemNavigationBarColor: Colors.transparent,
-      systemNavigationBarIconBrightness: Brightness.light,
-    ),
-  );
+  // 2. The system bars follow the active theme: see ExevraApp's builder
+  // (every screen) and the app bar theme (screens with an app bar).
 
   // 3. Validate the compile-time configuration. An invalid configuration
   // stops here; there is no offline or demo fallback.
@@ -215,9 +209,13 @@ class _ExevraAppState extends ConsumerState<ExevraApp>
       // ScaffoldMessenger.of(context) show through it.
       scaffoldMessengerKey: rootScaffoldMessengerKey,
       // SnackbarHost puts snack bars above sheets and dialogs; LockGate
-      // stays above everything, snack bars included.
-      builder: (context, child) =>
-          LockGate(child: SnackbarHost(child: child ?? const SizedBox())),
+      // stays above everything, snack bars included. SystemUiRegion gives
+      // every screen (the lock screen too) status and navigation bar icons
+      // that contrast with the resolved theme; app bars and screens that
+      // set their own region still override it where they draw.
+      builder: (context, child) => SystemUiRegion(
+        child: LockGate(child: SnackbarHost(child: child ?? const SizedBox())),
+      ),
     );
   }
 }
