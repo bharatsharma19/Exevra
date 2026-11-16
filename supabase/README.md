@@ -163,3 +163,6 @@ Site URL `com.exevra.app://auth-callback`; redirect URLs `com.exevra.app://auth-
 `https://exevra.app/auth/callback`; email confirmations on; minimum password length 8 with lower,
 upper case letters and digits; phone provider off; custom SMTP for auth emails; the three templates in
 `email_templates/`.
+Email OTP length 8 and email OTP expiry 900 s (Authentication > Providers > Email), matching
+`config.toml`; consider turning on CAPTCHA protection (Authentication > Attack Protection) for
+sign-up, sign-in and password reset.

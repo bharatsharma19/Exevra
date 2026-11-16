@@ -156,12 +156,12 @@ void main() {
       expect(backend.auth.calls.where((c) => c.startsWith('resend')), isEmpty);
     });
 
-    test('the 6-digit code signs in', () async {
+    test('the 8-digit code signs in', () async {
       final c = await start();
       await controllerOf(
         c,
       ).signUp(email: 'n@example.com', password: 'Passw0rdX', displayName: 'N');
-      final failure = await controllerOf(c).verifySignupCode('123456');
+      final failure = await controllerOf(c).verifySignupCode('12345678');
       await settle();
       expect(failure, isNull);
       expect(stateOf(c).phase, AuthPhase.signedIn);
@@ -289,7 +289,7 @@ void main() {
       final c = await start();
       final failure = await controllerOf(c).resetPasswordWithCode(
         email: 'a@example.com',
-        code: '123456',
+        code: '12345678',
         newPassword: 'NewPassw0rd',
       );
       await settle();
@@ -307,7 +307,7 @@ void main() {
       backend.auth.failPasswordUpdate = const AppFailure.weakPassword();
       final failure = await controllerOf(c).resetPasswordWithCode(
         email: 'a@example.com',
-        code: '123456',
+        code: '12345678',
         newPassword: 'weak',
       );
       await settle();

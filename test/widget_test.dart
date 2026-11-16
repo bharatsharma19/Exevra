@@ -79,10 +79,10 @@ void main() {
       expect(Validators.validateEmail(null), 'Email address is required');
     });
 
-    test('Validates 6-digit OTP tokens', () {
-      expect(Validators.validateOtp('123456'), null);
-      expect(Validators.validateOtp('12345'), 'Please enter a 6-digit code');
-      expect(Validators.validateOtp('abcdef'), 'Please enter a 6-digit code');
+    test('Validates 8-digit OTP tokens', () {
+      expect(Validators.validateOtp('12345678'), null);
+      expect(Validators.validateOtp('123456'), 'Please enter an 8-digit code');
+      expect(Validators.validateOtp('abcdefgh'), 'Please enter an 8-digit code');
     });
   });
 }

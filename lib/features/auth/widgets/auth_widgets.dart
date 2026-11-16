@@ -252,7 +252,7 @@ class PasswordField extends StatelessWidget {
   );
 }
 
-/// 6-digit code field (one-time-code autofill).
+/// 8-digit code field (one-time-code autofill).
 class OtpField extends StatelessWidget {
   const OtpField({
     super.key,
@@ -276,7 +276,7 @@ class OtpField extends StatelessWidget {
       autofillHints: const [AutofillHints.oneTimeCode],
       inputFormatters: [
         FilteringTextInputFormatter.digitsOnly,
-        LengthLimitingTextInputFormatter(6),
+        LengthLimitingTextInputFormatter(8),
       ],
       validator: validator,
       onFieldSubmitted: onSubmitted,

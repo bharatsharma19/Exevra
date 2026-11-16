@@ -380,7 +380,7 @@ class AuthController extends Notifier<AppAuthState> {
     return failure;
   }
 
-  /// Confirms the address with the 6-digit code (works on any device).
+  /// Confirms the address with the 8-digit code (works on any device).
   Future<AppFailure?> verifySignupCode(String code) async {
     final email = state.verificationEmail;
     if (email == null) return const AppFailure.sessionExpired();
@@ -435,7 +435,7 @@ class AuthController extends Notifier<AppAuthState> {
     }
   }
 
-  /// Emails a 6-digit password reset code.
+  /// Emails an 8-digit password reset code.
   Future<AppFailure?> sendPasswordResetCode(String email) =>
       _run(() => _service.sendPasswordResetCode(email));
 

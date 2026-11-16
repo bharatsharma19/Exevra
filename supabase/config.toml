@@ -107,9 +107,9 @@ enable_confirmations = true
 secure_password_change = true
 # Minimum interval between two confirmation / recovery emails to the same address.
 max_frequency = "60s"
-# Length and lifetime of the 6-digit email codes.
-otp_length = 6
-otp_expiry = 3600
+# Length and lifetime of the 8-digit email codes (15 minutes).
+otp_length = 8
+otp_expiry = 900
 
 # Production SMTP is NOT configured here. Set the transactional SMTP provider for auth emails in the
 # hosted project's dashboard (Authentication > Emails > SMTP settings). Locally, mail goes to the

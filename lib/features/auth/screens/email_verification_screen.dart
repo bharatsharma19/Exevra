@@ -13,7 +13,7 @@ import '../../../providers/auth_provider.dart';
 import '../widgets/auth_widgets.dart';
 
 /// Waits for the email address to be confirmed. The user can follow the
-/// link in the email, type the 6-digit code from it (works on any
+/// link in the email, type the 8-digit code from it (works on any
 /// device), resend it, or start over with another address.
 class EmailVerificationScreen extends ConsumerStatefulWidget {
   const EmailVerificationScreen({super.key});
