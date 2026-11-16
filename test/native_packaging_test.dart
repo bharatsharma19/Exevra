@@ -81,6 +81,21 @@ void main() {
       expect(manifest, contains('android:autoVerify="true"'));
       expect(manifest, contains('flutter_deeplinking_enabled'));
     });
+
+    test('turns Flutter deep linking off', () {
+      // Links reach the app's own handler only, never the router directly.
+      final entries = RegExp(
+        r'<meta-data\s+android:name="flutter_deeplinking_enabled"\s+'
+        r'android:value="([^"]*)"\s*/>',
+      ).allMatches(manifest).toList();
+      expect(entries, hasLength(1));
+      expect(entries.single.group(1), 'false');
+      expect(
+        'flutter_deeplinking_enabled'.allMatches(manifest).length,
+        1,
+        reason: 'declared once, with the value above',
+      );
+    });
   });
 
   group('iOS', () {
@@ -115,6 +130,15 @@ void main() {
       expect(info, isNot(contains('Landscape')));
       expect(info, contains(r'$(GOOGLE_REVERSED_CLIENT_ID)'));
       expect(info, contains(r'$(GOOGLE_IOS_CLIENT_ID)'));
+    });
+
+    test('turns Flutter deep linking off', () {
+      final entries = RegExp(
+        r'<key>FlutterDeepLinkingEnabled</key>\s*<(\w+)\s*/>',
+      ).allMatches(info).toList();
+      expect(entries, hasLength(1));
+      expect(entries.single.group(1), 'false');
+      expect('FlutterDeepLinkingEnabled'.allMatches(info).length, 1);
     });
 
     test('takes the universal link host from the build settings', () {
