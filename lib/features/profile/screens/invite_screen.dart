@@ -19,6 +19,7 @@ import '../../../providers/group_detail_providers.dart';
 import '../../../providers/groups_provider.dart';
 import '../../../providers/pending_invite_provider.dart';
 import '../widgets/invite_views.dart';
+import '../../../core/utils/app_clock.dart';
 
 /// Landing page of an invitation link (`/invite/<token>`).
 ///
@@ -173,7 +174,7 @@ class _InviteScreenState extends ConsumerState<InviteScreen> {
     if (failure != null) return _problem(context, failure, isAuthenticated);
     if (details == null) return _signedOut(context);
 
-    final now = DateTime.now();
+    final now = AppClock.now();
     final isExpired =
         details.status == InvitationStatus.expired ||
         !now.isBefore(details.expiresAt);

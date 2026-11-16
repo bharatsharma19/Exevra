@@ -2,6 +2,7 @@ import '../core/constants/app_constants.dart';
 import '../core/utils/date_helpers.dart';
 import 'json_reader.dart';
 import 'money.dart';
+import '../core/utils/app_clock.dart';
 
 /// An expense, personal (`groupId == null`) or in a group.
 ///
@@ -203,7 +204,7 @@ class ExpenseDraft {
 
   /// Local placeholder shown until the server answers.
   Expense toOptimistic({required String localId, required String userId}) {
-    final now = DateTime.now().toUtc();
+    final now = AppClock.now().toUtc();
     return Expense(
       id: localId,
       userId: userId,

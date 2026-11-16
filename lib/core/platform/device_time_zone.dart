@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 
 import '../logging/app_logger.dart';
+import '../utils/app_clock.dart';
 
 /// The device's IANA time zone (for example `Asia/Kolkata`), stored in
 /// `profiles.timezone` and sent to insights so days and months are bucketed
@@ -26,7 +27,7 @@ abstract final class DeviceTimeZone {
     } on ArgumentError catch (e) {
       AppLogger.warn('Time zone lookup failed', e.message);
     }
-    return fallbackForOffset((now ?? DateTime.now()).timeZoneOffset);
+    return fallbackForOffset((now ?? AppClock.now()).timeZoneOffset);
   }
 
   static const Map<int, String> _fractionalZones = {

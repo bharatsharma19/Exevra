@@ -22,6 +22,7 @@ import '../widgets/expense_form_fields.dart';
 import '../widgets/inline_notice.dart';
 import '../widgets/money_input_field.dart';
 import 'expense_sheet_save.dart';
+import '../../../core/utils/app_clock.dart';
 
 /// Adds a new expense or edits one.
 ///
@@ -126,7 +127,7 @@ class _AddEditExpenseSheetState extends ConsumerState<AddEditExpenseSheet> {
     );
     _noteController = TextEditingController(text: expense?.note ?? '');
     _category = expense?.category ?? AppConstants.categories.first.name;
-    final now = DateTime.now();
+    final now = AppClock.now();
     _spentAt =
         expense?.spentAt.toLocal() ??
         DateTime(now.year, now.month, now.day, now.hour, now.minute);

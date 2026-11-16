@@ -24,6 +24,7 @@ import '../widgets/expense_filter_bar.dart';
 import '../widgets/expense_tile.dart';
 import '../widgets/inline_notice.dart';
 import 'add_edit_expense_sheet.dart';
+import '../../../core/utils/app_clock.dart';
 
 /// The expenses tab: search and filters, the date-grouped list with
 /// pull-to-refresh and paging, and add, edit and delete (with Undo).
@@ -152,7 +153,7 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
     final l10n = context.l10n;
     final filter = ref.watch(expenseFilterProvider);
     final preset = ref.watch(expenseDatePresetProvider);
-    final range = dateRangeOf(preset, DateTime.now());
+    final range = dateRangeOf(preset, AppClock.now());
     final group = ref.watch(activeGroupProvider);
     final key = ref.watch(filteredExpenseKeyProvider);
     final listAsync = key == null
@@ -368,7 +369,7 @@ class _ExpenseList extends StatelessWidget {
             return _Footer(list: list, onLoadMore: onLoadMore);
           }
           final expense = items[i];
-          final now = DateTime.now();
+          final now = AppClock.now();
           final section = _sectionTitle(l10n, expense.spentAt, now);
           final showHeader =
               i == 0 ||

@@ -4,6 +4,7 @@ import '../../core/errors/app_failure.dart';
 import '../../core/errors/failure_messages.dart';
 import '../../data/ai/ai_chat_models.dart';
 import '../../l10n/l10n.dart';
+import '../../core/utils/app_clock.dart';
 
 /// Longest server message shown as is.
 const int chatMaxServerMessageLength = 300;
@@ -53,7 +54,7 @@ String chatErrorText(
     AiErrorCode.consentRequired => l10n.chatErrorConsent,
     AiErrorCode.rateLimited => l10n.chatErrorRateLimited,
     AiErrorCode.quotaExceeded => l10n.chatErrorQuota(
-      DateFormat.jm().format(chatQuotaResetsAt(now ?? DateTime.now())),
+      DateFormat.jm().format(chatQuotaResetsAt(now ?? AppClock.now())),
     ),
     AiErrorCode.tooLong => l10n.chatErrorTooLong,
     AiErrorCode.unavailable => l10n.chatErrorUnavailable,

@@ -7,6 +7,7 @@ import '../../models/group.dart';
 import '../../models/invitation.dart';
 import '../../models/json_reader.dart';
 import '../supabase_client_provider.dart';
+import '../../core/utils/app_clock.dart';
 
 /// Email invitations. Tokens are created on the server and only ever
 /// travel in the invitee's link.
@@ -120,7 +121,7 @@ class SupabaseInvitationRepository implements InvitationRepository {
           .select(GroupInvitation.columns)
           .eq('group_id', groupId)
           .eq('status', 'pending')
-          .gt('expires_at', DateHelpers.toUtcIso(DateTime.now()))
+          .gt('expires_at', DateHelpers.toUtcIso(AppClock.now()))
           .order('created_at', ascending: false);
       return parseList(rows, GroupInvitation.fromJson, 'GroupInvitation');
     });

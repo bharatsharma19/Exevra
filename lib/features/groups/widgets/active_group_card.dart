@@ -16,6 +16,7 @@ import '../../../providers/groups_provider.dart';
 import '../../expenses/widgets/inline_notice.dart';
 import 'group_dialogs.dart';
 import 'group_member_tiles.dart';
+import '../../../core/utils/app_clock.dart';
 
 /// The active group: its currency and members, the invite code and email
 /// invitations (admin), join requests, roles, and leave or delete.
@@ -34,7 +35,7 @@ class ActiveGroupCard extends ConsumerWidget {
     final members = membersAsync.value ?? const <GroupMember>[];
     final approved = members.where((m) => !m.isPending).toList();
     final requests = members.where((m) => m.isPending).toList();
-    final now = DateTime.now();
+    final now = AppClock.now();
     final invitations = !group.isAdmin
         ? const <GroupInvitation>[]
         : (ref.watch(pendingInvitationsProvider(group.id)).value ??

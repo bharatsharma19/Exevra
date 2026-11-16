@@ -1,4 +1,5 @@
 import 'package:intl/intl.dart';
+import 'app_clock.dart';
 
 /// Date and time helpers.
 ///
@@ -70,7 +71,7 @@ abstract final class DateHelpers {
     DateTime? now,
     Duration? utcOffset,
   }) {
-    final current = now ?? DateTime.now();
+    final current = now ?? AppClock.now();
     final diff = current.difference(instant);
     final days = calendarDaysBetween(instant, current, utcOffset: utcOffset);
 
@@ -103,7 +104,7 @@ abstract final class DateHelpers {
     DateTime? now,
     Duration? utcOffset,
   }) {
-    final current = now ?? DateTime.now();
+    final current = now ?? AppClock.now();
     final days = calendarDaysBetween(instant, current, utcOffset: utcOffset);
     if (days == 0) return 'Today';
     if (days == 1) return 'Yesterday';

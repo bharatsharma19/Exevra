@@ -10,6 +10,7 @@ import '../../../core/widgets/widgets.dart';
 import '../../../l10n/l10n.dart';
 import '../expense_categories.dart';
 import 'inline_notice.dart';
+import '../../../core/utils/app_clock.dart';
 
 /// Personal or group, as a segmented control.
 ///
@@ -176,7 +177,7 @@ class ExpenseDateTimeFields extends StatelessWidget {
 
   Future<void> _pickDate(BuildContext context) async {
     AppHaptics.selection();
-    final now = DateTime.now();
+    final now = AppClock.now();
     final first = DateTime(2000);
     final last = DateTime(now.year + 1, now.month, now.day);
     var initial = DateTime(value.year, value.month, value.day);

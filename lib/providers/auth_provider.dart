@@ -13,6 +13,7 @@ import '../data/repositories/profile_repository.dart';
 import '../models/profile.dart';
 import '../services/auth_service.dart';
 import 'profile_provider.dart';
+import '../core/utils/app_clock.dart';
 
 export '../services/auth_service.dart' show authServiceProvider;
 
@@ -353,7 +354,7 @@ class AuthController extends Notifier<AppAuthState> {
         _rememberedPassword = password;
         _setPendingEmail(email);
         state = state._copy(
-          resendAvailableAt: () => DateTime.now().add(resendCooldown),
+          resendAvailableAt: () => AppClock.now().add(resendCooldown),
         );
         _settle(_user);
       case SignUpOutcome.signedIn || null:
@@ -367,13 +368,13 @@ class AuthController extends Notifier<AppAuthState> {
     final email = state.verificationEmail;
     if (email == null) return const AppFailure.sessionExpired();
     final availableAt = state.resendAvailableAt;
-    if (availableAt != null && DateTime.now().isBefore(availableAt)) {
+    if (availableAt != null && AppClock.now().isBefore(availableAt)) {
       return const AppFailure.rateLimited();
     }
     final failure = await _run(() => _service.resendSignupConfirmation(email));
     if (ref.mounted && (failure == null || failure is RateLimitedFailure)) {
       state = state._copy(
-        resendAvailableAt: () => DateTime.now().add(resendCooldown),
+        resendAvailableAt: () => AppClock.now().add(resendCooldown),
       );
     }
     return failure;

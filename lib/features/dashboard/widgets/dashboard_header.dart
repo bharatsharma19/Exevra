@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_palette.dart';
 import '../../../core/theme/app_tokens.dart';
 import '../../../l10n/l10n.dart';
+import '../../../core/utils/app_clock.dart';
 
 /// Greeting, the user's name and the button that switches between the
 /// personal view and a group.
@@ -49,7 +50,7 @@ class DashboardHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                greeting(l10n, now ?? DateTime.now()),
+                greeting(l10n, now ?? AppClock.now()),
                 style: textTheme.bodyMedium?.copyWith(
                   color: palette.textSecondary,
                 ),

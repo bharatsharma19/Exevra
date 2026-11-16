@@ -26,6 +26,7 @@ import '../widgets/category_breakdown.dart';
 import '../widgets/insights_skeleton.dart';
 import '../widgets/insights_summary_card.dart';
 import '../widgets/spending_trend_chart.dart';
+import '../../../core/utils/app_clock.dart';
 
 /// Insights: what was spent in the active scope (personal or the active
 /// group) over the last week, month or year, by day or month and by
@@ -185,7 +186,7 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
           section(
             l10n.insightsTrendTitle,
             SpendingTrendChart(
-              buckets: zeroFilledBuckets(data, today: DateTime.now()),
+              buckets: zeroFilledBuckets(data, today: AppClock.now()),
               timeframe: data.timeframe,
               currency: data.currency,
               period: period,

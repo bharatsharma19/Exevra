@@ -13,6 +13,7 @@ import '../features/chat/models/chat_message.dart';
 import 'auth_provider.dart';
 import 'profile_provider.dart';
 import 'session_guard.dart';
+import '../core/utils/app_clock.dart';
 
 export '../features/chat/models/chat_message.dart';
 
@@ -116,7 +117,7 @@ class ChatNotifier extends Notifier<ChatState> {
       return;
     }
     final prior = state.messages;
-    final now = DateTime.now().toUtc();
+    final now = AppClock.now().toUtc();
     final user = ChatMessage(
       id: _newId('u'),
       isUser: true,
@@ -146,7 +147,7 @@ class ChatNotifier extends Notifier<ChatState> {
       id: _newId('a'),
       isUser: false,
       text: '',
-      createdAt: DateTime.now().toUtc(),
+      createdAt: AppClock.now().toUtc(),
       status: ChatMessageStatus.streaming,
     );
     final prior = messages.sublist(0, messages.length - 2);
@@ -272,14 +273,14 @@ class ChatNotifier extends Notifier<ChatState> {
     try {
       zone = await ref.read(deviceTimeZoneProvider.future);
     } on Object {
-      zone = DeviceTimeZone.fallbackForOffset(DateTime.now().timeZoneOffset);
+      zone = DeviceTimeZone.fallbackForOffset(AppClock.now().timeZoneOffset);
     }
     if (!current()) return flight.done.future;
     final locale =
         ref.read(userProfileProvider)?.locale ?? ref.read(deviceLocaleProvider);
     final request = AiChatRequest(
       messages: turns,
-      timeZone: requestTimeZone(zone, DateTime.now().timeZoneOffset),
+      timeZone: requestTimeZone(zone, AppClock.now().timeZoneOffset),
       locale: requestLocale(locale),
     );
 
@@ -415,6 +416,7 @@ class ChatNotifier extends Notifier<ChatState> {
     );
   }
 
+  // The real clock, not AppClock: only part of a unique id.
   String _newId(String kind) =>
       '$kind-${DateTime.now().microsecondsSinceEpoch}-${_seq++}';
 

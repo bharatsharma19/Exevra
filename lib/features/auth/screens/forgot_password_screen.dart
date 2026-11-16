@@ -13,6 +13,7 @@ import '../../../core/utils/validators.dart';
 import '../../../l10n/l10n.dart';
 import '../../../providers/auth_provider.dart';
 import '../widgets/auth_widgets.dart';
+import '../../../core/utils/app_clock.dart';
 
 /// Password reset with a 6-digit code from the email, so it works even
 /// when the email is opened on another device.
@@ -72,7 +73,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
       if (failure == null) {
         _codeSent = true;
         _notice = context.l10n.authCodeSent;
-        _resendAt = DateTime.now().add(_resendCooldown);
+        _resendAt = AppClock.now().add(_resendCooldown);
       }
     });
   }
