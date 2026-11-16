@@ -128,7 +128,13 @@ abstract final class AppSnackbar {
               ),
             ),
       persist: persist ?? MediaQuery.accessibleNavigationOf(context),
-      content: AppSnackbarContent(message, kind: kind),
+      // The fill is fixed now, so the text keeps the matching colour even
+      // if the theme changes while the message shows.
+      content: AppSnackbarContent(
+        message,
+        kind: kind,
+        foreground: style.foreground,
+      ),
     );
   }
 }
@@ -144,6 +150,7 @@ class AppSnackbarContent extends StatelessWidget {
   const AppSnackbarContent(
     this.message, {
     this.kind = AppSnackbarKind.info,
+    this.foreground,
     super.key,
   });
 
@@ -153,18 +160,24 @@ class AppSnackbarContent extends StatelessWidget {
   /// Tone of the message.
   final AppSnackbarKind kind;
 
+  /// Icon and text colour; defaults to the kind's foreground in the
+  /// current theme. A shown snack bar passes the colour that matches the
+  /// fill it was shown with.
+  final Color? foreground;
+
   @override
   Widget build(BuildContext context) {
     final style = _SnackStyle.of(context, kind);
+    final color = foreground ?? style.foreground;
     final textStyle = Theme.of(
       context,
-    ).textTheme.bodyMedium?.copyWith(color: style.foreground);
+    ).textTheme.bodyMedium?.copyWith(color: color);
     return Semantics(
       label: '${style.label}. $message',
       excludeSemantics: true,
       child: Row(
         children: [
-          Icon(style.icon, color: style.foreground, size: AppSizes.icon),
+          Icon(style.icon, color: color, size: AppSizes.icon),
           const SizedBox(width: AppSpacing.md),
           Expanded(child: Text(message, style: textStyle)),
         ],

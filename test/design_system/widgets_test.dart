@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'contrast.dart';
 import 'kit_gallery.dart';
 
 Widget _app(
@@ -192,6 +193,29 @@ void main() {
       AppSnackbar.showError('Could not save');
       await tester.pumpAndSettle();
       expect(find.bySemanticsLabel('Error. Could not save'), findsOneWidget);
+    });
+
+    testWidgets('stays readable when the theme changes while it shows', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_app(withHost: true, const Scaffold()));
+      AppSnackbar.show('Payment confirmed.', kind: AppSnackbarKind.success);
+      await tester.pumpAndSettle();
+
+      // Dark mode turns on (Settings, or the system at sunset).
+      await tester.pumpWidget(
+        _app(withHost: true, mode: ThemeMode.dark, const Scaffold()),
+      );
+      await tester.pumpAndSettle();
+
+      final background = tester
+          .widget<SnackBar>(find.byType(SnackBar))
+          .backgroundColor!;
+      final text = tester.widget<Text>(find.text('Payment confirmed.'));
+      expect(
+        contrastRatio(text.style!.color!, background),
+        greaterThanOrEqualTo(4.5),
+      );
     });
 
     testWidgets('is a no-op without a mounted messenger', (tester) async {
