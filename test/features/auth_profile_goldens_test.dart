@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../design_system/kit_gallery.dart';
 import '../support/fakes.dart';
+import '../support/golden_clock.dart';
 
 class _Lock extends AppLockController {
   @override
@@ -28,6 +29,7 @@ Future<void> _settleFrames(WidgetTester tester) async {
 /// Regenerate with
 /// `flutter test --update-goldens test/features/auth_profile_goldens_test.dart`.
 void main() {
+  useGoldenClock();
   late ProviderContainer signedOut;
   late ProviderContainer signedIn;
 

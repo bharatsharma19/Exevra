@@ -10,10 +10,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fakes.dart';
+import '../support/golden_clock.dart';
 
 /// Alchemist CI goldens of the expenses list in light and dark.
 /// Regenerate with `flutter test --update-goldens test/features`.
 void main() {
+  useGoldenClock();
   late ProviderContainer container;
 
   setUpAll(() async {
@@ -25,20 +27,27 @@ void main() {
       memberOf('u2'),
     ];
     backend.expenses.rows.addAll([
-      expenseOf('e1', userId: 'u1', groupId: 'g1', title: 'Dinner'),
+      expenseOf(
+        'e1',
+        userId: 'u1',
+        groupId: 'g1',
+        title: 'Dinner',
+        spentAt: goldenDay(2026, 11, 16),
+      ),
       expenseOf(
         'e2',
         userId: 'u2',
         groupId: 'g1',
         title: 'Cab to the airport',
         amountMinor: 64000,
+        spentAt: goldenDay(2026, 11, 15),
       ).copyWith(category: 'Transport'),
       expenseOf(
         'e3',
         userId: 'u1',
         title: 'Electricity bill',
         amountMinor: 189900,
-        spentAt: DateTime.utc(2026, 10, 28),
+        spentAt: goldenDay(2026, 10, 28),
       ).copyWith(category: 'Utilities'),
     ]);
     container = await backend.container();

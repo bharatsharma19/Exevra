@@ -5,10 +5,12 @@ import 'package:expense_manager/core/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 
 import 'kit_gallery.dart';
+import '../support/golden_clock.dart';
 
 /// Alchemist golden gallery of the widget kit. Regenerate with
 /// `flutter test --update-goldens test/design_system`.
 void main() {
+  useGoldenClock();
   unawaited(
     goldenTest(
       'widget kit renders in light and dark',

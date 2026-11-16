@@ -5,6 +5,7 @@ import 'package:expense_manager/core/platform/connectivity.dart';
 import 'package:expense_manager/core/platform/device_time_zone.dart';
 import 'package:expense_manager/core/platform/share_service.dart';
 import 'package:expense_manager/core/storage/preferences.dart';
+import 'package:expense_manager/core/utils/app_clock.dart';
 import 'package:expense_manager/data/repositories/expense_repository.dart';
 import 'package:expense_manager/data/repositories/group_repository.dart';
 import 'package:expense_manager/data/repositories/insights_repository.dart';
@@ -780,7 +781,7 @@ class FakeExpenseRepository implements ExpenseRepository {
       throw const AppFailure.validation(key: 'invalid_target');
     }
     moves.add((expenseId, groupId));
-    final now = DateTime.now().toUtc();
+    final now = AppClock.now().toUtc();
     final moved = old.copyWith(
       id: 'srv-${++_ids}',
       groupId: groupId,
@@ -1062,8 +1063,8 @@ class FakeInvitationRepository implements InvitationRepository {
         email: email,
         role: role,
         status: InvitationStatus.pending,
-        expiresAt: DateTime.now().toUtc().add(const Duration(days: 7)),
-        createdAt: DateTime.now().toUtc(),
+        expiresAt: AppClock.now().toUtc().add(const Duration(days: 7)),
+        createdAt: AppClock.now().toUtc(),
       ),
     );
     return nextSend;

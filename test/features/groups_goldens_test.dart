@@ -13,11 +13,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/fakes.dart';
+import '../support/golden_clock.dart';
 
 /// Alchemist CI goldens of the groups area (an admin's group with its
 /// balances and payments) in light and dark.
 /// Regenerate with `flutter test --update-goldens test/features`.
 void main() {
+  useGoldenClock();
   late ProviderContainer container;
 
   setUpAll(() async {
@@ -30,9 +32,9 @@ void main() {
     backend.profiles.profiles['u1'] = profileOf('u1', activeGroupId: 'g1');
     backend.groups.groupsByUser['u1'] = [group];
     backend.groups.membersByGroup['g1'] = [
-      memberOf('u1', role: GroupRole.admin, joinedAt: DateTime.utc(2025)),
-      memberOf('u2', joinedAt: DateTime.utc(2025, 2)),
-      memberOf('u3', role: GroupRole.viewer, joinedAt: DateTime.utc(2025, 3)),
+      memberOf('u1', role: GroupRole.admin, joinedAt: goldenDay(2025, 1, 1)),
+      memberOf('u2', joinedAt: goldenDay(2025, 2, 1)),
+      memberOf('u3', role: GroupRole.viewer, joinedAt: goldenDay(2025, 3, 1)),
     ];
     backend.balances.balancesByGroup['g1'] = [
       balanceOf('u1', -500),
@@ -52,7 +54,7 @@ void main() {
           toUser: 'u1',
           amount: Money(25000, 'INR'),
           status: SettlementStatus.pending,
-          createdAt: DateTime.utc(2026, 11, 9),
+          createdAt: goldenDay(2026, 11, 9),
         ),
         Settlement(
           id: 's2',
@@ -61,7 +63,7 @@ void main() {
           toUser: 'u-left',
           amount: Money(12000, 'INR'),
           status: SettlementStatus.pending,
-          createdAt: DateTime.utc(2026, 11, 2),
+          createdAt: goldenDay(2026, 11, 2),
         ),
       ]);
     container = await backend.container();

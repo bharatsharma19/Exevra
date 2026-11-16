@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 
 import '../design_system/kit_gallery.dart';
 import 'insights_screen_test.dart' show richInsights;
+import '../support/golden_clock.dart';
 
 /// The home summary and the insights charts, as the user sees them.
 class _HomeAndInsights extends StatelessWidget {
@@ -41,7 +42,7 @@ class _HomeAndInsights extends StatelessWidget {
           InsightsSummaryCard(insights: insights, period: 'Last 30 days'),
           const SizedBox(height: 16),
           SpendingTrendChart(
-            buckets: zeroFilledBuckets(insights, today: DateTime(2026, 11, 16)),
+            buckets: zeroFilledBuckets(insights, today: goldenNow),
             timeframe: insights.timeframe,
             currency: insights.currency,
             period: 'Last 30 days',
@@ -57,6 +58,7 @@ class _HomeAndInsights extends StatelessWidget {
 /// Regenerate with
 /// `flutter test --update-goldens test/features/home_insights_goldens_test.dart`.
 void main() {
+  useGoldenClock();
   unawaited(
     goldenTest(
       'home summary and insights render in light and dark',

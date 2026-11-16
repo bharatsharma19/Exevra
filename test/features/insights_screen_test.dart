@@ -66,7 +66,8 @@ ExpenseInsights richInsights({
     title: 'Groceries',
     category: 'Food',
     amount: Money(60000, 'INR'),
-    spentAt: DateTime.utc(2026, 11, 15, 10),
+    // Local noon: the same calendar day in every time zone.
+    spentAt: DateTime(2026, 11, 15, 12).toUtc(),
   ),
   otherCurrencyTotals: [Money(2500, 'USD')],
 );
