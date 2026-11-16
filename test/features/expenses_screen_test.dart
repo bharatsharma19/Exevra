@@ -115,6 +115,16 @@ void main() {
     });
   }
 
+  testWidgets('the add button has no hero (tabs share one route)', (
+    tester,
+  ) async {
+    await _pump(tester);
+    final fab = tester.widget<FloatingActionButton>(
+      find.byKey(const Key('expenses-add')),
+    );
+    expect(fab.heroTag, isNull);
+  });
+
   testWidgets('shows skeletons while the first page loads', (tester) async {
     final page = Completer<ExpensePage>();
     final (backend, _) = await _pump(

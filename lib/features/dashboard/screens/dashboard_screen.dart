@@ -274,6 +274,9 @@ class DashboardScreen extends ConsumerWidget {
         ),
         floatingActionButton: canAdd
             ? FloatingActionButton(
+                // Every tab stays alive in one page route: a shared default
+                // hero tag breaks the transition to sign-in.
+                heroTag: null,
                 tooltip: l10n.dashboardAddExpense,
                 onPressed: addExpense,
                 child: const Icon(Icons.add_rounded),

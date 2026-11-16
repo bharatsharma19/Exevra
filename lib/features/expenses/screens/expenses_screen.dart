@@ -275,6 +275,9 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen> {
       floatingActionButton: SnackbarClearance(
         child: FloatingActionButton.extended(
           key: const Key('expenses-add'),
+          // Every tab stays alive in one page route: a shared default hero
+          // tag breaks the transition to sign-in.
+          heroTag: null,
           onPressed: _openEditor,
           tooltip: l10n.expensesAdd,
           icon: const Icon(Icons.add_rounded),

@@ -352,6 +352,16 @@ void main() {
     expect(find.byTooltip(l10n.dashboardAddExpense), findsOneWidget);
   });
 
+  testWidgets('the floating button has no hero (tabs share one route)', (
+    tester,
+  ) async {
+    await _pump(tester);
+    final fab = tester.widget<FloatingActionButton>(
+      find.byType(FloatingActionButton),
+    );
+    expect(fab.heroTag, isNull);
+  });
+
   testWidgets('placeholders show while the summary and list load', (
     tester,
   ) async {
