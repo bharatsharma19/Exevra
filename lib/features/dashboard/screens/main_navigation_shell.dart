@@ -56,10 +56,15 @@ class MainNavigationShell extends ConsumerWidget {
         children: [
           OfflineBanner(visible: offline, message: l10n.shellOfflineMessage),
           Expanded(
-            child: MediaQuery.removePadding(
-              context: context,
-              removeTop: offline,
-              child: navigationShell,
+            // The body's own context: the Scaffold has already moved the
+            // tabs above the keyboard and the navigation bar, so the tabs
+            // (and sheets opened from them) must not pad for those again.
+            child: Builder(
+              builder: (bodyContext) => MediaQuery.removePadding(
+                context: bodyContext,
+                removeTop: offline,
+                child: navigationShell,
+              ),
             ),
           ),
         ],
