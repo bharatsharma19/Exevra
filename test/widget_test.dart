@@ -82,7 +82,10 @@ void main() {
     test('Validates 8-digit OTP tokens', () {
       expect(Validators.validateOtp('12345678'), null);
       expect(Validators.validateOtp('123456'), 'Please enter an 8-digit code');
-      expect(Validators.validateOtp('abcdefgh'), 'Please enter an 8-digit code');
+      expect(
+        Validators.validateOtp('abcdefgh'),
+        'Please enter an 8-digit code',
+      );
     });
   });
 }
