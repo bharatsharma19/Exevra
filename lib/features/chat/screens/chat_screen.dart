@@ -357,44 +357,43 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 label: _announcement,
                 child: const SizedBox(width: double.infinity, height: 1),
               ),
-              // The controls never take more than half the height; past
-              // that they scroll, so the conversation keeps its share.
-              ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxHeight: constraints.maxHeight / 2,
-                ),
-                child: SingleChildScrollView(
-                  reverse: true,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (messages.isNotEmpty && !chat.isStreaming && !compact)
-                        ChatPromptStrip(onPrompt: _send),
-                      ChatInputBar(
-                        controller: _input,
-                        streaming: chat.isStreaming,
-                        onSend: _send,
-                        onStop: () => ref.read(chatProvider.notifier).stop(),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          AppSpacing.lg,
-                          AppSpacing.xs,
-                          AppSpacing.lg,
-                          AppSpacing.sm,
-                        ),
-                        child: Text(
-                          l10n.chatDisclaimer,
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              if (messages.isNotEmpty && !chat.isStreaming && !compact)
+                ChatPromptStrip(onPrompt: _send),
+              // The field and Send sit outside any scroll so they are never
+              // clipped; with the keyboard open or large text it grows less.
+              ChatInputBar(
+                controller: _input,
+                streaming: chat.isStreaming,
+                maxLines: compact ? 3 : 5,
+                onSend: _send,
+                onStop: () => ref.read(chatProvider.notifier).stop(),
               ),
+              // The empty view shows the disclaimer itself. Here it never
+              // takes more than a quarter of the height; past that it
+              // scrolls, so the conversation and the field keep their room.
+              if (messages.isNotEmpty)
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: constraints.maxHeight / 4,
+                  ),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg,
+                      AppSpacing.xs,
+                      AppSpacing.lg,
+                      AppSpacing.sm,
+                    ),
+                    child: Text(
+                      l10n.chatDisclaimer,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                )
+              else
+                const SizedBox(height: AppSpacing.sm),
             ],
           );
         },

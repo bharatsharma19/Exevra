@@ -12,6 +12,7 @@ class ChatInputBar extends StatelessWidget {
     required this.streaming,
     required this.onSend,
     required this.onStop,
+    this.maxLines = 5,
     super.key,
   });
 
@@ -19,6 +20,9 @@ class ChatInputBar extends StatelessWidget {
   final bool streaming;
   final VoidCallback onSend;
   final VoidCallback onStop;
+
+  /// How many lines the field grows to before it scrolls.
+  final int maxLines;
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +42,7 @@ class ChatInputBar extends StatelessWidget {
             child: TextField(
               controller: controller,
               minLines: 1,
-              maxLines: 5,
+              maxLines: maxLines,
               maxLength: AiChatRequest.maxUserMessageLength,
               maxLengthEnforcement: MaxLengthEnforcement.enforced,
               // The counter appears only close to the limit.

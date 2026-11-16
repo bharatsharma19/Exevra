@@ -107,7 +107,8 @@ void main() {
       ) async {
         await _pump(tester, theme: theme);
         expect(find.text(l10n.chatEmptyTitle), findsOneWidget);
-        expect(find.text(l10n.chatDisclaimer), findsNWidgets(2));
+        // The empty view carries the disclaimer, so the footer leaves it out.
+        expect(find.text(l10n.chatDisclaimer), findsOneWidget);
         for (final prompt in chatPrompts(l10n)) {
           expect(find.text(prompt), findsOneWidget);
         }
@@ -368,6 +369,61 @@ void main() {
       );
       expect(tester.getSize(list).height, greaterThan(100));
     });
+
+    // The message field and Send must be fully on screen, not clipped by
+    // the footer, on a 320x568 phone at 200% text.
+    void expectInputVisible(WidgetTester tester, {double keyboard = 0}) {
+      final bottom = 568 - keyboard;
+      final appBar = tester.getRect(find.byType(AppBar));
+      for (final finder in [
+        find.byType(TextField),
+        find.byTooltip(l10n.chatSend),
+      ]) {
+        final rect = tester.getRect(finder);
+        expect(
+          rect.top,
+          greaterThanOrEqualTo(appBar.bottom),
+          reason: '$finder',
+        );
+        expect(rect.bottom, lessThanOrEqualTo(bottom), reason: '$finder');
+      }
+      // Nothing sits on top of Send: a tap at its centre reaches it.
+      final send = find.byTooltip(l10n.chatSend);
+      final hits = tester.hitTestOnBinding(tester.getCenter(send));
+      final sendBox = tester.renderObject(send);
+      expect(hits.path.any((e) => e.target == sendBox), isTrue);
+    }
+
+    for (final keyboard in [0.0, 250.0]) {
+      testWidgets('the message field stays visible at 320x568 '
+          '(keyboard ${keyboard.toInt()})', (tester) async {
+        final env = await _pump(tester, theme: AppTheme.light());
+        tester.view
+          ..physicalSize = const Size(960, 1704)
+          ..devicePixelRatio = 3
+          ..viewInsets = FakeViewPadding(bottom: keyboard * 3);
+        tester.platformDispatcher.textScaleFactorTestValue = 2;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        expect(find.text(l10n.chatDisclaimer), findsOneWidget);
+        expectInputVisible(tester, keyboard: keyboard);
+
+        await tester.enterText(find.byType(TextField), 'Hello');
+        await tester.pump();
+        await tester.tap(find.byTooltip(l10n.chatSend));
+        await tester.pump();
+        expect(env.api.calls, hasLength(1));
+        await env.api.last.finish([
+          const AiDelta('You spent ₹1,200 on food.'),
+          const AiDone(),
+        ]);
+        await tester.pump();
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        expectInputVisible(tester, keyboard: keyboard);
+      });
+    }
 
     testWidgets('Thinking… fits 320dp at 200% text', (tester) async {
       final env = await _pump(tester, theme: AppTheme.dark());
