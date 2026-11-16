@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:expense_manager/core/errors/app_failure.dart';
 import 'package:expense_manager/core/errors/failure_messages.dart';
+import 'package:expense_manager/core/widgets/widgets.dart';
 import 'package:expense_manager/features/groups/widgets/groups_section.dart';
 import 'package:expense_manager/models/group.dart';
 import 'package:expense_manager/models/invitation.dart';
@@ -9,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/expense_group_harness.dart';
 import '../support/fakes.dart';
 
 Future<(TestBackend, ProviderContainer)> _pump(
@@ -16,10 +20,13 @@ Future<(TestBackend, ProviderContainer)> _pump(
   Group? group,
   List<GroupMember> members = const [],
   void Function(TestBackend backend)? setUp,
+  ThemeMode mode = ThemeMode.light,
+  double width = 400,
+  double height = 1600,
+  double textScale = 1,
+  bool settle = true,
 }) async {
-  tester.view.physicalSize = const Size(1200, 4800);
-  tester.view.devicePixelRatio = 3;
-  addTearDown(tester.view.reset);
+  setPhoneSize(tester, width: width, height: height);
   tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
     SystemChannels.platform,
     (call) async => null,
@@ -39,12 +46,19 @@ Future<(TestBackend, ProviderContainer)> _pump(
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
-      child: const MaterialApp(
-        home: Scaffold(body: SingleChildScrollView(child: GroupsSection())),
+      child: themedApp(
+        mode: mode,
+        textScale: textScale,
+        home: const Scaffold(
+          body: SingleChildScrollView(
+            padding: EdgeInsets.all(16),
+            child: GroupsSection(),
+          ),
+        ),
       ),
     ),
   );
-  await tester.pumpAndSettle();
+  if (settle) await tester.pumpAndSettle();
   return (backend, container);
 }
 
@@ -69,7 +83,7 @@ void main() {
     ) async {
       final (backend, container) = await _pump(tester);
 
-      await tester.tap(find.byTooltip('Create group'));
+      await tester.tap(find.byKey(const Key('groups-create')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('group-name')), 'Flatmates');
       await tester.tap(find.byKey(const Key('group-currency')));
@@ -91,14 +105,14 @@ void main() {
       final (backend, _) = await _pump(tester);
       backend.groups.failSetActive = const AppFailure.network();
 
-      await tester.tap(find.byTooltip('Create group'));
+      await tester.tap(find.byKey(const Key('groups-create')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('group-name')), 'Trip');
       await tester.tap(find.text('Create'));
       await tester.pumpAndSettle();
 
       // No form left to press Create on again.
-      expect(find.text('Create a group'), findsNothing);
+      expect(find.byType(AlertDialog), findsNothing);
       expect(find.textContaining('"Trip" was created'), findsOneWidget);
       expect(backend.groups.calls, ['create:Trip:INR']);
     });
@@ -111,13 +125,13 @@ void main() {
         ..failCreate = const AppFailure.timeout()
         ..createBeforeFailing = true;
 
-      await tester.tap(find.byTooltip('Create group'));
+      await tester.tap(find.byKey(const Key('groups-create')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('group-name')), 'Trip');
       await tester.tap(find.text('Create'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Create a group'), findsNothing);
+      expect(find.byType(AlertDialog), findsNothing);
       expect(
         find.text(friendlyMessageForKey('group_unconfirmed')),
         findsOneWidget,
@@ -128,7 +142,7 @@ void main() {
 
     testWidgets('a blank name is rejected inline', (tester) async {
       final (backend, _) = await _pump(tester);
-      await tester.tap(find.byTooltip('Create group'));
+      await tester.tap(find.byKey(const Key('groups-create')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Create'));
       await tester.pumpAndSettle();
@@ -139,7 +153,7 @@ void main() {
     testWidgets('joining by code says it waits for approval', (tester) async {
       final (backend, _) = await _pump(tester);
 
-      await tester.tap(find.byTooltip('Join with code'));
+      await tester.tap(find.byKey(const Key('groups-join')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('join-code')), 'abcd-efgh');
       await tester.tap(find.text('Send request'));
@@ -152,14 +166,14 @@ void main() {
 
     testWidgets('a wrong code is explained in the dialog', (tester) async {
       await _pump(tester);
-      await tester.tap(find.byTooltip('Join with code'));
+      await tester.tap(find.byKey(const Key('groups-join')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('join-code')), 'BAD-CODE');
       await tester.tap(find.text('Send request'));
       await tester.pumpAndSettle();
 
       expect(find.text(friendlyMessageForKey('invalid_code')), findsOneWidget);
-      expect(find.text('Join with a code'), findsOneWidget);
+      expect(find.byType(AlertDialog), findsOneWidget);
     });
   });
 
@@ -189,7 +203,7 @@ void main() {
       );
       await tester.tap(find.byTooltip('Deny User u4'));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(ElevatedButton, 'Deny'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Deny'));
       await tester.pumpAndSettle();
       expect(backend.groups.calls, ['remove:u4:false']);
     });
@@ -204,7 +218,12 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Make viewer (read only)'));
       await tester.pumpAndSettle();
+      // Taking a right away asks first.
+      expect(find.text('Make User u2 a viewer?'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Make viewer'));
+      await tester.pumpAndSettle();
       expect(backend.groups.calls, ['role:u2:viewer']);
+      expect(find.text('User u2 can now only view the group.'), findsOneWidget);
     });
 
     testWidgets('hands over admin after confirming', (tester) async {
@@ -218,7 +237,7 @@ void main() {
       await tester.tap(find.text('Make admin'));
       await tester.pumpAndSettle();
       expect(find.text('Make User u2 the admin?'), findsOneWidget);
-      await tester.tap(find.widgetWithText(ElevatedButton, 'Make admin'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Make admin'));
       await tester.pumpAndSettle();
       expect(backend.groups.calls, ['transfer:u2']);
     });
@@ -236,11 +255,11 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Remove from group'));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(ElevatedButton, 'Remove'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Remove'));
       await tester.pumpAndSettle();
 
       expect(find.text('User u2 is not settled up'), findsOneWidget);
-      await tester.tap(find.widgetWithText(ElevatedButton, 'Remove anyway'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Remove anyway'));
       await tester.pumpAndSettle();
       expect(backend.groups.calls, ['remove:u2:false', 'remove:u2:true']);
       expect(find.text('User u2 was removed from the group.'), findsOneWidget);
@@ -255,9 +274,9 @@ void main() {
         members: _members(),
       );
       expect(find.text('ABCD-EFGH-JKMN-PQRS'), findsOneWidget);
-      await tester.tap(find.text('New code'));
+      await tester.tap(find.widgetWithText(OutlinedButton, 'New code'));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(ElevatedButton, 'New code'));
+      await tester.tap(find.widgetWithText(FilledButton, 'New code'));
       await tester.pumpAndSettle();
       expect(backend.groups.calls, ['rotate:g1']);
       await tester.tap(find.text('Share'));
@@ -271,13 +290,13 @@ void main() {
         group: _adminGroup(),
         members: _members(),
       );
-      await tester.tap(find.text('Leave group'));
+      await tester.tap(find.byKey(const Key('group-leave')));
       await tester.pumpAndSettle();
       expect(
         find.textContaining('User u2, the longest-standing member, becomes'),
         findsOneWidget,
       );
-      await tester.tap(find.widgetWithText(ElevatedButton, 'Leave group'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Leave group'));
       await tester.pumpAndSettle();
       expect(backend.groups.calls, ['leave:g1']);
     });
@@ -285,7 +304,7 @@ void main() {
 
   group('invitations', () {
     Future<void> invite(WidgetTester tester) async {
-      await tester.tap(find.text('Invite by email'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Invite by email'));
       await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const Key('invite-email')),
@@ -373,10 +392,140 @@ void main() {
 
       await tester.tap(find.byTooltip('Revoke invitation'));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(ElevatedButton, 'Revoke'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Revoke'));
       await tester.pumpAndSettle();
       expect(backend.invitations!.revoked, ['open']);
       expect(find.text('open@example.com'), findsNothing);
+      expect(
+        find.text('Invitation for open@example.com revoked.'),
+        findsOneWidget,
+      );
     });
   });
+
+  group('states', () {
+    testWidgets('a new user is shown both ways into a group', (tester) async {
+      await _pump(tester);
+      expect(find.byKey(const Key('groups-empty')), findsOneWidget);
+      expect(find.text('Share costs with a group'), findsOneWidget);
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Join with a code'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('join-code')), findsOneWidget);
+    });
+
+    testWidgets('shows skeletons while groups load', (tester) async {
+      final hold = Completer<void>();
+      await _pump(tester, settle: false, setUp: (b) => b.reads.hold = hold);
+      await tester.pump();
+      expect(find.byType(SkeletonBox), findsWidgets);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      hold.complete();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('groups-empty')), findsOneWidget);
+    });
+
+    testWidgets('a failed load offers Retry', (tester) async {
+      final (backend, _) = await _pump(
+        tester,
+        group: _adminGroup(),
+        members: _members(),
+        setUp: (b) => b.groups.failFetch = const AppFailure.offline(),
+      );
+      expect(find.byKey(const Key('groups-retry')), findsOneWidget);
+      backend.groups.failFetch = null;
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const Key('groups-retry')),
+          matching: find.text('Retry'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('groups-retry')), findsNothing);
+      expect(find.text('Group g1'), findsWidgets);
+    });
+
+    testWidgets('the group summary names its currency', (tester) async {
+      await _pump(tester, group: _adminGroup(), members: _members());
+      expect(find.text('Currency INR · 3 members'), findsOneWidget);
+      expect(find.text('Balances (INR)'), findsOneWidget);
+      expect(find.text('Showing expenses from Group g1'), findsOneWidget);
+    });
+
+    testWidgets('an invitation that was neither sent nor linked says so', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        group: _adminGroup(),
+        members: _members(),
+        setUp: (b) => b.invitations!.nextSend = const SentInvitation(
+          invitationId: 'inv-3',
+          sent: false,
+          reason: 'email_failed',
+        ),
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Invite by email'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('invite-email')),
+        'a@example.com',
+      );
+      await tester.tap(find.text('Send invitation'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Email sent'), findsNothing);
+      expect(find.textContaining("couldn't email it"), findsOneWidget);
+    });
+
+    testWidgets('deleting a group with other members is refused', (
+      tester,
+    ) async {
+      final (backend, _) = await _pump(
+        tester,
+        group: _adminGroup(),
+        members: _members(),
+      );
+      await tester.tap(find.byKey(const Key('group-delete')));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.textContaining('Remove the other members'), findsOneWidget);
+      expect(backend.groups.calls, isEmpty);
+    });
+  });
+
+  for (final mode in themeModes) {
+    testWidgets('an admin group meets the guidelines ($mode)', (tester) async {
+      await _pump(
+        tester,
+        mode: mode,
+        group: _adminGroup(),
+        members: _members(),
+      );
+      await expectAccessibleScreen(tester);
+    });
+
+    testWidgets('a new user meets the guidelines ($mode)', (tester) async {
+      await _pump(tester, mode: mode);
+      await expectAccessibleScreen(tester);
+    });
+
+    testWidgets('groups fit 320dp at 200% text ($mode)', (tester) async {
+      await _pump(
+        tester,
+        mode: mode,
+        width: 320,
+        height: 800,
+        textScale: 2,
+        group: _adminGroup(),
+        members: _members(),
+      );
+      expectNoOverflow(tester);
+      await tester.ensureVisible(
+        find.widgetWithText(FilledButton, 'Invite by email'),
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Invite by email'));
+      await tester.pumpAndSettle();
+      expectNoOverflow(tester);
+      expect(find.byKey(const Key('invite-email')), findsOneWidget);
+    });
+  }
 }

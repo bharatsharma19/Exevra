@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:expense_manager/core/errors/app_failure.dart';
 import 'package:expense_manager/core/errors/failure_messages.dart';
+import 'package:expense_manager/core/widgets/widgets.dart';
 import 'package:expense_manager/features/groups/widgets/settlements_card.dart';
 import 'package:expense_manager/models/balance.dart';
 import 'package:expense_manager/models/group.dart';
@@ -14,6 +15,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/expense_group_harness.dart';
 import '../support/fakes.dart';
 
 Settlement _settlement(
@@ -39,10 +41,13 @@ Future<TestBackend> _pump(
   bool isAdmin = false,
   List<Settlement> settlements = const [],
   int u1Net = -500,
+  ThemeMode mode = ThemeMode.light,
+  double width = 400,
+  double textScale = 1,
+  void Function(TestBackend backend)? setUp,
+  bool settle = true,
 }) async {
-  tester.view.physicalSize = const Size(1200, 4000);
-  tester.view.devicePixelRatio = 3;
-  addTearDown(tester.view.reset);
+  setPhoneSize(tester, width: width, height: 1400);
   tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
     SystemChannels.platform,
     (call) async => null,
@@ -84,20 +89,26 @@ Future<TestBackend> _pump(
     ..rows.addAll(settlements)
     ..adminId = isAdmin ? signedInAs : 'u9'
     ..maxAmountMinor = -u1Net;
+  setUp?.call(backend);
   final container = await backend.container();
   addTearDown(container.dispose);
 
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
-      child: MaterialApp(
+      child: themedApp(
+        mode: mode,
+        textScale: textScale,
         home: Scaffold(
-          body: SingleChildScrollView(child: SettlementsCard(group: group)),
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: SettlementsCard(group: group),
+          ),
         ),
       ),
     ),
   );
-  await tester.pumpAndSettle();
+  if (settle) await tester.pumpAndSettle();
   return backend;
 }
 
@@ -361,10 +372,11 @@ void main() {
     tester,
   ) async {
     await _pump(tester);
-    expect(find.text('You'), findsOneWidget);
-    expect(find.text('owe ₹5.00'), findsOneWidget);
-    expect(find.text('is owed ₹5.00'), findsOneWidget);
-    expect(find.text('You pay User u2 ₹5.00'), findsOneWidget);
+    expect(find.text('Balances (INR)'), findsOneWidget);
+    expect(find.text('You owe ₹5.00'), findsOneWidget);
+    expect(find.text('User u2 is owed ₹5.00'), findsOneWidget);
+    expect(find.text('User u9 is settled up'), findsOneWidget);
+    expect(find.text('You owe User u2 ₹5.00'), findsOneWidget);
   });
 
   testWidgets('recording a payment leaves it pending for the payee', (
@@ -385,9 +397,10 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.textContaining('Pending: waiting for User u2 to confirm'),
+      find.textContaining('Waiting for User u2 to confirm'),
       findsOneWidget,
     );
+    expect(find.widgetWithText(StatusBadge, 'Pending'), findsOneWidget);
     // The payer can void it but cannot confirm it.
     expect(find.text('Confirm'), findsNothing);
     expect(find.text('Void'), findsOneWidget);
@@ -419,7 +432,7 @@ void main() {
     await tester.pumpAndSettle();
     // The first other member is the admin, who is owed nothing.
     expect(find.byKey(const Key('payment-nothing-owed')), findsOneWidget);
-    final button = tester.widget<ElevatedButton>(
+    final button = tester.widget<LoadingButton>(
       find.byKey(const Key('payment-record')),
     );
     expect(button.onPressed, isNull);
@@ -448,7 +461,7 @@ void main() {
       settlements: [_settlement('s1', from: 'u1', to: 'u2')],
     );
 
-    expect(find.textContaining('waiting for you to confirm'), findsOneWidget);
+    expect(find.textContaining('Waiting for you to confirm'), findsOneWidget);
     await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();
     expect(find.text('Confirm this payment?'), findsOneWidget);
@@ -456,7 +469,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(backend.settlements.calls, ['confirm:s1']);
-    expect(find.textContaining('Confirmed'), findsOneWidget);
+    expect(find.widgetWithText(StatusBadge, 'Confirmed'), findsOneWidget);
+    expect(find.text('Payment confirmed.'), findsOneWidget);
     expect(find.text('Confirm'), findsNothing);
   });
 
@@ -476,7 +490,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(backend.settlements.calls, ['void:s1:Entered twice']);
-    expect(find.textContaining('Voided: Entered twice'), findsOneWidget);
+    expect(find.textContaining('Reason: Entered twice'), findsOneWidget);
+    expect(find.widgetWithText(StatusBadge, 'Voided'), findsOneWidget);
     expect(find.text('Void'), findsNothing);
   });
 
@@ -504,4 +519,120 @@ void main() {
     expect(find.text('Confirm'), findsNothing);
     expect(find.text('Void'), findsOneWidget);
   });
+
+  testWidgets('a payment with someone who left is locked, with the reason', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      isAdmin: true,
+      settlements: [
+        _settlement('gone', from: 'u1', to: 'u-left'),
+        _settlement('ok', from: 'u1', to: 'u2'),
+      ],
+    );
+
+    expect(find.byKey(const Key('settlement-locked-gone')), findsOneWidget);
+    expect(
+      find.text(friendlyMessageForKey('settlement_locked_member_left')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('settlement-void-gone')), findsNothing);
+    expect(find.byKey(const Key('settlement-void-ok')), findsOneWidget);
+    expect(find.byKey(const Key('settlement-locked-ok')), findsNothing);
+    expect(find.textContaining('Former member'), findsWidgets);
+  });
+
+  test('isSettlementLocked waits for the members and ignores voided ones', () {
+    final members = [memberOf('u1'), memberOf('u2')];
+    final gone = _settlement('g', from: 'u1', to: 'u-left');
+    expect(isSettlementLocked(gone, null), isFalse);
+    expect(isSettlementLocked(gone, members), isTrue);
+    expect(
+      isSettlementLocked(_settlement('k', from: 'u1', to: 'u2'), members),
+      isFalse,
+    );
+    expect(
+      isSettlementLocked(
+        _settlement(
+          'v',
+          from: 'u1',
+          to: 'u-left',
+          status: SettlementStatus.voided,
+        ),
+        members,
+      ),
+      isFalse,
+    );
+  });
+
+  testWidgets('shows skeletons while balances load', (tester) async {
+    final hold = Completer<void>();
+    await _pump(tester, settle: false, setUp: (b) => b.reads.hold = hold);
+    await tester.pump();
+    expect(find.byType(SkeletonList), findsWidgets);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    hold.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('You owe ₹5.00'), findsOneWidget);
+  });
+
+  testWidgets('a failed load offers Retry with friendly copy', (tester) async {
+    final backend = await _pump(
+      tester,
+      setUp: (b) =>
+          b.balances.gate = ReadGate()..failure = const AppFailure.offline(),
+    );
+    expect(find.text('Retry'), findsWidgets);
+    expect(
+      find.text(friendlyMessage(const AppFailure.offline())),
+      findsWidgets,
+    );
+    backend.balances.gate.failure = null;
+    await tester.tap(find.text('Retry').first);
+    await tester.pumpAndSettle();
+    expect(find.text('You owe ₹5.00'), findsOneWidget);
+  });
+
+  for (final mode in themeModes) {
+    testWidgets('balances and payments meet the guidelines ($mode)', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        mode: mode,
+        settlements: [
+          _settlement('s1', from: 'u1', to: 'u2'),
+          _settlement(
+            's2',
+            from: 'u2',
+            to: 'u1',
+            status: SettlementStatus.confirmed,
+          ),
+          _settlement('s3', from: 'u1', to: 'u-left'),
+        ],
+      );
+      await expectAccessibleScreen(tester);
+    });
+
+    testWidgets('balances fit 320dp at 200% text ($mode)', (tester) async {
+      await _pump(
+        tester,
+        mode: mode,
+        width: 320,
+        textScale: 2,
+        settlements: [
+          _settlement('s1', from: 'u1', to: 'u2'),
+          _settlement('s3', from: 'u1', to: 'u-left'),
+        ],
+      );
+      expectNoOverflow(tester);
+      await tester.ensureVisible(find.text('Pay'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Pay'));
+      await tester.pumpAndSettle();
+      expectNoOverflow(tester);
+      expect(find.text('Record a payment'), findsOneWidget);
+    });
+  }
 }

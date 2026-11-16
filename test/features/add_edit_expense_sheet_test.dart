@@ -2,6 +2,7 @@ import 'package:expense_manager/core/errors/app_failure.dart';
 import 'package:expense_manager/core/errors/failure_messages.dart';
 import 'package:expense_manager/core/widgets/app_snackbar.dart';
 import 'package:expense_manager/features/expenses/screens/add_edit_expense_sheet.dart';
+import 'package:expense_manager/features/expenses/widgets/expense_form_fields.dart';
 import 'package:expense_manager/models/expense.dart';
 import 'package:expense_manager/models/group.dart';
 import 'package:expense_manager/models/money.dart';
@@ -10,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/expense_group_harness.dart';
 import '../support/fakes.dart';
 
 /// Opens the sheet from a button so dismissal goes through the route.
@@ -39,10 +41,12 @@ Future<(TestBackend, ProviderContainer)> _pump(
   List<Expense> rows = const [],
   void Function(TestBackend backend)? setUp,
   bool rootMessenger = false,
+  ThemeMode mode = ThemeMode.light,
+  double width = 360,
+  double height = 800,
+  double textScale = 1,
 }) async {
-  tester.view.physicalSize = const Size(1080, 2400);
-  tester.view.devicePixelRatio = 3;
-  addTearDown(tester.view.reset);
+  setPhoneSize(tester, width: width, height: height);
 
   final backend = TestBackend(signedInAs: 'u1');
   backend.profiles.profiles['u1'] = profileOf(
@@ -67,9 +71,11 @@ Future<(TestBackend, ProviderContainer)> _pump(
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
-      child: MaterialApp(
-        scaffoldMessengerKey: rootMessenger ? rootScaffoldMessengerKey : null,
+      child: themedApp(
+        messengerKey: rootMessenger ? rootScaffoldMessengerKey : null,
         home: _Host(expense: expense),
+        mode: mode,
+        textScale: textScale,
       ),
     ),
   );
@@ -77,6 +83,18 @@ Future<(TestBackend, ProviderContainer)> _pump(
   await tester.tap(find.text('open'));
   await tester.pumpAndSettle();
   return (backend, container);
+}
+
+/// The Personal or Group segment (a category is also called Personal).
+Finder _scope(String label) => find.descendant(
+  of: find.byType(ExpenseScopeSelector),
+  matching: find.text(label),
+);
+
+Future<void> _tapScope(WidgetTester tester, String label) async {
+  await tester.ensureVisible(_scope(label));
+  await tester.tap(_scope(label));
+  await tester.pump();
 }
 
 Future<void> _save(WidgetTester tester) async {
@@ -156,6 +174,7 @@ void main() {
       rows: [original],
     );
 
+    await tester.ensureVisible(find.byTooltip('Clear note'));
     await tester.tap(find.byTooltip('Clear note'));
     await tester.pump();
     await _save(tester);
@@ -177,8 +196,7 @@ void main() {
       rows: [original],
     );
 
-    await tester.tap(find.text('Group Expense'));
-    await tester.pump();
+    await _tapScope(tester, 'Group');
     expect(find.byKey(const Key('expense-currency-locked')), findsOneWidget);
     await _save(tester);
 
@@ -205,8 +223,7 @@ void main() {
       rootMessenger: true,
     );
 
-    await tester.tap(find.text('Group Expense'));
-    await tester.pump();
+    await _tapScope(tester, 'Group');
     await _save(tester);
 
     expect(backend.expenses.moves, [('e1', 'g1')]);
@@ -256,8 +273,7 @@ void main() {
       expect(amount.enabled, isFalse);
 
       // Moving to personal is refused with the same reason.
-      await tester.tap(find.text('Personal'));
-      await tester.pump();
+      await _tapScope(tester, 'Personal');
       expect(backend.expenses.moves, isEmpty);
 
       await tester.enterText(find.byKey(const Key('expense-title')), 'Dinner');
@@ -305,7 +321,8 @@ void main() {
   });
 
   testWidgets('asks before discarding unsaved changes', (tester) async {
-    await _pump(tester);
+    // Tall enough to leave the barrier visible above the sheet.
+    await _pump(tester, height: 1400);
 
     await tester.enterText(find.byKey(const Key('expense-title')), 'Draft');
     await tester.tap(find.byTooltip('Close'));
@@ -317,7 +334,14 @@ void main() {
     expect(find.byType(AddEditExpenseSheet), findsOneWidget);
     expect(find.text('Draft'), findsOneWidget);
 
-    // Tapping outside the sheet asks as well.
+    // Back asks as well.
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Discard changes?'), findsOneWidget);
+    await tester.tap(find.text('Keep editing'));
+    await tester.pumpAndSettle();
+
+    // And so does tapping outside the sheet.
     await tester.tapAt(const Offset(10, 10));
     await tester.pumpAndSettle();
     expect(find.text('Discard changes?'), findsOneWidget);
@@ -340,8 +364,7 @@ void main() {
     final (backend, _) = await _pump(tester, role: GroupRole.viewer);
 
     // Starts as personal; Group explains why it is unavailable.
-    await tester.tap(find.text('Group Expense'));
-    await tester.pump();
+    await _tapScope(tester, 'Group');
     expect(
       find.text(friendlyMessageForKey('viewer_cannot_add')),
       findsOneWidget,
@@ -391,5 +414,112 @@ void main() {
       findsOneWidget,
     );
     expect(find.byType(AddEditExpenseSheet), findsOneWidget);
+  });
+
+  for (final mode in themeModes) {
+    testWidgets('the sheet meets contrast and tap-target guidelines ($mode)', (
+      tester,
+    ) async {
+      await _pump(tester, mode: mode);
+      expect(find.text('Add expense'), findsOneWidget);
+      await expectAccessibleScreen(tester);
+    });
+
+    testWidgets('a locked expense meets the guidelines ($mode)', (
+      tester,
+    ) async {
+      final shared = expenseOf(
+        'ge',
+        userId: 'u1',
+        groupId: 'g1',
+      ).copyWith(amount: Money(3000, 'EUR'));
+      await _pump(
+        tester,
+        mode: mode,
+        expense: shared,
+        rows: [shared],
+        setUp: (b) {
+          b.groups.membersByGroup['g1'] = [memberOf('u1')];
+          b.expenses.participants['ge'] = ['u1', 'u-left'];
+        },
+      );
+      expect(find.byKey(const Key('expense-locked')), findsOneWidget);
+      await expectAccessibleScreen(tester);
+    });
+
+    testWidgets('the sheet fits 320dp at 200% text ($mode)', (tester) async {
+      await _pump(tester, mode: mode, width: 320, textScale: 2);
+      await tester.enterText(find.byKey(const Key('expense-title')), 'Taxi');
+      await _save(tester);
+      expectNoOverflow(tester);
+      expect(find.byType(AddEditExpenseSheet), findsOneWidget);
+    });
+  }
+
+  testWidgets('a comma is read as the decimal point', (tester) async {
+    final (backend, _) = await _pump(tester);
+
+    await tester.enterText(find.byKey(const Key('expense-amount')), '12,5');
+    await tester.enterText(find.byKey(const Key('expense-title')), 'Tea');
+    await _save(tester);
+
+    expect(backend.expenses.rows.single.amount, Money(1250, 'EUR'));
+  });
+
+  testWidgets('letters and minus signs are never typed into the amount', (
+    tester,
+  ) async {
+    await _pump(tester);
+    await tester.enterText(find.byKey(const Key('expense-amount')), '-1a2');
+    await tester.pump();
+    expect(find.text('12'), findsOneWidget);
+  });
+
+  testWidgets('an empty title is refused inline', (tester) async {
+    final (backend, _) = await _pump(tester);
+    await tester.enterText(find.byKey(const Key('expense-amount')), '5');
+    await _save(tester);
+    expect(find.text('Enter a title.'), findsOneWidget);
+    expect(backend.expenses.rows, isEmpty);
+  });
+
+  testWidgets('Undo after a move with edits restores every field', (
+    tester,
+  ) async {
+    final original = expenseOf('e1', userId: 'u1', title: 'Groceries').copyWith(
+      amount: Money(4000, 'INR'),
+      note: 'Weekly',
+      category: 'Shopping',
+    );
+    final (backend, _) = await _pump(
+      tester,
+      expense: original,
+      rows: [original],
+      rootMessenger: true,
+    );
+
+    await _tapScope(tester, 'Group');
+    expect(find.byKey(const Key('expense-currency-locked')), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('expense-amount')), '55');
+    await tester.enterText(find.byKey(const Key('expense-title')), 'Shared');
+    await _save(tester);
+
+    final moved = backend.expenses.rows.single;
+    expect(moved.groupId, 'g1');
+    expect(moved.title, 'Shared');
+    expect(moved.amount, Money(5500, 'EUR'));
+    expect(find.textContaining('Moved "Shared"'), findsOneWidget);
+
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+
+    final restored = backend.expenses.rows.single;
+    expect(restored.isPersonal, isTrue);
+    expect(restored.title, 'Groceries');
+    expect(restored.amount, Money(4000, 'INR'));
+    expect(restored.note, 'Weekly');
+    expect(restored.category, 'Shopping');
+    expect(find.text('"Groceries" is back as it was'), findsOneWidget);
+    rootScaffoldMessengerKey.currentState?.clearSnackBars();
   });
 }
