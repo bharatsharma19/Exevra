@@ -822,6 +822,9 @@ class FakeInsightsRepository implements InsightsRepository {
   AppFailure? failure;
   int calls = 0;
 
+  /// The timeframe of every fetch, in order.
+  final List<InsightTimeframe> timeframes = [];
+
   @override
   Future<ExpenseInsights> fetch({
     required InsightScope scope,
@@ -831,6 +834,7 @@ class FakeInsightsRepository implements InsightsRepository {
     String? groupId,
   }) async {
     calls++;
+    timeframes.add(timeframe);
     final f = failure;
     if (f != null) throw f;
     return byGroup[groupId] ??
