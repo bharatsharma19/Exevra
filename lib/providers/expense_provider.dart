@@ -873,11 +873,71 @@ ExpenseLockKey? expenseLockKeyOf(Expense expense) {
   return (expenseId: expense.id, groupId: groupId, payerId: expense.userId);
 }
 
+/// Collects the lock checks asked for in one turn of the event loop (the
+/// rows of one list frame) into a single participants read.
+class ExpenseParticipantsBatcher {
+  ExpenseParticipantsBatcher(this._repo);
+
+  final ExpenseRepository _repo;
+  final Map<String, Completer<List<String?>>> _queued = {};
+  final Map<String, Future<List<String?>>> _inFlight = {};
+
+  /// The participants of [expenseId], read together with the others
+  /// asked for in the same turn.
+  Future<List<String?>> fetch(String expenseId) {
+    final running = _inFlight[expenseId];
+    if (running != null) return running;
+    final queued = _queued[expenseId];
+    if (queued != null) return queued.future;
+    if (_queued.isEmpty) Timer.run(_flush);
+    return (_queued[expenseId] = Completer<List<String?>>()).future;
+  }
+
+  Future<void> _flush() async {
+    final batch = Map.of(_queued);
+    _queued.clear();
+    for (final MapEntry(:key, :value) in batch.entries) {
+      _inFlight[key] = value.future;
+    }
+    try {
+      final result = await _repo.fetchParticipants(batch.keys.toList());
+      for (final MapEntry(:key, :value) in batch.entries) {
+        value.complete(result[key] ?? const []);
+      }
+    } on Object catch (error, stack) {
+      for (final completer in batch.values) {
+        completer.completeError(error, stack);
+      }
+    } finally {
+      batch.keys.forEach(_inFlight.remove);
+    }
+  }
+}
+
+/// See [ExpenseParticipantsBatcher]. Lives while any lock check does.
+final expenseParticipantsBatcherProvider =
+    Provider.autoDispose<ExpenseParticipantsBatcher>(
+      (ref) => ExpenseParticipantsBatcher(ref.watch(expenseRepositoryProvider)),
+    );
+
+/// A group's members for the lock checks: read once per group and shared
+/// by every row, again after joins, leaves and removals.
+final expenseLockMembersProvider = FutureProvider.autoDispose
+    .family<List<GroupMember>, String>((ref, groupId) {
+      ref.watch(currentUserIdProvider);
+      ref.watch(dataRevisionProvider.select((r) => r.members));
+      return ref.watch(groupRepositoryProvider).fetchMembers(groupId);
+    });
+
 /// Whether a group expense is locked because someone who shares it (the
 /// payer or anyone in its split) is no longer an approved member of the
 /// group. The server then refuses amount and payer changes, deletion and
 /// moves (`expense_locked_member_left`); title, category, note and date
 /// stay editable.
+///
+/// The rows of a list share their reads: one participants read per frame
+/// ([ExpenseParticipantsBatcher]) and one members read per group
+/// ([expenseLockMembersProvider]).
 ///
 /// False while signed out and when the check itself fails: the server
 /// still enforces the rule, and its error is shown then.
@@ -886,23 +946,25 @@ final expenseLockedProvider = FutureProvider.autoDispose
       if (ref.watch(currentUserIdProvider) == null) return false;
       // Joins, leaves and removals change the answer.
       ref.watch(dataRevisionProvider.select((r) => r.members));
+      final participants = ref
+          .watch(expenseParticipantsBatcherProvider)
+          .fetch(key.expenseId);
+      final members = ref.watch(expenseLockMembersProvider(key.groupId).future);
       try {
-        final participants = await ref
-            .watch(expenseRepositoryProvider)
-            .fetchParticipants(key.expenseId);
-        final members = await ref
-            .watch(groupRepositoryProvider)
-            .fetchMembers(key.groupId);
+        final (who, approved) = await (participants, members).wait;
         // No visible members: the caller cannot tell (for example after
         // leaving); the server decides.
-        if (members.isEmpty) return false;
+        if (approved.isEmpty) return false;
         return isExpenseLocked(
           payerId: key.payerId,
-          participants: participants,
-          members: members,
+          participants: who,
+          members: approved,
         );
-      } on AppFailure catch (failure) {
-        AppLogger.warn('Could not check whether an expense is locked', failure);
+      } on ParallelWaitError<Object?, Object?> catch (error) {
+        AppLogger.warn(
+          'Could not check whether an expense is locked',
+          error.errors,
+        );
         return false;
       }
     });

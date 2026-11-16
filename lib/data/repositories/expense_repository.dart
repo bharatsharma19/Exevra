@@ -142,9 +142,10 @@ abstract interface class ExpenseRepository {
   /// expense is unchanged.
   Future<Expense> moveScope(String expenseId, {required String? groupId});
 
-  /// The users who share the group expense [expenseId] (its split rows; a
-  /// null entry is a deleted account). Empty for a personal expense.
-  Future<List<String?>> fetchParticipants(String expenseId);
+  /// The users who share each of the group expenses [expenseIds] (their
+  /// split rows; a null entry is a deleted account), in one read. An id
+  /// without split rows (a personal expense) maps to an empty list.
+  Future<Map<String, List<String?>>> fetchParticipants(List<String> expenseIds);
 
   /// Changes to a group's expenses, members and settlements, pushed by
   /// realtime, plus expense deletions (see [GroupChange.expenseDeleted]).
@@ -271,16 +272,21 @@ class SupabaseExpenseRepository implements ExpenseRepository {
   }
 
   @override
-  Future<List<String?>> fetchParticipants(String expenseId) {
+  Future<Map<String, List<String?>>> fetchParticipants(
+    List<String> expenseIds,
+  ) {
     return ErrorMapper.guard(() async {
+      final result = {for (final id in expenseIds) id: <String?>[]};
+      if (expenseIds.isEmpty) return result;
       final rows = await _client
           .from('expense_splits')
-          .select('user_id')
-          .eq('expense_id', expenseId);
-      return [
-        for (final row in rows)
-          JsonReader.of(row, 'Split').optString('user_id'),
-      ];
+          .select('expense_id, user_id')
+          .inFilter('expense_id', expenseIds);
+      for (final row in rows) {
+        final split = JsonReader.of(row, 'Split');
+        result[split.string('expense_id')]?.add(split.optString('user_id'));
+      }
+      return result;
     });
   }
 

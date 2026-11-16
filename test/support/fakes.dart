@@ -435,8 +435,12 @@ class FakeGroupRepository implements GroupRepository {
   final List<String> calls = [];
   int _ids = 0;
 
+  /// The group ids of each [fetchMembers] call.
+  final List<String> memberFetches = [];
+
   @override
   Future<List<GroupMember>> fetchMembers(String groupId) async {
+    memberFetches.add(groupId);
     await gate.pass();
     return List.of(membersByGroup[groupId] ?? const []);
   }
@@ -795,12 +799,18 @@ class FakeExpenseRepository implements ExpenseRepository {
     return moved;
   }
 
+  /// The ids asked for by each [fetchParticipants] call.
+  final List<List<String>> participantBatches = [];
+
   @override
-  Future<List<String?>> fetchParticipants(String expenseId) async {
+  Future<Map<String, List<String?>>> fetchParticipants(
+    List<String> expenseIds,
+  ) async {
     participantFetches++;
+    participantBatches.add(List.of(expenseIds));
     final failure = failReads;
     if (failure != null) throw failure;
-    return participants[expenseId] ?? const [];
+    return {for (final id in expenseIds) id: participants[id] ?? const []};
   }
 
   /// Realtime changes pushed by the test (per group).

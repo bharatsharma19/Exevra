@@ -9,6 +9,7 @@ import 'package:expense_manager/features/expenses/screens/add_edit_expense_sheet
 import 'package:expense_manager/features/expenses/screens/expenses_screen.dart';
 import 'package:expense_manager/models/expense.dart';
 import 'package:expense_manager/models/group.dart';
+import 'package:expense_manager/providers/data_revision.dart';
 import 'package:expense_manager/providers/expense_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -410,6 +411,43 @@ void main() {
     expect(backend.expenses.deleted, isEmpty);
   });
 
+  testWidgets('the rows share their lock-check reads', (tester) async {
+    final group = groupOf('g1', adminId: 'u1');
+    final ids = [for (var i = 0; i < 6; i++) 'g$i'];
+    final (backend, _) = await _pump(
+      tester,
+      group: group,
+      rows: [
+        for (final (i, id) in ids.indexed)
+          expenseOf(
+            id,
+            userId: 'u1',
+            groupId: 'g1',
+            title: 'Shared $i',
+            spentAt: DateTime.utc(2026, 11, 1, i),
+          ),
+      ],
+      setUp: (b) {
+        b.groups.membersByGroup['g1'] = [memberOf('u1')];
+        b.expenses.participants['g3'] = ['u1', 'u-left'];
+      },
+    );
+
+    expect(find.byKey(const Key('expense-locked')), findsOneWidget);
+    // One participants read for the rows of the frame, not one per row.
+    expect(backend.expenses.participantFetches, 1);
+    final asked = backend.expenses.participantBatches.single;
+    expect(asked, contains('g3'));
+    expect(asked.length, greaterThan(1));
+    expect(asked.toSet(), hasLength(asked.length));
+    // The members are read once for the checks (and once for the screen),
+    // not once per row.
+    expect(
+      backend.groups.memberFetches.where((g) => g == 'g1').length,
+      lessThanOrEqualTo(2),
+    );
+  });
+
   testWidgets('an expense that locks after the list loaded is not deleted', (
     tester,
   ) async {
@@ -425,11 +463,12 @@ void main() {
     );
     expect(find.byKey(const Key('expense-locked')), findsNothing);
 
-    // u2 leaves while the row still shows the earlier answer.
+    // u2 leaves (the members change is pushed) while the row still shows
+    // the earlier answer.
     final hold = Completer<void>();
     backend.groups.gate.hold = hold;
     backend.groups.membersByGroup['g1'] = [memberOf('u1')];
-    container.invalidate(expenseLockedProvider);
+    container.read(dataRevisionProvider.notifier).bump(DataKind.members);
     await tester.pump();
 
     await _openMenu(tester, 'Shared');

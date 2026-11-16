@@ -188,15 +188,24 @@ void main() {
       );
     });
 
-    test('fetchParticipants reads the split rows', () async {
+    test('fetchParticipants reads the split rows of many expenses', () async {
       server.respond = (_) => json([
-        {'user_id': 'u1'},
-        {'user_id': null},
+        {'expense_id': 'e1', 'user_id': 'u1'},
+        {'expense_id': 'e1', 'user_id': null},
+        {'expense_id': 'e2', 'user_id': 'u2'},
       ]);
       final repo = SupabaseExpenseRepository(server.client());
-      expect(await repo.fetchParticipants('e1'), ['u1', null]);
+      expect(await repo.fetchParticipants(['e1', 'e2', 'e3']), {
+        'e1': ['u1', null],
+        'e2': ['u2'],
+        'e3': <String?>[],
+      });
+      expect(server.requests, hasLength(1));
       expect(server.last.url.path, '/rest/v1/expense_splits');
-      expect(server.last.url.queryParameters['expense_id'], 'eq.e1');
+      expect(
+        server.last.url.queryParameters['expense_id'],
+        'in.("e1","e2","e3")',
+      );
     });
 
     test('server errors become AppFailure', () async {
