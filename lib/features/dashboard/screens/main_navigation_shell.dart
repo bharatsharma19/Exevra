@@ -1,21 +1,25 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
-import '../../../core/constants/app_colors.dart';
-import '../../../core/utils/haptics.dart';
-import '../../../core/widgets/app_navigation_destination.dart';
-import '../../../core/widgets/app_snackbar.dart' show SnackbarClearance;
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
 import '../../../core/errors/app_failure.dart';
 import '../../../core/errors/failure_messages.dart';
 import '../../../core/platform/connectivity.dart';
+import '../../../core/theme/app_palette.dart';
+import '../../../core/utils/haptics.dart';
+import '../../../core/widgets/widgets.dart';
+import '../../../l10n/l10n.dart';
 import '../../../providers/failure_reporter.dart';
 import '../../../providers/group_detail_providers.dart';
+import '../widgets/feature_snackbar.dart';
 
+/// The signed-in frame: the offline banner above every tab, the tab content
+/// and the bottom navigation bar. It also shows every background failure
+/// once, as a friendly error snackbar.
 class MainNavigationShell extends ConsumerWidget {
-  final StatefulNavigationShell navigationShell;
-
   const MainNavigationShell({super.key, required this.navigationShell});
+
+  final StatefulNavigationShell navigationShell;
 
   void _onTap(int index) {
     AppHaptics.selection();
@@ -25,48 +29,32 @@ class MainNavigationShell extends ConsumerWidget {
     );
   }
 
-  void _showError(BuildContext context, String message) {
-    if (message.isEmpty) return;
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          style: TextStyle(color: Theme.of(context).colorScheme.onError),
-        ),
-        backgroundColor: Theme.of(context).colorScheme.error,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     // Keeps the active group's realtime channel open while signed in.
     ref.watch(groupRealtimeProvider);
 
     // Every background failure (save, delete, switch group...) is shown
-    // here exactly once, as friendly copy.
+    // here exactly once, as friendly copy. Assistant failures are shown in
+    // the reply bubble only.
     ref.listen<ReportedFailure?>(failureReporterProvider, (prev, next) {
       if (next != null && next.sequence != prev?.sequence) {
-        _showError(
-          context,
-          friendlyMessage(
-            offlineAware(next.failure, offline: ref.read(isOfflineProvider)),
-          ),
+        final message = friendlyMessage(
+          offlineAware(next.failure, offline: ref.read(isOfflineProvider)),
         );
+        if (message.isNotEmpty) {
+          showFeatureSnackbar(context, message, kind: AppSnackbarKind.error);
+        }
       }
     });
     final offline = ref.watch(isOfflineProvider);
-
-    // Assistant failures are shown in the reply bubble only.
-
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final l10n = context.l10n;
+    final palette = context.palette;
 
     return Scaffold(
       body: Column(
         children: [
-          if (offline) const OfflineBanner(),
+          OfflineBanner(visible: offline, message: l10n.shellOfflineMessage),
           Expanded(
             child: MediaQuery.removePadding(
               context: context,
@@ -78,62 +66,38 @@ class MainNavigationShell extends ConsumerWidget {
       ),
       // Snack bars (shown by the root SnackbarHost) stay above the bar.
       bottomNavigationBar: SnackbarClearance(
-        child: Container(
+        child: DecoratedBox(
           decoration: BoxDecoration(
-            border: Border(
-              top: BorderSide(
-                color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-                width: 1,
-              ),
-            ),
+            border: Border(top: BorderSide(color: palette.outlineVariant)),
           ),
           child: NavigationBar(
             selectedIndex: navigationShell.currentIndex,
             onDestinationSelected: _onTap,
-            backgroundColor: isDark ? AppColors.darkCard : AppColors.lightCard,
-            indicatorColor: Theme.of(
-              context,
-            ).colorScheme.primary.withValues(alpha: 0.2),
             destinations: [
               AppNavigationDestination(
-                icon: const Icon(Icons.dashboard_outlined),
-                selectedIcon: Icon(
-                  Icons.dashboard_rounded,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                label: 'Dashboard',
+                icon: const Icon(Icons.home_outlined),
+                selectedIcon: const Icon(Icons.home_rounded),
+                label: l10n.shellNavHome,
               ),
               AppNavigationDestination(
                 icon: const Icon(Icons.receipt_long_outlined),
-                selectedIcon: Icon(
-                  Icons.receipt_long_rounded,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                label: 'Expenses',
+                selectedIcon: const Icon(Icons.receipt_long_rounded),
+                label: l10n.shellNavExpenses,
               ),
               AppNavigationDestination(
                 icon: const Icon(Icons.insert_chart_outlined_rounded),
-                selectedIcon: Icon(
-                  Icons.insert_chart_rounded,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                label: 'Insights',
+                selectedIcon: const Icon(Icons.insert_chart_rounded),
+                label: l10n.shellNavInsights,
               ),
-              const AppNavigationDestination(
-                icon: Icon(Icons.auto_awesome_outlined),
-                selectedIcon: Icon(
-                  Icons.auto_awesome_rounded,
-                  color: AppColors.primaryViolet,
-                ),
-                label: 'AI Advisor',
+              AppNavigationDestination(
+                icon: const Icon(Icons.auto_awesome_outlined),
+                selectedIcon: const Icon(Icons.auto_awesome_rounded),
+                label: l10n.shellNavAssistant,
               ),
               AppNavigationDestination(
                 icon: const Icon(Icons.person_outline_rounded),
-                selectedIcon: Icon(
-                  Icons.person_rounded,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                label: 'Profile',
+                selectedIcon: const Icon(Icons.person_rounded),
+                label: l10n.shellNavProfile,
               ),
             ],
           ),
@@ -151,47 +115,4 @@ AppFailure offlineAware(AppFailure failure, {required bool offline}) {
     NetworkFailure() || TimeoutFailure() => const AppFailure.offline(),
     _ => failure,
   };
-}
-
-/// Shown above every tab while the device has no connection.
-class OfflineBanner extends StatelessWidget {
-  const OfflineBanner({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Semantics(
-      liveRegion: true,
-      child: Material(
-        key: const Key('offline-banner'),
-        color: scheme.inverseSurface,
-        child: SafeArea(
-          bottom: false,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.cloud_off_rounded,
-                  size: 18,
-                  color: scheme.onInverseSurface,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    "You're offline. Changes can't be saved until you "
-                    'reconnect.',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: scheme.onInverseSurface,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }
