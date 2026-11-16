@@ -1,9 +1,10 @@
-/// Text the assistant feature stores, not shows. Everything on screen comes
-/// from the ARB (`chat*` keys) through `context.l10n`.
+/// Text the assistant feature once stored. Everything on screen comes from
+/// the ARB (`chat*` keys) through `context.l10n`.
 abstract final class ChatCopy {
-  /// Saved as the text of a declined answer when the server sent no copy
-  /// of its own. The bubble shows `chatDeclinedFallback` in its place.
-  static const String declinedFallback =
+  /// What older versions saved as the text of a declined answer without
+  /// the server's own copy. Restored history drops it, so the bubble shows
+  /// the localized `chatDeclinedFallback` instead.
+  static const String legacyDeclinedText =
       "I can't help with that. Try asking about your spending, budgets or "
       'ways to save.';
 }

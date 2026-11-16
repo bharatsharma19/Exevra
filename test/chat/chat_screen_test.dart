@@ -263,6 +263,22 @@ void main() {
     });
   }
 
+  testWidgets('a decline without copy shows the localized fallback', (
+    tester,
+  ) async {
+    final env = await _pump(tester, theme: AppTheme.light());
+    await tester.tap(find.text(chatPrompts(l10n).first));
+    await tester.pump();
+    await env.api.last.finish(const [
+      AiDelta('Something I should not'),
+      AiStreamError(AiErrorCode.declined, discardPartial: true),
+    ]);
+    await tester.pump();
+    await tester.pump();
+    expect(find.text(l10n.chatDeclinedFallback), findsOneWidget);
+    expect(find.textContaining('Something I should not'), findsNothing);
+  });
+
   group('live announcements', () {
     for (final (name, events, expected) in [
       (

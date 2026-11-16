@@ -1,4 +1,5 @@
 import '../../../data/ai/ai_chat_models.dart';
+import '../chat_copy.dart';
 
 /// Where an assistant answer stands.
 enum ChatMessageStatus {
@@ -17,7 +18,9 @@ enum ChatMessageStatus {
   /// The user pressed Stop; the partial text is kept.
   stopped,
 
-  /// The provider refused; [ChatMessage.text] is the friendly decline.
+  /// The provider refused; [ChatMessage.text] is the server's friendly
+  /// decline, or empty when it sent none (the bubble then shows the app's
+  /// own localized copy).
   declined,
 
   /// No answer; [ChatMessage.errorCode] says why.
@@ -119,10 +122,14 @@ class ChatMessage {
     if (status == ChatMessageStatus.streaming) {
       status = ChatMessageStatus.interrupted;
     }
+    // Older saves stored the English fallback of a decline as its text.
+    final legacyDecline =
+        status == ChatMessageStatus.declined &&
+        text == ChatCopy.legacyDeclinedText;
     return ChatMessage(
       id: id,
       isUser: isUser,
-      text: text,
+      text: legacyDecline ? '' : text,
       createdAt: at,
       status: isUser ? ChatMessageStatus.done : status,
       provider: AiProvider.values

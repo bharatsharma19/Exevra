@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:expense_manager/core/storage/preferences.dart';
 import 'package:expense_manager/data/ai/ai_chat_models.dart';
+import 'package:expense_manager/features/chat/chat_copy.dart';
 import 'package:expense_manager/features/chat/chat_error_copy.dart';
 import 'package:expense_manager/features/chat/widgets/chat_empty_view.dart';
 import 'package:expense_manager/l10n/l10n.dart';
@@ -216,6 +217,32 @@ void main() {
     ]);
     await api.last.finish([const AiDone()]);
     await sending.done;
+  });
+
+  test('a decline without copy keeps a flag, not English text', () async {
+    final sending = await send('q');
+    await api.last.finish([
+      const AiMeta(AiProvider.claude),
+      const AiDelta('Something I should not'),
+      const AiStreamError(AiErrorCode.declined, discardPartial: true),
+    ]);
+    await sending.done;
+    expect(last().status, ChatMessageStatus.declined);
+    expect(last().text, isEmpty);
+    expect(last().hasUsableText, isFalse);
+    expect(last().toJson()['text'], isEmpty);
+  });
+
+  test('a saved English decline comes back as the flag', () {
+    final restored = ChatMessage.fromJson({
+      'id': 'a1',
+      'user': false,
+      'text': ChatCopy.legacyDeclinedText,
+      'at': '2026-11-16T06:30:00.000Z',
+      'status': 'declined',
+    })!;
+    expect(restored.status, ChatMessageStatus.declined);
+    expect(restored.text, isEmpty);
   });
 
   group('error codes map to friendly copy', () {

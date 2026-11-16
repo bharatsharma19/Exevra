@@ -8,7 +8,6 @@ import '../core/platform/device_time_zone.dart';
 import '../core/storage/preferences.dart';
 import '../data/ai/ai_chat_client.dart';
 import '../data/ai/ai_chat_models.dart';
-import '../features/chat/chat_copy.dart';
 import '../features/chat/models/chat_message.dart';
 import 'auth_provider.dart';
 import 'profile_provider.dart';
@@ -371,10 +370,12 @@ class ChatNotifier extends Notifier<ChatState> {
       case AiStreamError(:final code, :final message):
         if (code == AiErrorCode.declined) {
           // Partial text of a refusal is never kept, copied or resent.
+          // Without the server's copy the text stays empty: the status is
+          // the flag, and the bubble shows the decline in the app's words.
           _update(
             id,
             (m) => m.copyWith(
-              text: message ?? ChatCopy.declinedFallback,
+              text: message ?? '',
               status: ChatMessageStatus.declined,
             ),
           );

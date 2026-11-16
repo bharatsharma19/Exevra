@@ -6,7 +6,6 @@ import '../../../core/theme/app_tokens.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../l10n/l10n.dart';
 import '../../dashboard/widgets/feature_snackbar.dart';
-import '../chat_copy.dart';
 import '../chat_error_copy.dart';
 import '../models/chat_message.dart';
 import 'report_sheet.dart';
@@ -79,10 +78,8 @@ class MessageBubble extends StatelessWidget {
       ChatMessageStatus.truncated => l10n.chatTruncated,
       _ => null,
     };
-    // The stored fallback of a declined answer is shown in the app's words.
-    final text =
-        message.status == ChatMessageStatus.declined &&
-            message.text == ChatCopy.declinedFallback
+    // A decline without the server's own copy is shown in the app's words.
+    final text = message.status == ChatMessageStatus.declined && !hasText
         ? l10n.chatDeclinedFallback
         : message.text;
 
