@@ -491,8 +491,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get insightsTrendTitle => 'Spending over time';
 
   @override
-  String insightsTrendSummary(String period, String date, String amount,
-      int activeCount, String bucketCount) {
+  String insightsTrendSummary(
+    String period,
+    String date,
+    String amount,
+    int activeCount,
+    String bucketCount,
+  ) {
     return 'Bar chart of spending, $period. Highest: $date, $amount. $activeCount of $bucketCount with spending.';
   }
 
@@ -533,7 +538,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String insightsCategoryRowLabel(
-      String category, String amount, String percent, String count) {
+    String category,
+    String amount,
+    String percent,
+    String count,
+  ) {
     return '$category: $amount, $percent of spending, $count';
   }
 
@@ -553,6 +562,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get insightsErrorTitle => 'Couldn\'t load your insights';
+
+  @override
+  String insightsExpenseDetail(String category, String date) {
+    return '$category · $date';
+  }
 
   @override
   String get chatAssistantName => 'Exevra Assistant';

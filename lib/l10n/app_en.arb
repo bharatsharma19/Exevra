@@ -257,6 +257,8 @@
   "insightsEmptyGroup": "Expenses added to this group will show up here.",
   "insightsAddExpense": "Add expense",
   "insightsErrorTitle": "Couldn't load your insights",
+  "insightsExpenseDetail": "{category} · {date}",
+  "@insightsExpenseDetail": {"placeholders": {"category": {"type": "String", "example": "Food"}, "date": {"type": "String", "example": "12 Nov 2026"}}},
   "chatAssistantName": "Exevra Assistant",
   "@chatAssistantName": {"description": "Name of the AI assistant. 'Exevra' is not translated."},
   "chatAnswersBy": "Answers by {provider}",
