@@ -59,3 +59,15 @@ android/key.properties
 # Gradle reports written outside /build/ and Supabase CLI scratch files
 /android/build/
 supabase/.temp/
+
+# Signing certificates, provisioning profiles and Firebase configs
+*.p8
+*.p12
+*.pem
+*.mobileprovision
+*.cer
+*.der
+AuthKey_*.p8
+google-services.json
+GoogleService-Info.plist
+android/app/upload-keystore*
