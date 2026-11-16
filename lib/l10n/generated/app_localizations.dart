@@ -778,6 +778,324 @@ abstract class AppLocalizations {
   /// **'Exevra is hidden while in the background'**
   String get lockCoverLabel;
 
+  /// Title of the Profile tab.
+  ///
+  /// In en, this message translates to:
+  /// **'Profile'**
+  String get profileTitle;
+
+  /// No description provided for @profileLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'We couldn\'t load your profile.'**
+  String get profileLoadFailed;
+
+  /// No description provided for @profileEditTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit profile'**
+  String get profileEditTooltip;
+
+  /// No description provided for @profileEditTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit profile'**
+  String get profileEditTitle;
+
+  /// No description provided for @profileNameLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Display name'**
+  String get profileNameLabel;
+
+  /// No description provided for @profileNameHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Shown to people in your groups.'**
+  String get profileNameHelper;
+
+  /// No description provided for @profilePhotoLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Photo link (optional)'**
+  String get profilePhotoLabel;
+
+  /// No description provided for @profilePhotoHint.
+  ///
+  /// In en, this message translates to:
+  /// **'https://…'**
+  String get profilePhotoHint;
+
+  /// No description provided for @profilePhotoHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'A link to an image that starts with https://.'**
+  String get profilePhotoHelper;
+
+  /// No description provided for @profileSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Profile updated.'**
+  String get profileSaved;
+
+  /// Shown when the account has no name yet.
+  ///
+  /// In en, this message translates to:
+  /// **'You'**
+  String get profileFallbackName;
+
+  /// No description provided for @profileAvatarLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Profile photo of {name}'**
+  String profileAvatarLabel(String name);
+
+  /// No description provided for @settingsSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Settings'**
+  String get settingsSection;
+
+  /// No description provided for @settingsAppearance.
+  ///
+  /// In en, this message translates to:
+  /// **'Appearance'**
+  String get settingsAppearance;
+
+  /// No description provided for @settingsThemeSystem.
+  ///
+  /// In en, this message translates to:
+  /// **'System'**
+  String get settingsThemeSystem;
+
+  /// No description provided for @settingsThemeLight.
+  ///
+  /// In en, this message translates to:
+  /// **'Light'**
+  String get settingsThemeLight;
+
+  /// No description provided for @settingsThemeDark.
+  ///
+  /// In en, this message translates to:
+  /// **'Dark'**
+  String get settingsThemeDark;
+
+  /// No description provided for @settingsThemeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'System follows your device setting.'**
+  String get settingsThemeHint;
+
+  /// No description provided for @settingsCurrency.
+  ///
+  /// In en, this message translates to:
+  /// **'Default currency'**
+  String get settingsCurrency;
+
+  /// No description provided for @settingsCurrencySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'{code} · {name}. Used for new personal expenses; groups keep their own currency.'**
+  String settingsCurrencySubtitle(String code, String name);
+
+  /// No description provided for @settingsCurrencyPickerTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a currency'**
+  String get settingsCurrencyPickerTitle;
+
+  /// No description provided for @settingsCurrencySearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Search currencies'**
+  String get settingsCurrencySearch;
+
+  /// No description provided for @settingsCurrencyNoMatch.
+  ///
+  /// In en, this message translates to:
+  /// **'No currency matches \"{query}\".'**
+  String settingsCurrencyNoMatch(String query);
+
+  /// No description provided for @settingsCurrencySelected.
+  ///
+  /// In en, this message translates to:
+  /// **'Selected'**
+  String get settingsCurrencySelected;
+
+  /// No description provided for @settingsCurrencySaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Default currency set to {code}.'**
+  String settingsCurrencySaved(String code);
+
+  /// No description provided for @settingsAppLock.
+  ///
+  /// In en, this message translates to:
+  /// **'App Lock'**
+  String get settingsAppLock;
+
+  /// No description provided for @settingsAppLockOn.
+  ///
+  /// In en, this message translates to:
+  /// **'On. Exevra asks for your fingerprint, face or device PIN when it opens.'**
+  String get settingsAppLockOn;
+
+  /// No description provided for @settingsAppLockOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask for your fingerprint, face or device PIN when Exevra opens.'**
+  String get settingsAppLockOff;
+
+  /// No description provided for @settingsAppLockChecking.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking it\'s you…'**
+  String get settingsAppLockChecking;
+
+  /// No description provided for @settingsAppLockTurnedOn.
+  ///
+  /// In en, this message translates to:
+  /// **'App Lock is on.'**
+  String get settingsAppLockTurnedOn;
+
+  /// No description provided for @settingsAppLockTurnedOff.
+  ///
+  /// In en, this message translates to:
+  /// **'App Lock is off.'**
+  String get settingsAppLockTurnedOff;
+
+  /// No description provided for @settingsHaptics.
+  ///
+  /// In en, this message translates to:
+  /// **'Vibration feedback'**
+  String get settingsHaptics;
+
+  /// No description provided for @settingsHapticsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'A light vibration when you tap buttons and switches.'**
+  String get settingsHapticsSubtitle;
+
+  /// No description provided for @settingsAssistant.
+  ///
+  /// In en, this message translates to:
+  /// **'AI assistant'**
+  String get settingsAssistant;
+
+  /// No description provided for @settingsAssistantOn.
+  ///
+  /// In en, this message translates to:
+  /// **'On. The assistant can use a summary of your spending to answer your questions.'**
+  String get settingsAssistantOn;
+
+  /// No description provided for @settingsAssistantOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Off. Turn it on to ask questions about your spending.'**
+  String get settingsAssistantOff;
+
+  /// A setting failed to save. {reason} is the friendly error.
+  ///
+  /// In en, this message translates to:
+  /// **'We couldn\'t save that setting. {reason}'**
+  String settingsSaveFailed(String reason);
+
+  /// No description provided for @settingsAccountSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Account'**
+  String get settingsAccountSection;
+
+  /// No description provided for @settingsSignOut.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign out'**
+  String get settingsSignOut;
+
+  /// No description provided for @settingsSignOutTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign out?'**
+  String get settingsSignOutTitle;
+
+  /// No description provided for @settingsSignOutMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Your data stays in your account. To come back, sign in again with your email and password or Google. App Lock is turned off on this device.'**
+  String get settingsSignOutMessage;
+
+  /// No description provided for @settingsDeleteAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete account'**
+  String get settingsDeleteAccount;
+
+  /// No description provided for @settingsDeleteAccountSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Permanently delete your account and personal data.'**
+  String get settingsDeleteAccountSubtitle;
+
+  /// No description provided for @settingsDeleteTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete your account?'**
+  String get settingsDeleteTitle;
+
+  /// No description provided for @settingsDeleteMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'This permanently deletes your profile, your personal expenses, your settings and your AI assistant history.\n\nExpenses you added to shared groups stay with those groups so the other members\' balances remain correct; they will show as \"Former member\". If you are a group admin, the longest-standing member becomes admin; groups with no other members are deleted. Payments still waiting for confirmation are cancelled.\n\nThis can\'t be undone.'**
+  String get settingsDeleteMessage;
+
+  /// No description provided for @settingsDeleting.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleting your account…'**
+  String get settingsDeleting;
+
+  /// No description provided for @settingsDeleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Your account was deleted.'**
+  String get settingsDeleted;
+
+  /// No description provided for @settingsReauthTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm it\'s you'**
+  String get settingsReauthTitle;
+
+  /// No description provided for @settingsReauthPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'For your security, enter your password to delete your account.'**
+  String get settingsReauthPassword;
+
+  /// No description provided for @settingsReauthProvider.
+  ///
+  /// In en, this message translates to:
+  /// **'For your security, sign in with {provider} again to delete your account.'**
+  String settingsReauthProvider(String provider);
+
+  /// No description provided for @settingsReauthContinueWith.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue with {provider}'**
+  String settingsReauthContinueWith(String provider);
+
+  /// No description provided for @settingsReauthContinue.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue'**
+  String get settingsReauthContinue;
+
+  /// No description provided for @settingsReauthChecking.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking it\'s you…'**
+  String get settingsReauthChecking;
+
   /// Button that leaves the introduction.
   ///
   /// In en, this message translates to:

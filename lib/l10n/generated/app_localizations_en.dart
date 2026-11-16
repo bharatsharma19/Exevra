@@ -389,6 +389,189 @@ class AppLocalizationsEn extends AppLocalizations {
   String get lockCoverLabel => 'Exevra is hidden while in the background';
 
   @override
+  String get profileTitle => 'Profile';
+
+  @override
+  String get profileLoadFailed => 'We couldn\'t load your profile.';
+
+  @override
+  String get profileEditTooltip => 'Edit profile';
+
+  @override
+  String get profileEditTitle => 'Edit profile';
+
+  @override
+  String get profileNameLabel => 'Display name';
+
+  @override
+  String get profileNameHelper => 'Shown to people in your groups.';
+
+  @override
+  String get profilePhotoLabel => 'Photo link (optional)';
+
+  @override
+  String get profilePhotoHint => 'https://…';
+
+  @override
+  String get profilePhotoHelper =>
+      'A link to an image that starts with https://.';
+
+  @override
+  String get profileSaved => 'Profile updated.';
+
+  @override
+  String get profileFallbackName => 'You';
+
+  @override
+  String profileAvatarLabel(String name) {
+    return 'Profile photo of $name';
+  }
+
+  @override
+  String get settingsSection => 'Settings';
+
+  @override
+  String get settingsAppearance => 'Appearance';
+
+  @override
+  String get settingsThemeSystem => 'System';
+
+  @override
+  String get settingsThemeLight => 'Light';
+
+  @override
+  String get settingsThemeDark => 'Dark';
+
+  @override
+  String get settingsThemeHint => 'System follows your device setting.';
+
+  @override
+  String get settingsCurrency => 'Default currency';
+
+  @override
+  String settingsCurrencySubtitle(String code, String name) {
+    return '$code · $name. Used for new personal expenses; groups keep their own currency.';
+  }
+
+  @override
+  String get settingsCurrencyPickerTitle => 'Choose a currency';
+
+  @override
+  String get settingsCurrencySearch => 'Search currencies';
+
+  @override
+  String settingsCurrencyNoMatch(String query) {
+    return 'No currency matches \"$query\".';
+  }
+
+  @override
+  String get settingsCurrencySelected => 'Selected';
+
+  @override
+  String settingsCurrencySaved(String code) {
+    return 'Default currency set to $code.';
+  }
+
+  @override
+  String get settingsAppLock => 'App Lock';
+
+  @override
+  String get settingsAppLockOn =>
+      'On. Exevra asks for your fingerprint, face or device PIN when it opens.';
+
+  @override
+  String get settingsAppLockOff =>
+      'Ask for your fingerprint, face or device PIN when Exevra opens.';
+
+  @override
+  String get settingsAppLockChecking => 'Checking it\'s you…';
+
+  @override
+  String get settingsAppLockTurnedOn => 'App Lock is on.';
+
+  @override
+  String get settingsAppLockTurnedOff => 'App Lock is off.';
+
+  @override
+  String get settingsHaptics => 'Vibration feedback';
+
+  @override
+  String get settingsHapticsSubtitle =>
+      'A light vibration when you tap buttons and switches.';
+
+  @override
+  String get settingsAssistant => 'AI assistant';
+
+  @override
+  String get settingsAssistantOn =>
+      'On. The assistant can use a summary of your spending to answer your questions.';
+
+  @override
+  String get settingsAssistantOff =>
+      'Off. Turn it on to ask questions about your spending.';
+
+  @override
+  String settingsSaveFailed(String reason) {
+    return 'We couldn\'t save that setting. $reason';
+  }
+
+  @override
+  String get settingsAccountSection => 'Account';
+
+  @override
+  String get settingsSignOut => 'Sign out';
+
+  @override
+  String get settingsSignOutTitle => 'Sign out?';
+
+  @override
+  String get settingsSignOutMessage =>
+      'Your data stays in your account. To come back, sign in again with your email and password or Google. App Lock is turned off on this device.';
+
+  @override
+  String get settingsDeleteAccount => 'Delete account';
+
+  @override
+  String get settingsDeleteAccountSubtitle =>
+      'Permanently delete your account and personal data.';
+
+  @override
+  String get settingsDeleteTitle => 'Delete your account?';
+
+  @override
+  String get settingsDeleteMessage =>
+      'This permanently deletes your profile, your personal expenses, your settings and your AI assistant history.\n\nExpenses you added to shared groups stay with those groups so the other members\' balances remain correct; they will show as \"Former member\". If you are a group admin, the longest-standing member becomes admin; groups with no other members are deleted. Payments still waiting for confirmation are cancelled.\n\nThis can\'t be undone.';
+
+  @override
+  String get settingsDeleting => 'Deleting your account…';
+
+  @override
+  String get settingsDeleted => 'Your account was deleted.';
+
+  @override
+  String get settingsReauthTitle => 'Confirm it\'s you';
+
+  @override
+  String get settingsReauthPassword =>
+      'For your security, enter your password to delete your account.';
+
+  @override
+  String settingsReauthProvider(String provider) {
+    return 'For your security, sign in with $provider again to delete your account.';
+  }
+
+  @override
+  String settingsReauthContinueWith(String provider) {
+    return 'Continue with $provider';
+  }
+
+  @override
+  String get settingsReauthContinue => 'Continue';
+
+  @override
+  String get settingsReauthChecking => 'Checking it\'s you…';
+
+  @override
   String get onboardingSkip => 'Skip';
 
   @override

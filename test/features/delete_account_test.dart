@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:expense_manager/core/errors/app_failure.dart';
 import 'package:expense_manager/core/platform/secure_window.dart';
 import 'package:expense_manager/core/router/app_router.dart';
+import 'package:expense_manager/core/widgets/widgets.dart';
 import 'package:expense_manager/data/repositories/account_repository.dart';
 import 'package:expense_manager/features/auth/screens/login_screen.dart';
 import 'package:expense_manager/main.dart';
@@ -26,6 +27,12 @@ class _Accounts implements AccountRepository {
     if (failures.isNotEmpty) throw failures.removeAt(0);
   }
 }
+
+/// The confirm button of the deletion dialog.
+final _confirm = find.descendant(
+  of: find.byType(ConfirmDialog),
+  matching: find.text('Delete account'),
+);
 
 /// Pumps frames without waiting for animations to settle (the progress
 /// dialog spins).
@@ -75,7 +82,7 @@ void main() {
     c.read(routerProvider).go('/profile');
     await _frames(tester);
 
-    final delete = find.text('Delete Account');
+    final delete = find.byKey(const Key('profile-delete-account'));
     await tester.ensureVisible(delete);
     await tester.tap(delete);
     await _frames(tester);
@@ -90,7 +97,7 @@ void main() {
     await openDeletion(tester);
     accounts.failures.add(const AppFailure.business('reauth_required'));
 
-    await tester.tap(find.text('Delete account'));
+    await tester.tap(_confirm);
     await _frames(tester);
     expect(accounts.calls, 1);
     expect(find.text("Confirm it's you"), findsOneWidget);
@@ -110,7 +117,7 @@ void main() {
     await openDeletion(tester);
     accounts.failures.add(const AppFailure.business('reauth_required'));
 
-    await tester.tap(find.text('Delete account'));
+    await tester.tap(_confirm);
     await _frames(tester);
     await tester.tap(find.text('Cancel'));
     await _frames(tester);
@@ -126,7 +133,7 @@ void main() {
     accounts.failures.add(const AppFailure.business('reauth_required'));
     backend.auth.reauthFailure = const AppFailure.invalidCredentials();
 
-    await tester.tap(find.text('Delete account'));
+    await tester.tap(_confirm);
     await _frames(tester);
     await tester.enterText(find.byKey(const Key('reauth-password')), 'bad');
     await tester.tap(find.byKey(const Key('reauth-continue')));
@@ -135,7 +142,7 @@ void main() {
     expect(accounts.calls, 1);
     expect(backend.auth.signOutCalls, 0);
     expect(path(), '/profile');
-    expect(find.text("Checking it's you..."), findsNothing);
+    expect(find.text("Checking it's you…"), findsNothing);
   });
 
   testWidgets('a slow sign-out after deletion still ends on sign-in', (
@@ -147,7 +154,7 @@ void main() {
     // sign-in screen when it ends.
     final hold = Completer<void>();
     backend.auth.holdSignOut = hold;
-    await tester.tap(find.text('Delete account'));
+    await tester.tap(_confirm);
     await _frames(tester);
     expect(accounts.calls, 1);
     expect(find.byType(LoginScreen), findsOneWidget);
@@ -157,7 +164,7 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.byType(LoginScreen), findsOneWidget);
-    expect(find.text('Deleting your account...'), findsNothing);
+    expect(find.text('Deleting your account…'), findsNothing);
     expect(path(), '/login');
     expect(find.text('Your account was deleted.'), findsOneWidget);
   });
