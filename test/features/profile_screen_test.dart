@@ -10,6 +10,7 @@ import 'package:expense_manager/models/profile.dart';
 import 'package:expense_manager/providers/app_lock_provider.dart';
 import 'package:expense_manager/providers/profile_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -106,6 +107,42 @@ void main() {
     expect(tester.takeException(), isNull);
     // Large text swaps the segmented control for a list of choices.
     expect(find.byKey(const Key('settings-theme-dark')), findsOneWidget);
+  });
+
+  testWidgets('a long name and email wrap in full at 320dp and 200% text', (
+    tester,
+  ) async {
+    const name = 'Priya Venkataraman-Iyer';
+    const email = 'priya.venkataraman@example.com';
+    final handle = tester.ensureSemantics();
+    await _pump(
+      tester,
+      size: const Size(320, 6000),
+      textScale: 2,
+      setUp: (b) => b.profiles.profiles['u1'] = profileOf(
+        'u1',
+      ).copyWith(displayName: name, email: email),
+    );
+    expect(tester.takeException(), isNull);
+    for (final (key, full) in [
+      ('profile-name', name),
+      ('profile-email', email),
+    ]) {
+      final paragraph = tester.renderObject<RenderParagraph>(
+        find.descendant(
+          of: find.byKey(Key(key)),
+          matching: find.byType(RichText),
+        ),
+      );
+      expect(paragraph.didExceedMaxLines, isFalse, reason: '$key is cut');
+      // Screen readers get the whole text either way.
+      expect(find.bySemanticsLabel(full), findsOneWidget);
+    }
+    // The text has the card's width, not a sliver beside the photo.
+    final header = tester.getRect(find.byKey(const Key('profile-header')));
+    final nameBox = tester.getRect(find.byKey(const Key('profile-name')));
+    expect(nameBox.width, greaterThan(header.width * 0.7));
+    handle.dispose();
   });
 
   testWidgets('shows a skeleton while the profile loads', (tester) async {
