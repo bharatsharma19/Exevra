@@ -9,19 +9,19 @@ enum ExpenseDatePreset {
   /// No date filter.
   any,
 
-  /// The last 7 days, today included.
+  /// The last 7 days, today included (nothing dated after today).
   last7Days,
 
-  /// From the 1st of this month.
+  /// The whole calendar month, later-dated expenses in it included.
   thisMonth,
 
   /// The whole previous month.
   lastMonth,
 
-  /// The last three months, this one included.
+  /// The last three calendar months, the whole of this one included.
   last3Months,
 
-  /// From 1 January this year.
+  /// The whole calendar year, later-dated expenses in it included.
   thisYear,
 }
 
@@ -29,10 +29,13 @@ enum ExpenseDatePreset {
 typedef LocalDateRange = ({DateTime start, DateTime end});
 
 /// The range of [preset] around the local time [now], or null for
-/// [ExpenseDatePreset.any].
+/// [ExpenseDatePreset.any]. Calendar presets cover their whole month or
+/// year, so an expense dated later this month (a bill due next week) is
+/// not dropped; only "Last 7 days" stops at today.
 LocalDateRange? dateRangeOf(ExpenseDatePreset preset, DateTime now) {
   final today = DateTime(now.year, now.month, now.day);
   final tomorrow = DateTime(now.year, now.month, now.day + 1);
+  final nextMonth = DateTime(now.year, now.month + 1);
   return switch (preset) {
     ExpenseDatePreset.any => null,
     ExpenseDatePreset.last7Days => (
@@ -41,7 +44,7 @@ LocalDateRange? dateRangeOf(ExpenseDatePreset preset, DateTime now) {
     ),
     ExpenseDatePreset.thisMonth => (
       start: DateTime(now.year, now.month),
-      end: tomorrow,
+      end: nextMonth,
     ),
     ExpenseDatePreset.lastMonth => (
       start: DateTime(now.year, now.month - 1),
@@ -49,9 +52,12 @@ LocalDateRange? dateRangeOf(ExpenseDatePreset preset, DateTime now) {
     ),
     ExpenseDatePreset.last3Months => (
       start: DateTime(now.year, now.month - 2),
-      end: tomorrow,
+      end: nextMonth,
     ),
-    ExpenseDatePreset.thisYear => (start: DateTime(now.year), end: tomorrow),
+    ExpenseDatePreset.thisYear => (
+      start: DateTime(now.year),
+      end: DateTime(now.year + 1),
+    ),
   };
 }
 
